@@ -1,0 +1,67 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "trans-hub"
+version = "0.1.0"
+description = "An embeddable, intelligent localization (i18n) backend engine with persistence for Python applications."
+authors = ["Saken <saken.w@gmail.com>"] # 我根据你的邮箱信息修改了这里
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/SakenW/trans-hub"  # 推荐添加你的GitHub项目地址
+repository = "https://github.com/SakenW/trans-hub" # 推荐添加你的GitHub项目地址
+keywords = ["i18n", "localization", "translation", "backend", "engine"]
+
+# 注意：下面的 "packages" 行已经被移除了，Poetry将自动发现 trans_hub 包
+
+[tool.poetry.dependencies]
+python = "^3.8" # 保持广泛的兼容性
+pydantic = "^2.0"
+structlog = "^23.0"
+
+# 使用了新的分组语法，更加清晰
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4"
+pytest-cov = "^4.1"
+pytest-asyncio = "^0.21.0"
+black = "^23.0"
+isort = "^5.12"
+ruff = "^0.1.0"
+mypy = "^1.5"
+
+# --- Tool Configurations ---
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.ruff]
+line-length = 88
+# 选择了最常用和推荐的规则集
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "N",  # pep8-naming
+    "D",  # pydocstyle
+    "UP", # pyupgrade
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+]
+ignore = [
+    "D100", # Missing docstring in public module
+    "D104", # Missing docstring in public package
+    "D107", # Missing docstring in __init__
+]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true # 初始阶段保持为true，后续可以收紧

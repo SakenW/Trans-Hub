@@ -268,19 +268,22 @@ sequenceDiagram
 3. [ ] **CI**: 建立GitHub Actions流水线。
 
 ### Milestone 1: Foundation (基础架构)
-4.  [ ] **`types.py` & `utils.py`**: 实现所有DTOs, Enums, 和校验函数。
-5.  [ ] **数据库**: 实现`schema_manager`和`001_initial.sql`（含索引）。
-6.  [ ] **接口**: 定义`interfaces.py`和`engines/base.py`，并为每个接口提供一个Mock实现用于测试。
-7.  [ ] **单元测试**: 为以上所有模块编写单元测试。
+
+4. [ ] **`types.py` & `utils.py`**: 实现所有DTOs, Enums, 和校验函数。
+5. [ ] **数据库**: 实现`schema_manager`和`001_initial.sql`（含索引）。
+6. [ ] **接口**: 定义`interfaces.py`和`engines/base.py`，并为每个接口提供一个Mock实现用于测试。
+7. [ ] **单元测试**: 为以上所有模块编写单元测试。
 
 ### Milestone 2: Core Implementation (核心实现)
-8.  [ ] **数据库处理器**: 实现`DefaultPersistenceHandler`和`AsyncPersistenceHandler`。
-9.  [ ] **引擎系统**: 实现`entry_points`发现机制，并开发`DebugEngine`和`DeepLEngine`。
+
+8. [ ] **数据库处理器**: 实现`DefaultPersistenceHandler`和`AsyncPersistenceHandler`。
+9. [ ] **引擎系统**: 实现`entry_points`发现机制，并开发`DebugEngine`和`DeepLEngine`。
 10. [ ] **错误处理与限速模块**: 实现中心化的重试与限速模块。
 11. [ ] **主协调器**: 完成`Coordinator`，集成所有子模块。
 12. [ ] **集成测试**: 编写完整的端到端流程测试。
 
 ### Milestone 3: Finalization & Polish (收尾与打磨)
+
 13. [ ] **异步支持**: 完整实现`AsyncCoordinator`和同步/异步隔离机制。
 14. [ ] **生命周期工具**: 实现`run_garbage_collection`（含`dry_run`模式）和管理CLI。
 15. [ ] **日志记录**: 集成结构化的、带`correlation_id`的日志记录。
