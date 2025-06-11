@@ -1,24 +1,61 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*$py.class
+
+# C extensions
 *.so
 
-# Virtual environment
-.venv/
-env/
-venv/
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# VSCode settings
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+test-output/
+
+# PyCharm & VSCode
+.idea/
 .vscode/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
 
 # MacOS
 .DS_Store
 
-# Logs and temp
+# Logs
 *.log
-*.tmp
 
-# Python test coverage
-htmlcov/
-.coverage
-.pytest_cache/
+# Custom
+*.sqlite3
