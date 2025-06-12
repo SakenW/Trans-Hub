@@ -28,14 +28,7 @@ jobs:
         # 启用 Poetry 缓存，可以加速后续的依赖安装
         cache: 'poetry'
 
-    # === [核心修正] 步骤 3: 安装 Poetry ===
-    # 在使用 poetry 命令之前，必须先安装它。
-    - name: Install Poetry
-      run: |
-        pip install poetry
-
-    # 步骤 4: 安装项目依赖
-    # 现在系统能找到 poetry 命令了
+    # 步骤 3: 设置pipx并安装Poetry
     - name: Set up pipx
       run: |
         python -m ensurepip
@@ -43,10 +36,14 @@ jobs:
         python -m pipx ensurepath
 
     - name: Install Poetry
-      run: pipx install poetry
+      run: pipx install poetry==1.8.2
+
+    # 步骤 4: 配置Poetry虚拟环境路径
+    - name: Configure Poetry
+      run: poetry config virtualenvs.in-project true
 
     - name: Install dependencies
-      run: poetry install --with dev --all-extras
+      run: poetry install --group dev --all-extras
 
     # 步骤 5: 运行 Linter (Ruff)
     - name: Lint with Ruff
