@@ -36,8 +36,11 @@ jobs:
 
     # 步骤 4: 安装项目依赖
     # 现在系统能找到 poetry 命令了
-    - name: Install dependencies
-      run: poetry install --with dev --all-extras
+    - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev --all-extras
 
     # 步骤 5: 运行 Linter (Ruff)
     - name: Lint with Ruff
