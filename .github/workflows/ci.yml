@@ -25,46 +25,32 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        # 启用 Poetry 缓存，可以加速后续的依赖安装
-        cache: 'poetry'
-
-    # 步骤 3: 设置pipx并安装Poetry
-    - name: Set up pipx
-      run: |
-        python -m ensurepip
-        python -m pip install pipx
-        python -m pipx ensurepath
-
+    
+    # === [核心修正] 步骤 3: 使用专业的 Action 安装 Poetry ===
+    # 这个 action 会处理好所有路径问题和缓存
     - name: Install Poetry
-      run: |
-        pipx install poetry==1.8.2
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    # 步骤 4: 配置Poetry虚拟环境路径
-    - name: Configure Poetry
-      run: poetry config virtualenvs.in-project true
-
+      uses: snok/install-poetry@v1
+      with:
+        # 你可以在这里指定 poetry 的版本
+        version: latest 
+    
+    # 步骤 4: 安装项目依赖
+    # `snok/install-poetry` 已经处理了缓存，但我们也可以在这里保留 poetry 的缓存配置
     - name: Install dependencies
-      run: pipx run poetry install --group dev --all-extras
+      run: poetry install --with dev --all-extras
+      
+    # === 后续步骤保持不变 ===
 
-    # 步骤 5: 运行 Linter (Ruff)
     - name: Lint with Ruff
       run: poetry run ruff check .
 
-    # 步骤 6: 检查代码格式 (Black & isort)
     - name: Check formatting with Black and isort
       run: |
         poetry run black --check .
         poetry run isort --check-only .
 
-    # 步骤 7: 运行静态类型检查 (Mypy)
     - name: Type check with Mypy
       run: poetry run mypy .
       
-    # 步骤 8: 运行测试
-    # 使用 pytest 来运行，它会自动发现在 tests/ 目录下的测试文件
-    - name: Run tests with Pytest
-      run: |
-        # 在 CI 环境中，我们通常不需要真实的 API Key
-        # 我们的 run_coordinator_test.py 脚本会优雅地跳过需要 key 的测试
-        poetry run python run_coordinator_test.py
+    - name: Run tests
+      run: poetry run python run_coordinator_test.py
