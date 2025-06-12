@@ -4,6 +4,7 @@ trans_hub/coordinator.py (v1.0 Final)
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 它采用动态引擎发现机制，并负责编排所有核心工作流。
 """
+import re
 import time
 import structlog
 from typing import Dict, Generator, List, Optional

@@ -22,6 +22,7 @@
     *   **轻松扩展**: 提供清晰的基类，可以方便地开发和接入自定义的翻译引擎。
 *   **健壮的错误处理**:
     *   内置可配置的**自动重试**机制，采用指数退避策略，从容应对临时的网络或API错误。
+    *   在 API 入口处进行严格的参数校验，防止无效数据进入系统。
 *   **⚙️ 精准的策略控制**:
     *   内置**速率限制器**，保护你的API密钥不因请求过快而被服务商封禁。
     *   支持带**上下文（Context）**的翻译，实现对同一文本在不同场景下的不同译法。
@@ -47,9 +48,11 @@ pip install trans-hub
 ```python
 # main.py
 import os
+import sys
 import structlog
 
 # 导入 Trans-Hub 的核心组件
+from dotenv import load_dotenv
 from trans_hub.config import TransHubConfig, EngineConfigs
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
@@ -81,31 +84,43 @@ def initialize_trans_hub():
     return coordinator
 
 def main():
+    """主程序入口"""
+    # 在程序最开始主动加载 .env 文件，这是一个健壮的实践
+    load_dotenv()
+    
     coordinator = initialize_trans_hub()
     try:
         text_to_translate = "Hello, world!"
-        target_language = "zh-CN" # 目标语言：中文
+        # 使用标准的 IETF 语言标签
+        target_language_code = "zh-CN"
 
-        # 步骤 1: 登记翻译需求 (这是一个轻量级操作)
-        log.info("正在登记翻译任务", text=text_to_translate, lang=target_language)
-        coordinator.request(
-            target_langs=[target_language],
-            text_content=text_to_translate,
-            business_id="app.greeting.hello_world" # 使用一个有意义的 business_id
-        )
+        # --- 使用 try...except 块来优雅地处理预期的错误 ---
+        try:
+            log.info("正在登记翻译任务", text=text_to_translate, lang=target_language_code)
+            coordinator.request(
+                target_langs=[target_language_code],
+                text_content=text_to_translate,
+                business_id="app.greeting.hello_world"
+            )
+        except ValueError as e:
+            # 捕获我们自己定义的输入验证错误
+            log.error(
+                "无法登记翻译任务，输入参数有误。",
+                reason=str(e),
+                suggestion="请检查你的语言代码是否符合 'en' 或 'zh-CN' 这样的标准格式。"
+            )
+            # 优雅地退出
+            sys.exit(1)
 
-        # 步骤 2: 执行翻译工作 (这是一个重量级操作，会调用API)
-        # 建议在后台任务或定时脚本中执行
-        log.info(f"正在处理 '{target_language}' 的待翻译任务...")
+        # --- 执行翻译工作 ---
+        log.info(f"正在处理 '{target_language_code}' 的待翻译任务...")
         results_generator = coordinator.process_pending_translations(
-            target_lang=target_language
+            target_lang=target_language_code
         )
         
-        # 实时获取和处理结果
         results = list(results_generator)
         
         if results:
-            # 打印第一个结果的详细信息
             first_result = results[0]
             log.info(
                 "翻译完成！",
@@ -117,9 +132,13 @@ def main():
         else:
             log.warning("没有需要处理的新任务（可能已翻译过）。")
 
+    except Exception as e:
+        # 捕获所有其他意外的、严重的错误
+        log.critical("程序运行中发生未知严重错误！", exc_info=True)
     finally:
-        # 优雅地关闭数据库连接等资源
-        coordinator.close()
+        # 确保 coordinator 实例存在时才调用 close
+        if 'coordinator' in locals() and coordinator:
+            coordinator.close()
 
 if __name__ == "__main__":
     main()
@@ -135,8 +154,8 @@ python main.py
 你将会看到类似下面这样的输出，清晰地展示了从原文到译文的整个过程：
 
 ```
-2024-06-12T... [info     ] 正在登记翻译任务...                    text=Hello, world! lang=Chinese
-2024-06-12T... [info     ] 正在处理 'Chinese' 的待翻译任务...
+2024-06-12T... [info     ] 正在登记翻译任务...                    text=Hello, world! lang=zh-CN
+2024-06-12T... [info     ] 正在处理 'zh-CN' 的待翻译任务...
 2024-06-12T... [info     ] 翻译完成！                           original=Hello, world! translation=你好，世界！ status=TRANSLATED engine=translators
 ```
 就是这么简单！你已经成功地使用 `Trans-Hub` 完成了你的第一个翻译任务。
@@ -165,9 +184,8 @@ TH_OPENAI_API_KEY="your-secret-key"
 只需在创建配置时，明确指定 `active_engine` 即可。
 ```python
 # 在你的初始化代码中
-from dotenv import load_dotenv
+# ...
 from trans_hub.engines.openai import OpenAIEngineConfig
-load_dotenv() # 加载 .env
 
 config = TransHubConfig(
     database_url=f"sqlite:///{DB_FILE}",
@@ -176,6 +194,7 @@ config = TransHubConfig(
         openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载
     )
 )
+# ...
 ```
 
 ## 核心概念
