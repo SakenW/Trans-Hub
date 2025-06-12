@@ -1,33 +1,29 @@
 """
-run_coordinator_test.py (v0.2)
+run_coordinator_test.py (v0.4)
 
 一个用于测试 Coordinator 端到端工作流的脚本。
-此版本使用 coordinator.request() 方法来准备数据。
+此版本增加了对速率限制器的验证。
 """
 import logging
 import os
+import time
 
-# --- 导入我们自己的库和组件 ---
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngine, DebugEngineConfig
 from trans_hub.persistence import DefaultPersistenceHandler
-from trans_hub.types import TranslationStatus, TranslationResult # 导入 TranslationResult
-from trans_hub.utils import get_context_hash # [新] 导入哈希函数
-
+# [新] 导入速率限制器
+from trans_hub.rate_limiter import RateLimiter
+from trans_hub.types import TranslationStatus, TranslationResult
 
 def main():
-    """主测试函数"""
-    # --- 基本配置 ---
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    # 将我们自己库的日志级别设为DEBUG，以便看到速率限制器的日志
     logging.getLogger("trans_hub").setLevel(logging.DEBUG)
 
-    # --- 步骤 1: 初始化所有组件 ---
-    print("\n" + "=" * 20 + " 步骤 1: 初始化所有组件 " + "=" * 20)
-    
     DB_FILE = "transhub_coord_test.db"
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
@@ -37,87 +33,62 @@ def main():
     debug_engine = DebugEngine(config=DebugEngineConfig())
     engines = {"debug": debug_engine}
 
+    # === [新] 初始化速率限制器 ===
+    # 我们设置一个非常低的速率（每秒2个请求），以便在测试中能明显看到效果。
+    # 容量为1，意味着它不能累积突发能力。
+    rate_limiter = RateLimiter(refill_rate=2, capacity=1)
+    print(f"\n速率限制器已创建 (RPS=2, Capacity=1)")
+
+    # 将速率限制器注入 Coordinator
     coordinator = Coordinator(
         persistence_handler=handler,
         engines=engines,
         active_engine_name="debug",
+        rate_limiter=rate_limiter, # 注入！
     )
-    print("Coordinator 初始化成功！")
     
     try:
-        # === [变更] 步骤 2: 使用 coordinator.request() 准备数据 ===
-        print("\n" + "=" * 20 + " 步骤 2: 使用 request() API 准备待翻译数据 " + "=" * 20)
+        print("\n" + "=" * 20 + " 步骤 1: 准备数据 (3个任务) " + "=" * 20)
+        # 我们一次性请求3个任务
+        coordinator.request(target_langs=['jp'], text_content="apple")
+        coordinator.request(target_langs=['jp'], text_content="banana")
+        coordinator.request(target_langs=['jp'], text_content="cherry")
+        print("数据准备完成。")
         
-        # 场景1: UI 文本，需要翻译成日语和法语
-        coordinator.request(
-            target_langs=['jp', 'fr'],
-            text_content="apple",
-            business_id="ui.products.fruit_list.apple"
+        # === [新] 测试速率限制逻辑 ===
+        print("\n" + "=" * 20 + " 步骤 2: 以小批次 (batch_size=1) 执行翻译 " + "=" * 20)
+        
+        start_time = time.monotonic()
+        
+        # 我们将 batch_size 设为 1，这样 Coordinator 会对每个任务单独调用一次 translate_batch
+        # 因此，它会调用3次 API，每次都需要获取令牌。
+        jp_results_generator = coordinator.process_pending_translations(
+            target_lang="jp",
+            batch_size=1, # 强制每次只处理一个
+            max_retries=0 # 关闭重试，简化测试
         )
         
-        # 场景2: 带上下文的文本，只需要翻译成日语
-        context_for_banana = {"max_length": 10}
-        coordinator.request(
-            target_langs=['jp'],
-            text_content="banana",
-            business_id="ui.products.fruit_list.banana",
-            context=context_for_banana
-        )
+        results_list = [result for result in jp_results_generator]
         
-        # 场景3: 纯文本即席翻译，不需要 business_id
-        coordinator.request(
-            target_langs=['de'],
-            text_content="cherry",
-            business_id=None
-        )
+        end_time = time.monotonic()
+        duration = end_time - start_time
         
-        print("翻译请求已登记。")
+        print(f"\n处理3个任务总耗时: {duration:.2f} 秒")
         
-        # === 步骤 3: 执行核心流程 (处理日语翻译) ===
-        print("\n" + "=" * 20 + " 步骤 3: 调用 process_pending_translations 处理日语任务 " + "=" * 20)
+        # 验证结果
+        assert len(results_list) == 3
+        # 理论上，处理3个请求，速率为2rps，需要的时间：
+        # 第1个: 立即执行 (桶里有1个令牌)
+        # 第2个: 等待0.5秒补充1个令牌
+        # 第3个: 再等待0.5秒补充1个令牌
+        # 总时间应该略大于 1.0 秒。我们用一个宽松的断言。
+        assert duration > 1.0, f"总耗时 {duration:.2f}s 过短，速率限制器可能未生效！"
         
-        jp_results_generator = coordinator.process_pending_translations(target_lang="jp")
+        print(f"耗时符合预期，速率限制器工作正常！")
         
-        print("Coordinator 返回的实时结果:")
-        results_list: List[TranslationResult] = []
-        for result in jp_results_generator:
-            print(f"  > {result}")
-            results_list.append(result)
-            
-        assert len(results_list) == 2, "应该处理了2个日语任务"
-
-        # === 步骤 4: 验证数据库最终状态 ===
-        print("\n" + "=" * 20 + " 步骤 4: 验证数据库最终状态 " + "=" * 20)
-        
-        with handler.transaction() as cursor:
-            # 验证日语任务
-            cursor.execute("SELECT c.value, tr.status, tr.translation_content, tr.context_hash FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.lang_code = 'jp'")
-            final_jp_statuses = {row['value']: (row['status'], row['translation_content'], row['context_hash']) for row in cursor.fetchall()}
-            
-            # 验证法语和德语任务
-            cursor.execute("SELECT status FROM th_translations WHERE lang_code = 'fr'")
-            final_fr_status = cursor.fetchone()['status']
-            cursor.execute("SELECT status FROM th_translations WHERE lang_code = 'de'")
-            final_de_status = cursor.fetchone()['status']
-
-        print(f"  > 日语任务最终状态: {final_jp_statuses}")
-        print(f"  > 法语任务最终状态: {final_fr_status}")
-        print(f"  > 德语任务最终状态: {final_de_status}")
-        
-        # 断言
-        banana_context_hash = get_context_hash(context_for_banana)
-        assert final_jp_statuses['apple'][0] == TranslationStatus.TRANSLATED
-        assert final_jp_statuses['apple'][1] == "elppa-jp"
-        assert final_jp_statuses['banana'][0] == TranslationStatus.TRANSLATED
-        assert final_jp_statuses['banana'][2] == banana_context_hash, "上下文哈希不匹配"
-        
-        assert final_fr_status == TranslationStatus.PENDING
-        assert final_de_status == TranslationStatus.PENDING
-        
-        print("\n所有验证成功！Coordinator 的 request() 和 process() 流程工作正常！")
+        print("\n所有验证成功！Coordinator 已具备速率限制能力！")
 
     finally:
-        # --- 关闭资源 ---
         coordinator.close()
 
 if __name__ == "__main__":

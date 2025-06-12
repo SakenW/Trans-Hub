@@ -4,11 +4,11 @@ trans_hub/coordinator.py (v0.1)
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 它是上层应用与 Trans-Hub 核心功能交互的主要入口点。
 """
+import time
 import logging
 from typing import Dict, Generator, List, Optional, Type
-
+from trans_hub.rate_limiter import RateLimiter
 from trans_hub.utils import get_context_hash
-
 from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.types import (
@@ -34,26 +34,24 @@ class Coordinator:
     - 执行校验和策略（未来将包括重试、限速等）。
     """
 
+# ... 在 Coordinator 类中 ...
+
     def __init__(
         self,
         persistence_handler: PersistenceHandler,
         engines: Dict[str, BaseTranslationEngine],
         active_engine_name: str,
+        # [新] 增加速率限制器作为可选依赖
+        rate_limiter: Optional[RateLimiter] = None,
     ):
         """
-        初始化协调器。
-
-        采用依赖注入模式，将所有外部依赖作为参数传入。
-
-        Args:
-            persistence_handler: 一个实现了 PersistenceHandler 接口的实例。
-            engines: 一个字典，映射了引擎名称到已初始化的引擎实例。
-            active_engine_name: 当前要使用的活动引擎的名称。
+        [v0.3] 初始化协调器，增加了对速率限制器的支持。
         """
         self.handler = persistence_handler
         self.engines = engines
+        # [新] 保存速率限制器实例
+        self.rate_limiter = rate_limiter
         
-        # 检查活动引擎是否存在并设置
         if active_engine_name not in self.engines:
             raise ValueError(
                 f"指定的活动引擎 '{active_engine_name}' 不在已提供的引擎列表中: "
@@ -63,7 +61,8 @@ class Coordinator:
         self.active_engine_name = active_engine_name
         
         logger.info(
-            f"Coordinator 初始化完成。活动引擎: '{self.active_engine_name}'"
+            f"Coordinator 初始化完成。活动引擎: '{self.active_engine_name}', "
+            f"速率限制器: {'已启用' if self.rate_limiter else '未启用'}"
         )
 
     def process_pending_translations(
@@ -71,66 +70,77 @@ class Coordinator:
         target_lang: str,
         batch_size: int = 50,
         limit: Optional[int] = None,
+        # [新] 为重试策略添加参数
+        max_retries: int = 2,       # 最多重试2次 (总共尝试3次)
+        initial_backoff: float = 1.0, # 初始退避时间1秒
     ) -> Generator[TranslationResult, None, None]:
         """
-        处理指定语言的待翻译任务。
-
-        这是一个生成器函数，它会流式地处理任务并立即返回结果，
-        同时在后台异步（在同步版本中是并发）保存结果。
-
-        工作流:
-        1. 从持久化层流式获取待翻译的内容批次 (`ContentItem`)。
-           在获取时，这些任务的状态在数据库中已被原子地更新为 'TRANSLATING'。
-        2. 将每个批次发送给当前的活动翻译引擎。
-        3. 对引擎返回的结果进行处理和转换。
-        4. **立即 `yield`** 一个 `TranslationResult` 对象给调用者。
-        5. 将处理后的结果批量保存回持久化层。
-
-        Args:
-            target_lang: 要处理的目标语言代码。
-            batch_size: 每次从数据库获取和发送给引擎的批次大小。
-            limit: 本次调用处理的总任务数上限。
-
-        Yields:
-            一个 `TranslationResult` 对象，代表一个翻译任务的处理结果。
+        [v0.2] 处理指定语言的待翻译任务，增加了重试逻辑。
         """
         logger.info(
-            f"开始处理 '{target_lang}' 的待翻译任务 (batch_size={batch_size}, limit={limit})"
+            f"开始处理 '{target_lang}' 的待翻译任务 (max_retries={max_retries})"
         )
         
-        # 从数据库流式获取任务批次
         content_batches = self.handler.stream_translatable_items(
             lang_code=target_lang,
-            statuses=[TranslationStatus.PENDING, TranslationStatus.FAILED], # 也可以处理失败后待重试的任务
+            statuses=[TranslationStatus.PENDING, TranslationStatus.FAILED],
             batch_size=batch_size,
             limit=limit,
         )
 
         for batch in content_batches:
             logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
-            
-            # 提取纯文本列表以发送给引擎
             texts_to_translate = [item.value for item in batch]
             
-            try:
-                # 调用翻译引擎
-                engine_results = self.active_engine.translate_batch(
-                    texts=texts_to_translate,
-                    target_lang=target_lang,
-                    # 此处暂不传递 context，未来可以从 batch item 中获取
-                )
-            except Exception as e:
-                # 如果引擎的 translate_batch 方法本身抛出异常，则整个批次都失败
-                logger.error(
-                    f"引擎 '{self.active_engine_name}' 在处理批次时抛出异常: {e}",
-                    exc_info=True
-                )
-                # 为批次中的每个项目创建一个失败的 TranslationResult
-                engine_results = [
-                    EngineError(error_message=str(e), is_retryable=True)
-                ] * len(batch)
+            # --- [新] 重试循环 ---
+            engine_results: List[EngineBatchItemResult] = []
+            for attempt in range(max_retries + 1):
+                try:
+                    # --- [新] 在调用引擎前获取令牌 ---
+                    if self.rate_limiter:
+                        logger.debug("正在等待速率限制器...")
+                        # 每次 API 调用被视为消耗一个令牌
+                        self.rate_limiter.acquire(1)
+                        logger.debug("已获取速率限制器令牌，继续执行。")
+                    # --- 速率限制结束 ---
+                    
+                    engine_results = self.active_engine.translate_batch(
+                        texts=texts_to_translate,
+                        target_lang=target_lang,
+                    )
+                    
+                    # 检查批次中是否还有可重试的错误
+                    has_retryable_errors = any(
+                        isinstance(r, EngineError) and r.is_retryable for r in engine_results
+                    )
 
-            # 将引擎结果和原始任务进行匹配和转换
+                    if not has_retryable_errors:
+                        # 如果没有可重试的错误，说明批次成功或遇到了不可重试的错误，跳出重试循环
+                        logger.info(f"批次处理成功或遇到不可重试错误 (尝试次数: {attempt + 1})。")
+                        break
+                    
+                    # 如果还有可重试的错误，记录日志并准备下一次重试
+                    logger.warning(
+                        f"批次中包含可重试的错误 (尝试次数: {attempt + 1}/{max_retries + 1})。"
+                        "将在退避后重试..."
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        f"引擎在处理批次时抛出异常 (尝试次数: {attempt + 1}): {e}",
+                        exc_info=True
+                    )
+                    engine_results = [EngineError(error_message=str(e), is_retryable=True)] * len(batch)
+
+                # 如果不是最后一次尝试，则进行指数退避等待
+                if attempt < max_retries:
+                    backoff_time = initial_backoff * (2 ** attempt)
+                    logger.info(f"退避 {backoff_time:.2f} 秒...")
+                    time.sleep(backoff_time)
+                else:
+                    logger.error(f"已达到最大重试次数 ({max_retries})，放弃重试。")
+            # --- 重试循环结束 ---
+
             final_results_to_save: List[TranslationResult] = []
             for item, engine_result in zip(batch, engine_results):
                 result = self._convert_to_translation_result(
@@ -139,9 +149,8 @@ class Coordinator:
                     target_lang=target_lang,
                 )
                 final_results_to_save.append(result)
-                yield result  # 立即将结果返回给调用者
+                yield result
 
-            # 批处理结束后，将这一批的最终结果保存到数据库
             if final_results_to_save:
                 self.handler.save_translations(final_results_to_save)
                 logger.debug(f"已将 {len(final_results_to_save)} 条结果提交给持久化层保存。")
