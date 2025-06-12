@@ -2,70 +2,61 @@
 
 name: CI/CD Pipeline
 
-# 定义触发工作流的事件
 on:
-  # 当有代码推送到 main 分支时
   push:
     branches: [ "main" ]
-  # 当有 Pull Request 指向 main 分支时
   pull_request:
     branches: [ "main" ]
 
-# 定义工作流中的任务
 jobs:
-  # 定义一个名为 'build-and-test' 的任务
   build-and-test:
-    # 指定运行此任务的操作系统环境
     runs-on: ubuntu-latest
-    
-    # 定义一个构建矩阵，让任务在多个 Python 版本下运行
     strategy:
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
-    # 定义任务的步骤
     steps:
-    # 步骤 1: 检出（下载）你的仓库代码
+    # 步骤 1: 检出代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 步骤 2: 设置指定版本的 Python 环境
+    # 步骤 2: 设置 Python 环境
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        # 启用 Poetry 缓存，加速后续运行
+        # 启用 Poetry 缓存，可以加速后续的依赖安装
         cache: 'poetry'
 
-    # 步骤 3: 安装项目的所有依赖
-    - name: Install dependencies
+    # === [核心修正] 步骤 3: 安装 Poetry ===
+    # 在使用 poetry 命令之前，必须先安装它。
+    - name: Install Poetry
       run: |
-        # 安装 Poetry 本身
         pip install poetry
-        # 使用 poetry install 安装所有核心和开发依赖
-        poetry install --with dev
 
-    # 步骤 4: 运行 Linter (Ruff)
+    # 步骤 4: 安装项目依赖
+    # 现在系统能找到 poetry 命令了
+    - name: Install dependencies
+      run: poetry install --with dev --all-extras
+
+    # 步骤 5: 运行 Linter (Ruff)
     - name: Lint with Ruff
       run: poetry run ruff check .
 
-    # 步骤 5: 检查代码格式 (Black & isort)
+    # 步骤 6: 检查代码格式 (Black & isort)
     - name: Check formatting with Black and isort
       run: |
         poetry run black --check .
         poetry run isort --check-only .
 
-    # 步骤 6: 运行静态类型检查 (Mypy)
+    # 步骤 7: 运行静态类型检查 (Mypy)
     - name: Type check with Mypy
       run: poetry run mypy .
       
-    # 步骤 7: 运行测试
-    # 注意：我们暂时不运行依赖 .env 的测试，只运行核心测试
-    # 你需要调整你的测试脚本，或者使用 pytest 的标记来跳过需要 API Key 的测试
-    - name: Run core tests with Pytest
+    # 步骤 8: 运行测试
+    # 使用 pytest 来运行，它会自动发现在 tests/ 目录下的测试文件
+    - name: Run tests with Pytest
       run: |
-        # 我们可以创建一个专门用于 CI 的测试脚本，或者使用 pytest 的标记
-        # 这里为了简单，我们先假设直接运行是安全的
-        poetry run pytest # (如果你的测试被组织成了 pytest 格式)
-        # 或者，如果仍使用 run_coordinator_test.py，需要确保它在没有 .env 时不会失败
-        # poetry run python run_coordinator_test.py 
+        # 在 CI 环境中，我们通常不需要真实的 API Key
+        # 我们的 run_coordinator_test.py 脚本会优雅地跳过需要 key 的测试
+        poetry run python run_coordinator_test.py
