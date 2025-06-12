@@ -1,97 +1,101 @@
 # ==============================================================================
 #  构建系统配置
-#  - 定义了构建项目所需的工具，这里我们使用标准的 poetry-core。
 # ==============================================================================
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
+
 # ==============================================================================
-#  项目元数据与核心依赖 (Poetry 配置)
+#  项目元数据与依赖 (Poetry 配置) - v1.0.0 发布版
 # ==============================================================================
 [tool.poetry]
 # --- 基本信息 ---
 name = "trans-hub"
-version = "0.1.0"
+# [变更] 版本号更新为 1.0.0，标志着第一个稳定版本的发布
+version = "1.0.0" 
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/SakenW/trans-hub"  # 推荐替换为你的GitHub项目地址
-repository = "https://github.com/SakenW/trans-hub" # 推荐替换为你的GitHub项目地址
-keywords = ["i18n", "localization", "translation", "backend", "engine"]
+
+# [新增] 提供更丰富的链接，这些会显示在 PyPI 页面上
+homepage = "https://github.com/SakenW/trans-hub"
+repository = "https://github.com/SakenW/trans-hub"
+# documentation = "https://github.com/SakenW/trans-hub/blob/main/path/to/your/docs.md"
+
+# [新增] PyPI 分类器，非常重要！
+# 它能帮助用户在 PyPI 上更好地发现你的项目，并了解其状态和兼容性。
+classifiers = [
+    "Development Status :: 5 - Production/Stable", # 标志着这是一个稳定的版本
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Localization",
+    "Topic :: Text Processing",
+]
 
 # --- 核心依赖 (项目运行时必须的包) ---
 [tool.poetry.dependencies]
-# [变更] 项目最低 Python 版本要求提升至 3.9
 python = "^3.9"
-
-# 用于数据校验和模型定义的核心库
 pydantic = "^2.0"
-# 用于结构化日志记录
 structlog = "^23.0"
+
+# --- 可选依赖 (Extras) ---
+# [新增] 将可选依赖明确定义在这里，这是最佳实践。
+# 用户可以通过 `pip install "trans-hub[openai]"` 来安装。
+[tool.poetry.extras]
+openai = ["openai", "pydantic-settings", "python-dotenv"]
+
 
 # --- 开发依赖 (仅在开发和测试时需要的包) ---
 [tool.poetry.group.dev.dependencies]
 # 测试框架
 pytest = "^7.4"
 pytest-cov = "^4.1"
-pytest-asyncio = "^0.21.0" # 用于未来测试异步代码
+pytest-asyncio = "^0.21.0"
 
-# 代码格式化与风格检查
+# 代码风格与检查
 black = "^23.0"
 isort = "^5.12"
-ruff = "^0.1.0" # 高性能的 Linter
-
-# 静态类型检查
+ruff = "^0.1.0"
 mypy = "^1.5"
 
-# [新增] OpenAI 引擎及其配置所需的库，作为开发依赖以确保测试脚本能运行
-pydantic-settings = "^2.3.4" # 用于从 .env 文件加载配置
-openai = "^1.37.0"         # OpenAI 官方库
+# [变更] 我们在开发时也需要安装可选依赖，以便运行测试
+# 注意：openai, pydantic-settings, python-dotenv 现在由 extras 管理，
+# 在开发时，我们需要通过 `poetry install --extras openai` 来安装它们。
+# 为了方便，也可以把它们同时保留在 dev 组里。
+# 为了清晰，我们这里假设开发时会通过 --extras 安装。
+# 如果想更方便，可以取消下面三行的注释。
+# openai = "^1.37.0"
+# pydantic-settings = "^2.3.4"
+# python-dotenv = "^1.0.1"
 
 
 # ==============================================================================
 #  开发工具配置
-#  - 在这里统一配置所有工具，确保团队成员和CI/CD环境的行为一致。
 # ==============================================================================
-python-dotenv = "^1.1.0"
-
 [tool.black]
-# Black (代码格式化工具) 的配置
-line-length = 88 # 行长度限制
-target-version = ['py39'] # 目标 Python 版本，与上面保持一致
+line-length = 88
+target-version = ['py39']
 
 [tool.isort]
-# isort (import 排序工具) 的配置
-profile = "black" # 与 black 风格兼容
+profile = "black"
 line_length = 88
 
 [tool.ruff]
-# Ruff (Linter) 的配置
 line-length = 88
-# 选择要启用的规则集
-select = [
-    "E",  # pycodestyle 错误
-    "W",  # pycodestyle 警告
-    "F",  # pyflakes (未使用的导入、未定义的变量等)
-    "I",  # isort (import 排序规则)
-    "N",  # pep8-naming (命名规范)
-    "D",  # pydocstyle (文档字符串规范)
-    "UP", # pyupgrade (自动升级到新语法)
-    "B",  # flake8-bugbear (可能的逻辑错误)
-    "C4", # flake8-comprehensions (推荐使用更简洁的推导式)
-]
-# 忽略某些不太重要的规则
-ignore = [
-    "D100", # 公共模块缺少文档字符串
-    "D104", # 公共包缺少文档字符串
-    "D107", # __init__.py 文件缺少文档字符串
-]
+select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
+ignore = ["D100", "D104", "D107"]
 
 [tool.mypy]
-# Mypy (静态类型检查器) 的配置
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
-ignore_missing_imports = true # 初始阶段保持为 true，对于没有类型定义的第三方库，暂时忽略导入错误
+ignore_missing_imports = true
