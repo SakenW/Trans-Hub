@@ -132,4 +132,4 @@ desktop.ini
 *.swp # Vim
 *~
 *.bak
-*.tmp
+*.tmp.env
