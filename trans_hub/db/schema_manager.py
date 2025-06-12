@@ -4,12 +4,12 @@ trans_hub/db/schema_manager.py
 本模块负责管理数据库的 Schema 版本。
 它提供了应用迁移脚本、检查当前版本等功能。
 """
-import logging
+import structlog
 import sqlite3
 from pathlib import Path
 
 # 设置一个简单的日志记录器
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # 定义迁移脚本所在的目录
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"

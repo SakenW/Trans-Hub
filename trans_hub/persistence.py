@@ -5,7 +5,7 @@ trans_hub/persistence.py (v0.1)
 它实现了 `PersistenceHandler` 接口，并负责与数据库进行所有交互。
 此版本已完全根据最终版文档的数据库 Schema 和 DTOs 重写。
 """
-import logging
+import structlog
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -17,7 +17,7 @@ from trans_hub.interfaces import PersistenceHandler
 from trans_hub.types import ContentItem, SourceUpdateResult, TranslationResult, TranslationStatus
 
 # 获取一个模块级别的日志记录器
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class DefaultPersistenceHandler(PersistenceHandler):

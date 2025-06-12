@@ -5,7 +5,7 @@ trans_hub/coordinator.py (v0.1)
 它是上层应用与 Trans-Hub 核心功能交互的主要入口点。
 """
 import time
-import logging
+import structlog
 from typing import Dict, Generator, List, Optional, Type
 
 from trans_hub.rate_limiter import RateLimiter
@@ -22,7 +22,7 @@ from trans_hub.types import (
 )
 
 # 获取一个模块级别的日志记录器
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class Coordinator:
