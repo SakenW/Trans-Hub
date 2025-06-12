@@ -74,7 +74,7 @@ class TranslatorsEngine(BaseTranslationEngine):
         texts: List[str],
         target_lang: str,
         source_lang: str,
-        context: Optional[BaseContextModel] = None  # context 可以设为可选参数
+        context: Optional[BaseContextModel] = None,  # context 可以设为可选参数
     ) -> List[EngineBatchItemResult]:
         # translators 库也支持异步，但我们 v1.0 暂时保持同步实现
         return self.translate_batch(texts, target_lang, source_lang, context)
