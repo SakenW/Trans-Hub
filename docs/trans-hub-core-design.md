@@ -1,20 +1,6 @@
-好的，收到。我们来完成这项至关重要的任务：**生成最终、完整、权威的 `trans-hub-core-design.md`**。
+# **项目技术规范文档：`Trans-Hub` 核心引擎**
 
-这份文档将取代所有旧的设计稿，成为我们 `v1.0` 版本的“单一事实来源”。它精确地反映了我们最终的代码实现、架构决策和最佳实践。我将确保它包含我们讨论过的所有内容，没有任何删减和遗漏。
-
----
-
-### **使用说明**
-
-1.  请**删除**你项目中旧的 `trans-hub-core-design.md` 文件。
-2.  创建一个**新的** `trans-hub-core-design.md` 文件（建议放在 `docs/` 目录下，例如 `docs/technical-specification-v1.md`）。
-3.  将以下**全部内容**复制并粘贴到这个新文件中。
-
----
-
-# **项目开发文档：`Trans-Hub` 核心引擎**
-
-**版本**: 1.0.1
+**版本**: 1.0.0
 **文档状态**: **最终发布版 (Final, Released)**
 **目标读者**: 项目核心开发团队, 未来维护者, 社区贡献者
 **文档目的**: 本文档是 `Trans-Hub` 项目 v1.0 的权威技术规范与最终实现记录，是所有开发与维护工作的“单一事实来源”(Single Source of Truth)。它详尽地描述了从架构设计、数据模型、核心实现到部署配置的全部细节，旨在确保项目的长期可维护性、可扩展性与高质量。
@@ -32,7 +18,7 @@
 8.  [日志记录与可观测性](#8-日志记录与可观测性)
 9.  [附录A：配置指南 (`.env`)](#附录a配置指南-env)
 10. [附录B：术语表](#附录b术语表)
-11. [附录C：第三方引擎开发指南](#附录c第三方引擎开发指南)
+11. [附录C：第三方引擎开发指南](#附录c-第三方引擎开发指南)
 12. [附录D：`business_id` 命名指南与最佳实践](#附录d-business_id-命名指南与最佳实践)
 
 ---
@@ -79,7 +65,7 @@ graph TD
         end
         
         subgraph "配置与工具集"
-            U1["配置模型 (Pydantic)\n- 从环境/ .env 加载"]
+            U1["配置模型 (config.py)\n- 从环境/ .env 加载"]
             U2["日志系统 (Structlog)\n- 结构化、带上下文"]
             U3["垃圾回收 (GC)\n(由 Coordinator 调用)"]
         end
@@ -95,10 +81,10 @@ graph TD
     D -- "操作" --> F
 ```
 
-### **2.2 配置加载与注入模式**
+### **2.2 配置加载与注入模式 (最终方案)**
 1.  **主动加载**: 强烈建议上层应用在启动时，首先调用 `dotenv.load_dotenv()`，将 `.env` 文件中的配置显式加载到环境变量中。这是最健壮、最能抵抗环境干扰的方式。
-2.  **模型解析**: 各组件的配置模型（如 `OpenAIEngineConfig`）继承自 `pydantic_settings.BaseSettings`，它会自动从环境变量中解析和验证配置。最终所有配置被聚合到一个 `TransHubConfig` 对象中。
-3.  **依赖注入**: 上层应用负责创建 `PersistenceHandler` 和 `TransHubConfig` 的实例，并将它们作为参数注入到 `Coordinator` 的构造函数中。`Coordinator` 内部负责根据配置动态创建所需的引擎实例。
+2.  **模型解析**: 各引擎的配置模型（如 `OpenAIEngineConfig`）继承自 `pydantic_settings.BaseSettings`，它会自动从环境变量中解析和验证配置。最终所有配置被聚合到一个 `TransHubConfig` 对象中。
+3.  **依赖注入**: 上层应用负责创建 `PersistenceHandler` 和 `TransHubConfig` 的实例，并将它们作为参数注入到 `Coordinator` 的构造函数中。`Coordinator` 内部负责根据配置**动态创建**所需的引擎实例。
 
 ---
 
@@ -151,62 +137,39 @@ graph TD
 
 ## **4. 插件化翻译引擎设计**
 
-### **4.1 插件发现机制 (懒加载)**
-v1.0 采用一种轻量级的“懒加载”自动发现机制，而非复杂的 Entry Points。
-*   **实现**: `engine_registry.py` 模块在加载时，会自动扫描 `trans_hub.engines` 包下的所有模块。
+### **4.1 插件发现机制 (懒加载自动发现)**
+v1.0 采用一种轻量级的“懒加载”自动发现机制。
+*   **实现**: `engine_registry.py` 模块在首次被导入时，会自动扫描 `trans_hub.engines` 包下的所有模块。
 *   **工作方式**: 它会尝试导入每个模块。如果导入成功，则解析模块中的引擎类并注册。如果导入失败（通常因为缺少可选依赖，如 `openai` 库），它会捕获 `ModuleNotFoundError`，记录一条警告并优雅地跳过，而不会使整个应用崩溃。
-*   **优点**: 这让 `Trans-Hub` 的核心库保持轻量，用户只需安装他们真正需要的引擎依赖。系统能自动适应环境中已安装的库。
+*   **优点**: 保持了 `Trans-Hub` 核心库的轻量级。用户只需安装他们真正需要的引擎依赖，系统就能自动适应环境中已安装的库。
 
 ### **4.2 `BaseTranslationEngine` 接口**
-所有翻译引擎必须继承的抽象基类，定义了引擎的核心契约。
-
-```python
-# trans_hub/engines/base.py
-class BaseTranslationEngine(ABC):
-    # Pydantic 配置模型，Coordinator 用它来验证传入的引擎配置
-    CONFIG_MODEL: type[BaseEngineConfig]
-    # Pydantic 上下文模型，用于验证特定于引擎的上下文
-    CONTEXT_MODEL: type[BaseContextModel] = BaseContextModel
-    # 引擎的版本号
-    VERSION: str = "1.0.0"
-    # 引擎是否必须提供源语言
-    REQUIRES_SOURCE_LANG: bool = False
-    
-    def __init__(self, config: BaseEngineConfig): self.config = config
-
-    @abstractmethod
-    def translate_batch(self, ...) -> List[EngineBatchItemResult]: ...
-    
-    @abstractmethod
-    async def atranslate_batch(self, ...) -> List[EngineBatchItemResult]: ...
-```
+所有翻译引擎必须继承的抽象基类，定义了引擎的核心契约。其设计与我们之前的讨论一致，包含 `CONFIG_MODEL`, `CONTEXT_MODEL`, `VERSION`, `REQUIRES_SOURCE_LANG` 等属性，以及 `translate_batch` 和 `atranslate_batch` 两个核心抽象方法。
 
 ---
 
 ## **5. 核心模块与类设计**
 
 ### **5.1 `types.py`**
-定义了所有核心 DTOs，是系统的“血液”。关键 DTO 包括：
-*   `TranslationStatus(Enum)`: 翻译任务的生命周期状态。
-*   `EngineSuccess`, `EngineError`: 引擎返回的原子结果。`EngineError` 包含 `is_retryable` 标志，是重试逻辑的基础。
-*   `TranslationResult`: `Coordinator` 返回给用户的、包含完整信息的综合结果。
-*   `ContentItem`: `Coordinator` 与 `PersistenceHandler` 之间传递的待翻译任务单元。
+定义了所有核心 DTOs，是系统的“血液”。关键 DTO 包括：`TranslationStatus`, `EngineError` (含 `is_retryable`), `TranslationResult`, `ContentItem`。
 
 ### **5.2 `config.py`**
-定义了项目所有结构化的配置模型，包括 `TransHubConfig`, `EngineConfigs`, 以及各个具体引擎的配置模型（如 `OpenAIEngineConfig`）。它使得配置的管理和校验集中化。
+定义了项目所有结构化的配置模型，包括 `TransHubConfig`, `EngineConfigs`, 以及各个具体引擎的配置模型（如 `OpenAIEngineConfig`）。这是进行配置管理的中心枢纽。
 
 ### **5.3 `PersistenceHandler` (`persistence.py`)**
-数据库交互的接口及其同步实现 `DefaultPersistenceHandler`。它封装了所有 SQL 查询，并使用 `with self.transaction()` 上下文管理器来确保所有写操作的原子性。
+数据库交互的接口及其同步实现 `DefaultPersistenceHandler`。封装了所有 SQL 查询，并使用事务保证数据一致性。
 
 ### **5.4 `Coordinator` (`coordinator.py`)**
 项目的“大脑”，通过依赖注入持有 `PersistenceHandler` 和 `TransHubConfig`。
-*   `__init__()`: 在构造时，会查询 `engine_registry`，并根据 `TransHubConfig` 中的配置动态地创建所需的活动引擎实例。
-*   `request()`: 接收翻译请求，负责创建源记录和 `PENDING` 状态的翻译任务。
-*   `process_pending_translations()`: 核心后台处理方法，负责获取任务、调用引擎、处理结果、执行重试和限速、并保存最终结果。这是一个流式（生成器）方法，可以立即返回处理结果。
-*   `run_garbage_collection()`: 暴露给上层应用的垃圾回收接口。
+*   **`__init__()`**: 在构造时，会查询 `engine_registry`，并根据 `TransHubConfig` 中的配置动态地创建所需的活动引擎实例。
+*   **API**: 提供了 `request()`, `process_pending_translations()`, 和 `run_garbage_collection()` 等核心公共方法。
+*   **参数校验**: 在 `request` 和 `process_pending_translations` 等方法的入口处，对语言代码等关键参数进行格式校验，对无效输入会立即抛出 `ValueError`。
 
 ### **5.5 `RateLimiter` (`rate_limiter.py`)**
-一个基于令牌桶算法的、线程安全的速率限制器。通过 `acquire()` 方法阻塞执行，直到有可用令牌，从而平滑 API 调用速率。
+一个基于令牌桶算法的、线程安全的速率限制器。
+
+### **5.6 `engine_registry.py`**
+实现了上一节描述的懒加载自动发现机制，是项目插件化架构的核心。
 
 ---
 
@@ -297,17 +260,16 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
 要为 `Trans-Hub` 开发一个新的翻译引擎，你需要遵循以下步骤：
 
 1.  **在 `trans_hub/engines/` 目录下创建你的引擎文件**，例如 `your_engine.py`。
-2.  **创建配置模型**:
+2.  **创建配置模型**，继承自 `BaseSettings`，并使用 `Field(validation_alias=...)` 来映射环境变量。
     ```python
     # your_engine.py
     from pydantic import Field
     from pydantic_settings import BaseSettings
     
     class YourEngineConfig(BaseSettings):
-        your_api_key: str = Field(validation_alias='TH_YOURENGINE_API_KEY')
-        # ... 其他配置
+        api_key: str = Field(validation_alias='TH_YOURENGINE_API_KEY')
     ```
-3.  **创建引擎类**:
+3.  **创建引擎类**，继承自 `BaseTranslationEngine`，并绑定你的配置模型。
     ```python
     # your_engine.py
     from trans_hub.engines.base import BaseTranslationEngine
@@ -315,25 +277,18 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
     class YourEngine(BaseTranslationEngine):
         CONFIG_MODEL = YourEngineConfig
         VERSION = "1.0.0"
-        
-        def __init__(self, config: YourEngineConfig):
-            super().__init__(config)
-            # 初始化你的 API 客户端...
-            
-        def translate_batch(self, ...):
-            # 实现你的翻译逻辑...
+        # ... 实现 __init__ 和 translate_batch ...
     ```
-4.  **在 `config.py` 中注册你的配置**:
+4.  **在 `config.py` 中注册你的配置模型**，以便 `Coordinator` 能够识别它。
     ```python
     # trans_hub/config.py
     from trans_hub.engines.your_engine import YourEngineConfig
     
     class EngineConfigs(BaseModel):
-        debug: ...
-        openai: ...
-        your_engine: Optional[YourEngineConfig] = None # 添加你的引擎配置
+        # ... 其他引擎 ...
+        your_engine: Optional[YourEngineConfig] = None # 字段名必须是小写的引擎名
     ```
-5.  **完成！** `engine_registry` 会自动发现你的新引擎，用户只需在配置中激活 `active_engine: "your_engine"` 即可使用。
+5.  **完成！** `engine_registry` 会自动发现你的新引擎。用户只需安装你引擎所需的依赖（例如 `pip install your-engine-sdk`），然后在 `TransHubConfig` 中设置 `active_engine="your_engine"` 即可使用。
 
 ---
 
