@@ -84,7 +84,7 @@ def main():
     coordinator = initialize_trans_hub()
     try:
         text_to_translate = "Hello, world!"
-        target_language = "Chinese" # 目标语言：中文
+        target_language = "zh-CN" # 目标语言：中文
 
         # 步骤 1: 登记翻译需求 (这是一个轻量级操作)
         log.info("正在登记翻译任务", text=text_to_translate, lang=target_language)

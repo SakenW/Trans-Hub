@@ -100,6 +100,9 @@ class Coordinator:
         initial_backoff: float = 1.0,
     ) -> Generator[TranslationResult, None, None]:
         """处理指定语言的待翻译任务，内置重试和速率限制逻辑。"""
+        # [新] 在方法入口处进行校验
+        self._validate_lang_codes([target_lang])
+        
         logger.info(
             f"开始处理 '{target_lang}' 的待翻译任务 (max_retries={max_retries})"
         )
@@ -207,6 +210,11 @@ class Coordinator:
         source_lang: Optional[str] = None,
     ) -> None:
         """统一的翻译请求入口。"""
+        # [新] 在方法入口处进行校验
+        self._validate_lang_codes(target_langs)
+        if source_lang:
+            self._validate_lang_codes([source_lang])
+
         logger.debug(
             f"收到翻译请求: business_id='{business_id}', "
             f"langs={target_langs}, content='{text_content[:30]}...'"
@@ -253,6 +261,21 @@ class Coordinator:
         return self.handler.garbage_collect(
             retention_days=retention_days, dry_run=dry_run
         )
+
+    # [新] 语言代码校验的辅助方法
+    def _validate_lang_codes(self, lang_codes: List[str]):
+        """
+        校验语言代码列表中的每个代码是否符合标准格式。
+        """
+        # 正则表达式：匹配 'en', 'zh-CN', 'pt-BR', 'gsw-CH' 等格式
+        lang_code_pattern = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
+        
+        for code in lang_codes:
+            if not lang_code_pattern.match(code):
+                raise ValueError(
+                    f"提供的语言代码 '{code}' 格式无效。 "
+                    "请使用标准格式，例如 'en', 'de', 'zh-CN'。"
+                )
 
     def close(self):
         """关闭协调器及其持有的资源。"""
