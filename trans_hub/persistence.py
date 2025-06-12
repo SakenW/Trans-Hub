@@ -10,6 +10,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator, List, Optional
+from datetime import datetime, timezone, timedelta
 
 # [变更] 导入已更新的 DTOs
 from trans_hub.interfaces import PersistenceHandler
@@ -225,6 +226,93 @@ class DefaultPersistenceHandler(PersistenceHandler):
             if updatable_params:
                 cursor.executemany(update_sql, updatable_params)
                 logger.info(f"成功更新了 {cursor.rowcount} 条翻译记录。")
+
+# 在 trans_hub/persistence.py 的 DefaultPersistenceHandler 类中添加
+
+    def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
+        """
+        执行垃圾回收，清理过时和孤立的数据。
+
+        Args:
+            retention_days: 数据保留天数。早于这个天数的记录将被视为过时。
+            dry_run: 如果为 True，则只查询将要删除的记录数量，而不执行实际删除。
+
+        Returns:
+            一个字典，包含清理结果的统计信息，
+            例如: {"deleted_sources": 10, "deleted_content": 5}。
+        """
+        if retention_days < 0:
+            raise ValueError("retention_days 必须是非负数。")
+
+        # 计算截止时间点
+        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        # SQLite 需要一个特定的字符串格式
+        cutoff_str = cutoff_datetime.isoformat()
+
+        stats = {"deleted_sources": 0, "deleted_content": 0}
+        
+        logger.info(
+            f"开始垃圾回收 (retention_days={retention_days}, dry_run={dry_run}). "
+            f"截止时间: {cutoff_str}"
+        )
+
+        with self.transaction() as cursor:
+            # --- 阶段 1: 清理过时的 th_sources 记录 ---
+            # 查询将要被删除的源记录数量
+            select_expired_sources_sql = "SELECT COUNT(*) FROM th_sources WHERE last_seen_at < ?"
+            cursor.execute(select_expired_sources_sql, (cutoff_str,))
+            expired_sources_count = cursor.fetchone()[0]
+            stats["deleted_sources"] = expired_sources_count
+            
+            if not dry_run and expired_sources_count > 0:
+                logger.info(f"准备删除 {expired_sources_count} 条过时的源记录...")
+                delete_expired_sources_sql = "DELETE FROM th_sources WHERE last_seen_at < ?"
+                cursor.execute(delete_expired_sources_sql, (cutoff_str,))
+                # 确认删除的数量
+                assert cursor.rowcount == expired_sources_count
+                logger.info("过时的源记录已删除。")
+            else:
+                logger.info(f"发现 {expired_sources_count} 条可删除的过时源记录 (dry_run)。")
+            
+            # --- 阶段 2: 清理孤立的 th_content 记录 ---
+            # 一个 `th_content` 记录是孤立的，当且仅当：
+            # 1. 它不被任何 `th_sources` 记录所引用。
+            # 2. 它不被任何 `th_translations` 记录所引用。
+            # 3. 它的创建时间早于保留期限（可选，防止误删刚创建但还未被引用的内容）
+            
+            select_orphan_content_sql = """
+                SELECT COUNT(c.id)
+                FROM th_content c
+                WHERE 
+                    c.created_at < ?
+                    AND NOT EXISTS (SELECT 1 FROM th_sources s WHERE s.content_id = c.id)
+                    AND NOT EXISTS (SELECT 1 FROM th_translations tr WHERE tr.content_id = c.id)
+            """
+            cursor.execute(select_orphan_content_sql, (cutoff_str,))
+            orphan_content_count = cursor.fetchone()[0]
+            stats["deleted_content"] = orphan_content_count
+
+            if not dry_run and orphan_content_count > 0:
+                logger.info(f"准备删除 {orphan_content_count} 条孤立的内容记录...")
+                delete_orphan_content_sql = """
+                    DELETE FROM th_content
+                    WHERE id IN (
+                        SELECT c.id
+                        FROM th_content c
+                        WHERE 
+                            c.created_at < ?
+                            AND NOT EXISTS (SELECT 1 FROM th_sources s WHERE s.content_id = c.id)
+                            AND NOT EXISTS (SELECT 1 FROM th_translations tr WHERE tr.content_id = c.id)
+                    )
+                """
+                cursor.execute(delete_orphan_content_sql, (cutoff_str,))
+                assert cursor.rowcount == orphan_content_count
+                logger.info("孤立的内容记录已删除。")
+            else:
+                logger.info(f"发现 {orphan_content_count} 条可删除的孤立内容记录 (dry_run)。")
+
+        logger.info(f"垃圾回收完成。统计: {stats}")
+        return stats
 
     def close(self) -> None:
         """关闭数据库连接，释放资源。"""

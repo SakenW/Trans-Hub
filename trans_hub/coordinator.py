@@ -7,6 +7,7 @@ trans_hub/coordinator.py (v0.1)
 import time
 import logging
 from typing import Dict, Generator, List, Optional, Type
+
 from trans_hub.rate_limiter import RateLimiter
 from trans_hub.utils import get_context_hash
 from trans_hub.engines.base import BaseTranslationEngine
@@ -33,8 +34,6 @@ class Coordinator:
     - 编排核心工作流，如处理待办翻译任务。
     - 执行校验和策略（未来将包括重试、限速等）。
     """
-
-# ... 在 Coordinator 类中 ...
 
     def __init__(
         self,
@@ -269,6 +268,27 @@ class Coordinator:
             logger.info(
                 f"为 content_id={content_id} 确保了 {cursor.rowcount} 个新的 PENDING 任务。"
             )
+
+    def run_garbage_collection(self, retention_days: int, dry_run: bool = False) -> dict:
+        """
+        运行垃圾回收进程。
+
+        这是一个管理接口，用于清理数据库中不再需要的数据。
+
+        Args:
+            retention_days: 数据保留天数。
+            dry_run: 如果为 True，只报告将要删除的内容，不执行实际删除。
+
+        Returns:
+            一个包含清理统计信息的字典。
+        """
+        logger.info(
+            f"Coordinator 正在启动垃圾回收 (retention_days={retention_days}, dry_run={dry_run})..."
+        )
+        return self.handler.garbage_collect(
+            retention_days=retention_days,
+            dry_run=dry_run
+        )
 
     def close(self):
         """关闭协调器及其持有的资源，主要是数据库连接。"""

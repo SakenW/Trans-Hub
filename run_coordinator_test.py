@@ -1,92 +1,104 @@
 """
-run_coordinator_test.py (v0.4)
+run_coordinator_test.py (v0.5)
 
 一个用于测试 Coordinator 端到端工作流的脚本。
-此版本增加了对速率限制器的验证。
+此版本增加了对垃圾回收 (GC) 功能的验证。
 """
 import logging
 import os
+import sqlite3
 import time
 
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngine, DebugEngineConfig
 from trans_hub.persistence import DefaultPersistenceHandler
-# [新] 导入速率限制器
 from trans_hub.rate_limiter import RateLimiter
-from trans_hub.types import TranslationStatus, TranslationResult
+from trans_hub.types import TranslationStatus
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-    # 将我们自己库的日志级别设为DEBUG，以便看到速率限制器的日志
-    logging.getLogger("trans_hub").setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    logging.getLogger("trans_hub").setLevel(logging.INFO)
 
-    DB_FILE = "transhub_coord_test.db"
+    DB_FILE = "transhub_gc_test.db"
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
     apply_migrations(DB_FILE)
     
     handler = DefaultPersistenceHandler(db_path=DB_FILE)
-    debug_engine = DebugEngine(config=DebugEngineConfig())
-    engines = {"debug": debug_engine}
-
-    # === [新] 初始化速率限制器 ===
-    # 我们设置一个非常低的速率（每秒2个请求），以便在测试中能明显看到效果。
-    # 容量为1，意味着它不能累积突发能力。
-    rate_limiter = RateLimiter(refill_rate=2, capacity=1)
-    print(f"\n速率限制器已创建 (RPS=2, Capacity=1)")
-
-    # 将速率限制器注入 Coordinator
     coordinator = Coordinator(
         persistence_handler=handler,
-        engines=engines,
-        active_engine_name="debug",
-        rate_limiter=rate_limiter, # 注入！
+        engines={"debug": DebugEngine(DebugEngineConfig())},
+        active_engine_name="debug"
     )
     
     try:
-        print("\n" + "=" * 20 + " 步骤 1: 准备数据 (3个任务) " + "=" * 20)
-        # 我们一次性请求3个任务
-        coordinator.request(target_langs=['jp'], text_content="apple")
-        coordinator.request(target_langs=['jp'], text_content="banana")
-        coordinator.request(target_langs=['jp'], text_content="cherry")
-        print("数据准备完成。")
+        # === 步骤 1: 准备 GC 测试数据 ===
+        print("\n" + "=" * 20 + " 步骤 1: 准备 GC 测试数据 " + "=" * 20)
         
-        # === [新] 测试速率限制逻辑 ===
-        print("\n" + "=" * 20 + " 步骤 2: 以小批次 (batch_size=1) 执行翻译 " + "=" * 20)
+        # 1. 一个过时的源: last_seen_at 会在很久以前
+        # 2. 一个活跃的源: last_seen_at 是现在
+        # 3. 一个孤立的内容: 从未被任何源或翻译引用
         
-        start_time = time.monotonic()
-        
-        # 我们将 batch_size 设为 1，这样 Coordinator 会对每个任务单独调用一次 translate_batch
-        # 因此，它会调用3次 API，每次都需要获取令牌。
-        jp_results_generator = coordinator.process_pending_translations(
-            target_lang="jp",
-            batch_size=1, # 强制每次只处理一个
-            max_retries=0 # 关闭重试，简化测试
-        )
-        
-        results_list = [result for result in jp_results_generator]
-        
-        end_time = time.monotonic()
-        duration = end_time - start_time
-        
-        print(f"\n处理3个任务总耗时: {duration:.2f} 秒")
-        
-        # 验证结果
-        assert len(results_list) == 3
-        # 理论上，处理3个请求，速率为2rps，需要的时间：
-        # 第1个: 立即执行 (桶里有1个令牌)
-        # 第2个: 等待0.5秒补充1个令牌
-        # 第3个: 再等待0.5秒补充1个令牌
-        # 总时间应该略大于 1.0 秒。我们用一个宽松的断言。
-        assert duration > 1.0, f"总耗时 {duration:.2f}s 过短，速率限制器可能未生效！"
-        
-        print(f"耗时符合预期，速率限制器工作正常！")
-        
-        print("\n所有验证成功！Coordinator 已具备速率限制能力！")
+        with handler.transaction() as cursor:
+            # 插入内容
+            cursor.execute("INSERT INTO th_content (id, value, created_at) VALUES (1, 'old_content', '2020-01-01 10:00:00')")
+            cursor.execute("INSERT INTO th_content (id, value) VALUES (2, 'active_content')")
+            cursor.execute("INSERT INTO th_content (id, value, created_at) VALUES (3, 'orphan_content', '2020-01-01 11:00:00')")
+            
+            # 插入源
+            cursor.execute("INSERT INTO th_sources (business_id, content_id, last_seen_at) VALUES ('source:old', 1, '2020-01-01 10:00:00')")
+            cursor.execute("INSERT INTO th_sources (business_id, content_id, last_seen_at) VALUES ('source:active', 2, ?)", (time.strftime('%Y-%m-%d %H:%M:%S'),))
+            
+        print("GC 测试数据已创建。")
+
+        # === 步骤 2: 执行 GC (dry_run模式) ===
+        print("\n" + "=" * 20 + " 步骤 2: 执行 GC (dry_run) " + "=" * 20)
+        # 设置一个很长的保留期，比如 1000 天
+        stats_dry = coordinator.run_garbage_collection(retention_days=1000, dry_run=True)
+        print(f"Dry run 统计结果: {stats_dry}")
+        assert stats_dry["deleted_sources"] == 1
+        assert stats_dry["deleted_content"] == 1
+        print("Dry run 验证成功！")
+
+        # === 步骤 3: 验证数据库在 dry_run 后未发生变化 ===
+        print("\n" + "=" * 20 + " 步骤 3: 验证数据库在 dry_run 后状态 " + "=" * 20)
+        with handler.transaction() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM th_sources")
+            assert cursor.fetchone()[0] == 2
+            cursor.execute("SELECT COUNT(*) FROM th_content")
+            assert cursor.fetchone()[0] == 3
+        print("数据库状态未变，验证成功！")
+
+# run_coordinator_test.py
+
+        # === 步骤 4: 执行真正的 GC ===
+        print("\n" + "=" * 20 + " 步骤 4: 执行真正的 GC " + "=" * 20)
+        stats_real = coordinator.run_garbage_collection(retention_days=1000, dry_run=False)
+        print(f"GC 执行统计结果: {stats_real}")
+        # [修正] 断言删除的源是1个，删除的内容是2个（orphan_content + old_content）
+        assert stats_real["deleted_sources"] == 1
+        assert stats_real["deleted_content"] == 2
+
+        # === 步骤 5: 验证数据库在 GC 后发生变化 ===
+        print("\n" + "=" * 20 + " 步骤 5: 验证数据库在 GC 后状态 " + "=" * 20)
+        with handler.transaction() as cursor:
+            # 过时源被删除，只剩活跃源
+            cursor.execute("SELECT COUNT(*) FROM th_sources")
+            assert cursor.fetchone()[0] == 1
+            # 孤立内容和因源被删而孤立的内容都被删除，只剩活跃内容
+            cursor.execute("SELECT COUNT(*) FROM th_content")
+            assert cursor.fetchone()[0] == 1 # [修正] 3 - 2 = 1
+            
+            # 确认被删除的是正确的记录
+            cursor.execute("SELECT value FROM th_content")
+            remaining_content = {row[0] for row in cursor.fetchall()}
+            assert "orphan_content" not in remaining_content
+            assert "old_content" not in remaining_content # [新增] 确认 old_content 也被删了
+            assert "active_content" in remaining_content
+        print("数据库状态已更新，验证成功！")
+
+        print("\n所有验证成功！垃圾回收 (GC) 功能工作正常！")
 
     finally:
         coordinator.close()
