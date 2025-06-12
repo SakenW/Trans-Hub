@@ -36,14 +36,16 @@ jobs:
         python -m pipx ensurepath
 
     - name: Install Poetry
-      run: pipx install poetry==1.8.2
+      run: |
+        pipx install poetry==1.8.2
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     # 步骤 4: 配置Poetry虚拟环境路径
     - name: Configure Poetry
       run: poetry config virtualenvs.in-project true
 
     - name: Install dependencies
-      run: poetry install --group dev --all-extras
+      run: pipx run poetry install --group dev --all-extras
 
     # 步骤 5: 运行 Linter (Ruff)
     - name: Lint with Ruff
