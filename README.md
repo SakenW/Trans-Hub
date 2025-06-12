@@ -163,7 +163,11 @@ python main.py
 
 ## 贡献
 
-我们热烈欢迎任何形式的贡献！无论是提交 Bug 报告、功能建议还是代码 Pull Request。请先阅读我们的贡献指南（`CONTRIBUTING.md`）。
+我们热烈欢迎任何形式的贡献！无论是提交 Bug 报告、功能建议还是代码 Pull Request。请先阅读我们的 **[贡献指南](./CONTRIBUTING.md)**。
+
+## 行为准则
+
+为了营造一个开放、友好的社区环境，我们希望所有参与者都能遵守我们的 **[行为准则](./CODE_OF_CONDUCT.md)**。
 
 ## 许可证
 
