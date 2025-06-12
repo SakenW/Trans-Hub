@@ -1,3 +1,17 @@
+好的，收到。我们来完成这项至关重要的任务：**生成最终、完整、权威的 `trans-hub-core-design.md`**。
+
+这份文档将取代所有旧的设计稿，成为我们 `v1.0` 版本的“单一事实来源”。它精确地反映了我们最终的代码实现、架构决策和最佳实践。我将确保它包含我们讨论过的所有内容，没有任何删减和遗漏。
+
+---
+
+### **使用说明**
+
+1.  请**删除**你项目中旧的 `trans-hub-core-design.md` 文件。
+2.  创建一个**新的** `trans-hub-core-design.md` 文件（建议放在 `docs/` 目录下，例如 `docs/technical-specification-v1.md`）。
+3.  将以下**全部内容**复制并粘贴到这个新文件中。
+
+---
+
 # **项目开发文档：`Trans-Hub` 核心引擎**
 
 **版本**: 1.0.1
@@ -19,6 +33,7 @@
 9.  [附录A：配置指南 (`.env`)](#附录a配置指南-env)
 10. [附录B：术语表](#附录b术语表)
 11. [附录C：第三方引擎开发指南](#附录c第三方引擎开发指南)
+12. [附录D：`business_id` 命名指南与最佳实践](#附录d-business_id-命名指南与最佳实践)
 
 ---
 
@@ -32,7 +47,7 @@
 
 *   **契约优先 (Contract First)**: 所有外部输入和内部模块交互都通过严格的 DTOs (Data Transfer Objects, 使用 Pydantic 定义) 进行约束，确保类型安全和数据一致性。
 *   **结构化配置 (Structured Configuration)**: 系统的所有配置项（如数据库路径、API密钥）均通过结构化的 Pydantic 模型进行定义和验证。配置加载遵循 **环境优先** 的原则，并支持使用 `.env` 文件进行本地开发。
-*   **依赖注入 (Dependency Injection)**: 核心组件（如 `Coordinator`）在其构造函数中接收其依赖（如 `PersistenceHandler`, `Engine`），使得组件之间松耦合，易于测试和替换。
+*   **依赖注入 (Dependency Injection)**: 核心组件（如 `Coordinator`）在其构造函数中接收其依赖（如 `PersistenceHandler`），使得组件之间松耦合，易于测试和替换。
 *   **生命周期感知 (Lifecycle-Aware)**: 系统设计包含了数据的演进（通过独立的迁移脚本）和清理（通过垃圾回收GC功能），确保长期运行的健康性。
 *   **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚。`PersistenceHandler` 只管数据库，`Engine` 只管翻译API，`Coordinator` 只管编排。
 
@@ -52,14 +67,15 @@ graph TD
     end
 
     subgraph "核心库: Trans-Hub"
-        B["主协调器 (Coordinator)\n- 校验与规范化输入\n- 编排核心工作流\n- 应用重试与速率限制策略"]
+        B["主协调器 (Coordinator)\n- 接收总配置对象\n- 编排核心工作流\n- 应用重试与速率限制策略"]
         D["<b>持久化处理器 (PersistenceHandler)</b>\n- 数据库交互的唯一抽象层\n- 保证写操作的原子性"]
         E["翻译引擎 (Engine)\n- 对接具体翻译API的实现\n- e.g., OpenAIEngine, DebugEngine"]
         F["统一数据库 (SQLite)\n(含Schema版本管理)"]
         
-        subgraph "核心组件"
+        subgraph "核心组件与机制"
             C1["重试与退避逻辑\n(Coordinator 内建)"]
             C2["速率限制器 (RateLimiter)\n(可注入 Coordinator)"]
+            C3["引擎注册表 (EngineRegistry)\n- 动态发现可用引擎"]
         end
         
         subgraph "配置与工具集"
@@ -70,7 +86,8 @@ graph TD
     end
     
     G -- "由 dotenv 主动加载" --> U1
-    U1 -- "作为参数注入" --> E
+    U1 -- "打包成 TransHubConfig" --> B
+    C3 -- "被 Coordinator 使用" --> B
     A -- "调用" --> B
     B -- "持有并使用" --> C1 & C2
     B -- "依赖于" --> D
@@ -80,8 +97,8 @@ graph TD
 
 ### **2.2 配置加载与注入模式**
 1.  **主动加载**: 强烈建议上层应用在启动时，首先调用 `dotenv.load_dotenv()`，将 `.env` 文件中的配置显式加载到环境变量中。这是最健壮、最能抵抗环境干扰的方式。
-2.  **模型解析**: 各组件的配置模型（如 `OpenAIEngineConfig`）继承自 `pydantic_settings.BaseSettings`，它会自动从环境变量中解析和验证配置。
-3.  **依赖注入**: 上层应用负责创建所有组件的实例（如 `PersistenceHandler`, `OpenAIEngine`），并将它们作为参数注入到 `Coordinator` 的构造函数中。
+2.  **模型解析**: 各组件的配置模型（如 `OpenAIEngineConfig`）继承自 `pydantic_settings.BaseSettings`，它会自动从环境变量中解析和验证配置。最终所有配置被聚合到一个 `TransHubConfig` 对象中。
+3.  **依赖注入**: 上层应用负责创建 `PersistenceHandler` 和 `TransHubConfig` 的实例，并将它们作为参数注入到 `Coordinator` 的构造函数中。`Coordinator` 内部负责根据配置动态创建所需的引擎实例。
 
 ---
 
@@ -134,8 +151,11 @@ graph TD
 
 ## **4. 插件化翻译引擎设计**
 
-### **4.1 插件发现机制**
-v1.0 暂未实现基于 Entry Points 的自动发现，而是采用**显式注入**的方式：在上层应用中创建引擎实例字典，并将其传递给 `Coordinator`。这简化了初始设计，同时保留了未来扩展到 Entry Points 的可能性。
+### **4.1 插件发现机制 (懒加载)**
+v1.0 采用一种轻量级的“懒加载”自动发现机制，而非复杂的 Entry Points。
+*   **实现**: `engine_registry.py` 模块在加载时，会自动扫描 `trans_hub.engines` 包下的所有模块。
+*   **工作方式**: 它会尝试导入每个模块。如果导入成功，则解析模块中的引擎类并注册。如果导入失败（通常因为缺少可选依赖，如 `openai` 库），它会捕获 `ModuleNotFoundError`，记录一条警告并优雅地跳过，而不会使整个应用崩溃。
+*   **优点**: 这让 `Trans-Hub` 的核心库保持轻量，用户只需安装他们真正需要的引擎依赖。系统能自动适应环境中已安装的库。
 
 ### **4.2 `BaseTranslationEngine` 接口**
 所有翻译引擎必须继承的抽象基类，定义了引擎的核心契约。
@@ -172,16 +192,20 @@ class BaseTranslationEngine(ABC):
 *   `TranslationResult`: `Coordinator` 返回给用户的、包含完整信息的综合结果。
 *   `ContentItem`: `Coordinator` 与 `PersistenceHandler` 之间传递的待翻译任务单元。
 
-### **5.2 `PersistenceHandler` (`persistence.py`)**
+### **5.2 `config.py`**
+定义了项目所有结构化的配置模型，包括 `TransHubConfig`, `EngineConfigs`, 以及各个具体引擎的配置模型（如 `OpenAIEngineConfig`）。它使得配置的管理和校验集中化。
+
+### **5.3 `PersistenceHandler` (`persistence.py`)**
 数据库交互的接口及其同步实现 `DefaultPersistenceHandler`。它封装了所有 SQL 查询，并使用 `with self.transaction()` 上下文管理器来确保所有写操作的原子性。
 
-### **5.3 `Coordinator` (`coordinator.py`)**
-项目的“大脑”，通过依赖注入持有 `PersistenceHandler` 和引擎实例。
+### **5.4 `Coordinator` (`coordinator.py`)**
+项目的“大脑”，通过依赖注入持有 `PersistenceHandler` 和 `TransHubConfig`。
+*   `__init__()`: 在构造时，会查询 `engine_registry`，并根据 `TransHubConfig` 中的配置动态地创建所需的活动引擎实例。
 *   `request()`: 接收翻译请求，负责创建源记录和 `PENDING` 状态的翻译任务。
 *   `process_pending_translations()`: 核心后台处理方法，负责获取任务、调用引擎、处理结果、执行重试和限速、并保存最终结果。这是一个流式（生成器）方法，可以立即返回处理结果。
 *   `run_garbage_collection()`: 暴露给上层应用的垃圾回收接口。
 
-### **5.4 `RateLimiter` (`rate_limiter.py`)**
+### **5.5 `RateLimiter` (`rate_limiter.py`)**
 一个基于令牌桶算法的、线程安全的速率限制器。通过 `acquire()` 方法阻塞执行，直到有可用令牌，从而平滑 API 调用速率。
 
 ---
@@ -252,14 +276,9 @@ sequenceDiagram
 # 使用前缀以避免与其他应用的环境变量冲突。
 
 # --- OpenAI 引擎配置 ---
-# [重要] 替换为你的 API 地址。
-# 使用 ENDPOINT 而不是 BASE_URL 是为了避免我们遇到的解析问题。
+# [重要] 我们使用 ENDPOINT 而不是 BASE_URL 是为了避免我们遇到的解析问题。
 TH_OPENAI_ENDPOINT="https://api.oneabc.org/v1"
-
-# 你的 API 密钥。
 TH_OPENAI_API_KEY="your-real-or-dummy-key"
-
-# 你希望使用的模型。
 TH_OPENAI_MODEL="gpt-3.5-turbo"
 ```
 
@@ -267,7 +286,7 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
 
 ## **附录B：术语表**
 *   **内容 (Content)**: 在`th_content`表中存储的、去重后的、唯一的文本字符串。
-*   **业务ID (business_id)**: 上层应用传入的、全局唯一的静态字符串，用于追踪一个业务位置与特定内容的关联。
+*   **业务ID (business_id)**: 上层应用传入的、全局唯一的静态字符串，用于追踪一个业务位置与特定内容（Content）的关联。
 *   **上下文哈希 (context_hash)**: 基于引擎特定上下文内容的 SHA256 哈希，用于细粒度缓存命中。
 *   **DTO (Data Transfer Object)**: 数据传输对象，在本项目中指用 Pydantic 定义的、用于模块间数据交换的模型类。
 
@@ -277,17 +296,20 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
 
 要为 `Trans-Hub` 开发一个新的翻译引擎，你需要遵循以下步骤：
 
-1.  **创建配置模型**:
+1.  **在 `trans_hub/engines/` 目录下创建你的引擎文件**，例如 `your_engine.py`。
+2.  **创建配置模型**:
     ```python
-    from pydantic_settings import BaseSettings, SettingsConfigDict
+    # your_engine.py
+    from pydantic import Field
+    from pydantic_settings import BaseSettings
     
     class YourEngineConfig(BaseSettings):
-        model_config = SettingsConfigDict(...)
         your_api_key: str = Field(validation_alias='TH_YOURENGINE_API_KEY')
         # ... 其他配置
     ```
-2.  **创建引擎类**:
+3.  **创建引擎类**:
     ```python
+    # your_engine.py
     from trans_hub.engines.base import BaseTranslationEngine
     
     class YourEngine(BaseTranslationEngine):
@@ -296,127 +318,41 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
         
         def __init__(self, config: YourEngineConfig):
             super().__init__(config)
-            # 初始化你的 API 客户端，例如
-            # self.client = YourApiClient(api_key=config.your_api_key)
+            # 初始化你的 API 客户端...
             
         def translate_batch(self, ...):
-            # 实现你的翻译逻辑
-            # ...
-            # 成功时返回 EngineSuccess(...)
-            # 失败时返回 EngineError(..., is_retryable=...)
-            
-        async def atranslate_batch(self, ...):
-            # 实现异步版本
-            ...
+            # 实现你的翻译逻辑...
     ```
-3.  **在上层应用中使用**:
+4.  **在 `config.py` 中注册你的配置**:
     ```python
-    # 在你的应用代码中
-    from dotenv import load_dotenv
-    from trans_hub.coordinator import Coordinator
-    from your_engine_file import YourEngine, YourEngineConfig
+    # trans_hub/config.py
+    from trans_hub.engines.your_engine import YourEngineConfig
     
-    load_dotenv() # 加载 .env
-    
-    your_engine_config = YourEngineConfig()
-    your_engine = YourEngine(config=your_engine_config)
-    
-    engines = {"your_engine_name": your_engine}
-    
-    coordinator = Coordinator(
-        # ... 其他依赖 ...
-        engines=engines,
-        active_engine_name="your_engine_name"
-    )
+    class EngineConfigs(BaseModel):
+        debug: ...
+        openai: ...
+        your_engine: Optional[YourEngineConfig] = None # 添加你的引擎配置
     ```
+5.  **完成！** `engine_registry` 会自动发现你的新引擎，用户只需在配置中激活 `active_engine: "your_engine"` 即可使用。
 
-### **附录D：`business_id` 命名指南与最佳实践 (补全)**
+---
 
-`business_id` 是 `Trans-Hub` 设计中的一个核心概念。它是一个由上层应用定义的、全局唯一的字符串，其主要目的是**将一段具体的文本内容（Content）与它在业务逻辑中出现的“位置”或“来源”进行稳定地关联**。一个设计良好的 `business_id` 命名体系是实现高效、可维护本地化工作流的关键。
+## **附录D：`business_id` 命名指南与最佳实践**
+
+`business_id` 是 `Trans-Hub` 设计中的一个核心概念。它是一个由上层应用定义的、全局唯一的字符串，其主要目的是**将一段具体的文本内容（Content）与它在业务逻辑中出现的“位置”或“来源”进行稳定地关联**。
 
 #### **D.1 设计哲学：为何使用单一字符串**
-
-`Trans-Hub` 没有将来源标识拆分为多个固定的数据库字段（如 `domain`, `component`, `key`），而是选择使用一个灵活的、单一的字符串 `business_id`。这基于以下考量：
-
-*   **极致的灵活性**: 不同的翻译场景有截然不同的标识需求。单一字符串可以容纳任何结构，无论是简单的键值对，还是复杂的文件路径、时间戳或数据库记录ID。
-*   **避免过度设计**: 试图用一套固定的结构去预设所有可能的业务场景是不现实的，这会使系统变得僵化且难以适应未来的需求。例如，一个UI文本的标识方式与一个字幕文件的标识方式可能完全不同。
-*   **API简洁性**: 保持了 `request()` 接口的简洁性，降低了使用者的学习成本和心智负担。
-
-为了在这种灵活性和项目管理的可维护性之间取得平衡，我们**强烈推荐**团队内部遵循一套统一的命名约定。
+`Trans-Hub` 选择使用一个灵活的、单一的字符串 `business_id`，以提供极致的灵活性，避免过度设计，并保持 API 的简洁性。
 
 #### **D.2 推荐的命名约定**
-
-我们推荐使用一种**带命名空间的、点分式的路径结构**来构建你的 `business_id`。这种方式易于阅读、排序和过滤。
-
-**基本格式**:
-`domain.subdomain.component1.component2...key`
-
-*   **分隔符**: 使用点 `.` 作为层级之间的分隔符。
-*   **字符集**: 建议只使用**小写字母、数字、下划线 `_` 和横杠 `-`**。这能确保ID在各种系统（URL、文件名、代码变量等）中都是安全的。
-*   **全局唯一**: 每一个 `business_id` 在你的整个项目中都必须是唯一的。
+我们推荐使用一种**带命名空间的、点分式的路径结构**：`domain.subdomain.component.key`。建议只使用**小写字母、数字、下划线 `_` 和横杠 `-`**。
 
 #### **D.3 典型翻译场景的命名示例**
 
-以下是针对不同翻译场景，我们推荐的具体命名实践。
+*   **UI界面文本**: `ui.login_page.title`, `ui.settings.save_button`
+*   **配置文件**: `config.plugin_manifest.name`, `config.settings.appearance.theme`
+*   **字幕文件**: `subtitle.s01e01.srt.line.123`
+*   **数据库内容**: `db.products.42.description`
+*   **即席翻译**: 调用 `request()` 时，将 `business_id` 参数设为 `None`。
 
-##### **场景1：翻译UI界面文本 (最常见)**
-
-`business_id` 应该能清晰地反映出文本在UI中的位置和层级。
-
-*   **格式**: `ui.{page_or_window}.{section_or_group}.{element_name}.{attribute_or_state}`
-*   **示例**:
-    *   登录页面的标题: `ui.login_page.title`
-    *   设置对话框中“通用”选项卡的保存按钮: `ui.settings_dialog.tabs.general.save_button`
-    *   用户菜单中的“退出登录”项的提示文本: `ui.user_menu.logout.tooltip`
-    *   一个输入框的占位符文本: `ui.search.input.placeholder`
-
-##### **场景2：翻译配置文件（如JSON, YAML）**
-
-对于结构化的配置文件，`business_id` 应该模拟其在文件中的路径。
-
-*   **格式**: `config.{filename_or_group}.{path.to.key}`
-*   **示例**: 对于一个插件的 `manifest.json` 文件：
-    *   `name` 字段: `config.my_plugin.manifest.name`
-    *   `description` 字段: `config.my_plugin.manifest.description`
-    *   如果一个插件有多个配置文件，可以这样：`config.my_plugin.settings.appearance.theme_name`
-
-##### **场景3：翻译字幕文件（如SRT, VTT）**
-
-字幕的标识需要包含文件名和时间/位置信息，以确保唯一性。
-
-*   **格式**: `subtitle.{filename}.{identifier_type}.{identifier_value}`
-*   **示例**:
-    *   按行号: `subtitle.s01e01.srt.line.123` (第一季第一集的SRT文件的第123行)
-    *   按时间戳: `subtitle.movie_intro.vtt.ts.00-01-15-250` (使用 `-` 替代 `.` 和 `:` 以保持格式一致)
-    *   按ID（如果字幕格式支持）: `subtitle.feature_film.ass.dialogue.warning_sign`
-
-##### **场景4：翻译数据库内容**
-
-当需要翻译存储在数据库中的内容时（例如产品描述），`business_id` 应包含表名和记录的主键。
-
-*   **格式**: `db.{table_name}.{record_id}.{field_name}`
-*   **示例**:
-    *   `products` 表中ID为 `42` 的产品的 `description` 字段: `db.products.42.description`
-    *   `categories` 表中ID为 `5` 的 `name` 字段: `db.categories.5.name`
-
-##### **场景5：翻译纯文本内容（即席翻译）**
-
-当您只需要翻译一段临时文本（例如用户输入），不关心其来源，也不需要长期追踪其业务位置时。
-
-*   **`business_id`**: 在调用 `request()` 方法时，将 `business_id` 参数设为 `None`。
-*   **示例**:
-    ```python
-    user_input = "Can you translate this for me?"
-    coordinator.request(
-        target_langs=['fr'],
-        text_content=user_input,
-        business_id=None  # 明确表示这是一个即席翻译
-    )
-    ```
-*   **工作模式**: 在这种模式下，`Trans-Hub` 将退化为一个**基于文本内容的高效缓存翻译器**。它会直接使用 `text_content` 在 `th_content` 和 `th_translations` 中进行查找和存储，完全跳过 `th_sources` 表。这对于处理动态、非结构化的文本非常有用。
-
-#### **D.4 总结：设计您自己的命名空间**
-
-`Trans-Hub` 赋予您定义自己命名空间的全部能力。关键在于**保持一致性、可读性和唯一性**。一个好的 `business_id` 命名规范将使您的本地化项目在规模扩大时依然能够保持清晰和易于管理。在项目开始时，花时间与团队一起制定一套适用于您自己业务的命名约定，将是一项非常有价值的投资。
-
----
+一个好的 `business_id` 命名规范将使您的本地化项目在规模扩大时依然能够保持清晰和易于管理。

@@ -1,9 +1,29 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+#  Trans-Hub 项目特定忽略规则
+# ==============================================================================
+
+# 忽略本地配置文件，绝不应将包含密钥的文件提交到版本控制
+.env
+
+# 忽略 SQLite 数据库文件（由测试脚本或应用生成）
+*.db
+*.sqlite
+*.sqlite3
+
+# 忽略日志文件
+*.log
+
+
+# ==============================================================================
+#  Python 通用忽略规则
+# ==============================================================================
+
+# 编译后的 Python 文件
 __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
+# C 扩展
 *.so
 
 # Distribution / packaging
@@ -19,43 +39,79 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# PyInstaller
+# 通常不在库项目中使用，但加入无妨
+*.manifest
+*.spec
 
-# Unit test / coverage reports
-htmlcov/
+
+# ==============================================================================
+#  虚拟环境
+# ==============================================================================
+
+# Poetry, venv, virtualenv 等创建的本地虚拟环境目录
+.venv/
+venv/
+VENV/
+env/
+ENV/
+.env/
 .tox/
 .nox/
+.hypothesis/
+
+
+# ==============================================================================
+#  开发工具与编辑器配置
+# ==============================================================================
+
+# Pytest 缓存
+.pytest_cache/
+
+# Mypy 缓存
+.mypy_cache/
+
+# Ruff 缓存
+.ruff_cache/
+
+# Coverage an d profiler reports
 .coverage
 .coverage.*
-.cache
-nosetests.xml
 coverage.xml
-*.cover
-.pytest_cache/
-test-output/
+profile_output/
+.prof
+*.prof
 
-# PyCharm & VSCode
-.idea/
-.vscode/
+# VSCode 编辑器配置（允许团队共享，但有时个人配置不想提交）
+# 如果你的 .vscode/settings.json 是为团队共享的，则不要忽略它。
+# 如果是个人配置，可以取消下面的注释。
+# .vscode/
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv/
+# Jupyter Notebook 检查点
+.ipynb_checkpoints
 
-# MacOS
+# macOS 系统文件
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# Logs
-*.log
+# Windows 缩略图缓存
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
 
-# Custom
-*.sqlite3
+
+# ==============================================================================
+#  其他
+# ==============================================================================
+
+# IDEs
+.idea/ # PyCharm, IntelliJ
+*.swp # Vim
