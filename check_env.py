@@ -1,22 +1,22 @@
-"""
-check_env.py
+"""check_env.py
 
 一个独立的、最小化的脚本，专门用于测试 pydantic-settings
 是否能从 .env 文件中成功加载配置。
 """
 import os
 from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-print(f"--- 开始 .env 加载测试 ---")
+print("--- 开始 .env 加载测试 ---")
 print(f"当前工作目录 (CWD): {os.getcwd()}")
 print(f"期望的 .env 文件路径: {os.path.abspath('.env')}")
 
 # 检查 .env 文件是否存在且可读
-if os.path.isfile('.env'):
+if os.path.isfile(".env"):
     print(".env 文件存在于当前目录。")
     try:
-        with open('.env', 'r', encoding='utf-8') as f:
+        with open(".env", encoding="utf-8") as f:
             print("\n.env 文件内容预览:")
             print("-" * 20)
             print(f.read().strip())
@@ -30,11 +30,9 @@ else:
 # 定义一个与我们项目中 OpenAIEngineConfig 完全相同的配置模型
 class TestConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix='TH_OPENAI_',
-        env_file='.env',
-        extra='ignore'
+        env_prefix="TH_OPENAI_", env_file=".env", extra="ignore"
     )
-    
+
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: str = "default-model"
@@ -56,7 +54,7 @@ try:
         print("✅ 成功！base_url 已从 .env 文件中成功加载。")
     else:
         print("❌ 失败！base_url 未能加载。请检查 .env 文件内容和格式。")
-        
+
     # 额外检查：环境变量是否被 `python-dotenv` 加载（如果它工作的话）
     print("\n检查 os.environ 是否包含已加载的变量...")
     env_var_value = os.getenv("TH_OPENAI_API_BASE_URL")

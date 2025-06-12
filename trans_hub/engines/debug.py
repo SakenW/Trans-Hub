@@ -1,5 +1,4 @@
-"""
-trans_hub/engines/debug.py (v0.2)
+"""trans_hub/engines/debug.py (v0.2)
 
 提供一个用于开发和测试的调试引擎。
 此版本增加了模拟失败的能力。
@@ -11,24 +10,26 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
+
 # [新] 导入 EngineError
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
 class DebugEngineConfig(BaseEngineConfig):
     """调试引擎的特定配置。"""
+
     # [新] 增加一个配置项，用于指定哪些文本应该模拟失败
     fail_on_text: Optional[str] = None
     fail_is_retryable: bool = True
 
 
 class DebugEngine(BaseTranslationEngine):
-    """
-    一个简单的调试翻译引擎。
+    """一个简单的调试翻译引擎。
     此版本可以配置为在遇到特定文本时模拟失败。
     """
+
     CONFIG_MODEL = DebugEngineConfig
-    VERSION = "1.0.1" # 版本升级
+    VERSION = "1.0.1"  # 版本升级
 
     def __init__(self, config: DebugEngineConfig):
         super().__init__(config)
@@ -54,15 +55,21 @@ class DebugEngine(BaseTranslationEngine):
             )
 
     def translate_batch(
-        self, texts: List[str], target_lang: str,
-        source_lang: Optional[str] = None, context: Optional[BaseContextModel] = None,
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: Optional[str] = None,
+        context: Optional[BaseContextModel] = None,
     ) -> List[EngineBatchItemResult]:
         """同步批量翻译，现在会检查是否需要模拟失败。"""
         return [self._process_text(text, target_lang) for text in texts]
 
     async def atranslate_batch(
-        self, texts: List[str], target_lang: str,
-        source_lang: Optional[str] = None, context: Optional[BaseContextModel] = None,
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: Optional[str] = None,
+        context: Optional[BaseContextModel] = None,
     ) -> List[EngineBatchItemResult]:
         """异步版本，逻辑相同。"""
         return self.translate_batch(texts, target_lang, source_lang, context)
