@@ -1,36 +1,20 @@
-# ==============================================================================
-#  构建系统配置
-# ==============================================================================
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-
-# ==============================================================================
-#  项目元数据与依赖 (Poetry 配置) - v1.0.0 发布版
-# ==============================================================================
 [tool.poetry]
-# --- 基本信息 ---
 name = "trans-hub"
-# [变更] 版本号更新为 1.0.0，标志着第一个稳定版本的发布
-version = "1.0.0" 
+version = "1.0.0"
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-
-# [新增] 提供更丰富的链接，这些会显示在 PyPI 页面上
 homepage = "https://github.com/SakenW/trans-hub"
 repository = "https://github.com/SakenW/trans-hub"
-# documentation = "https://github.com/SakenW/trans-hub/blob/main/path/to/your/docs.md"
-
-# [新增] PyPI 分类器，非常重要！
-# 它能帮助用户在 PyPI 上更好地发现你的项目，并了解其状态和兼容性。
 classifiers = [
-    "Development Status :: 5 - Production/Stable", # 标志着这是一个稳定的版本
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -38,64 +22,32 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Software Development :: Localization",
-    "Topic :: Text Processing",
 ]
 
-# --- 核心依赖 (项目运行时必须的包) ---
+# --- 核心依赖 (项目的最小运行集) ---
 [tool.poetry.dependencies]
 python = "^3.9"
 pydantic = "^2.0"
 structlog = "^23.0"
 
 # --- 可选依赖 (Extras) ---
-# [新增] 将可选依赖明确定义在这里，这是最佳实践。
-# 用户可以通过 `pip install "trans-hub[openai]"` 来安装。
 [tool.poetry.extras]
+# 定义一个名为 'openai' 的功能集。
 openai = ["openai", "pydantic-settings", "python-dotenv"]
+# 未来可以增加其他引擎
+# deepl = ["deepl"]
 
-
-# --- 开发依赖 (仅在开发和测试时需要的包) ---
+# --- 开发依赖 (仅在开发和测试时需要) ---
 [tool.poetry.group.dev.dependencies]
-# 测试框架
 pytest = "^7.4"
 pytest-cov = "^4.1"
 pytest-asyncio = "^0.21.0"
-
-# 代码风格与检查
 black = "^23.0"
 isort = "^5.12"
 ruff = "^0.1.0"
 mypy = "^1.5"
 
-# [变更] 我们在开发时也需要安装可选依赖，以便运行测试
-# 注意：openai, pydantic-settings, python-dotenv 现在由 extras 管理，
-# 在开发时，我们需要通过 `poetry install --extras openai` 来安装它们。
-# 为了方便，也可以把它们同时保留在 dev 组里。
-# 为了清晰，我们这里假设开发时会通过 --extras 安装。
-# 如果想更方便，可以取消下面三行的注释。
-# openai = "^1.37.0"
-# pydantic-settings = "^2.3.4"
-# python-dotenv = "^1.0.1"
-
-
-# ==============================================================================
-#  开发工具配置
-# ==============================================================================
-[tool.black]
-line-length = 88
-target-version = ['py39']
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
-[tool.ruff]
-line-length = 88
-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
-ignore = ["D100", "D104", "D107"]
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
+# 开发时，我们直接在这里列出所有可选依赖，以确保测试能覆盖所有功能
+openai = "^1.37.0"
+pydantic-settings = "^2.3.4"
+python-dotenv = "^1.0.1"
