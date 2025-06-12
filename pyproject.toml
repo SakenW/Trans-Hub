@@ -51,6 +51,7 @@ structlog = "^23.0"
 
 # --- 可选依赖 (Extras) ---
 # 这使得用户可以按需安装功能，例如 `pip install "trans-hub[openai]"`。
+translators = "^6.0.1"
 [tool.poetry.extras]
 # 定义一个名为 'openai' 的功能集。
 openai = ["openai", "pydantic-settings", "python-dotenv"]

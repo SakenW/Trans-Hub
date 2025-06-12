@@ -4,6 +4,8 @@
 
 # 忽略本地配置文件，绝不应将包含密钥的文件提交到版本控制
 .env
+.env.*
+!.env.example # 确保 .env.example 不被忽略
 
 # 忽略 SQLite 数据库文件（由测试脚本或应用生成）
 *.db
@@ -12,10 +14,12 @@
 
 # 忽略日志文件
 *.log
+logs/
+*.log.*
 
 
 # ==============================================================================
-#  Python 通用忽略规则
+#  Python 通用忽略规则 (基于 GitHub 官方模板)
 # ==============================================================================
 
 # 编译后的 Python 文件
@@ -85,33 +89,47 @@ ENV/
 .coverage
 .coverage.*
 coverage.xml
+htmlcov/
 profile_output/
 .prof
 *.prof
 
-# VSCode 编辑器配置（允许团队共享，但有时个人配置不想提交）
-# 如果你的 .vscode/settings.json 是为团队共享的，则不要忽略它。
-# 如果是个人配置，可以取消下面的注释。
-# .vscode/
+# VSCode 编辑器配置
+# .vscode/ 文件夹通常建议提交，以便团队共享配置。
+# 如果你有个人不想共享的设置，可以忽略 .vscode/settings.json
+# 但我们当前的 settings.json 是项目级的，所以不忽略 .vscode/
+!.vscode/settings.json
 
 # Jupyter Notebook 检查点
 .ipynb_checkpoints
+
+
+# ==============================================================================
+#  操作系统与通用忽略规则
+# ==============================================================================
 
 # macOS 系统文件
 .DS_Store
 .AppleDouble
 .LSOverride
+._*
 
-# Windows 缩略图缓存
+# Windows 系统文件
 Thumbs.db
 ehthumbs.db
 ehthumbs_vista.db
-
-
-# ==============================================================================
-#  其他
-# ==============================================================================
+desktop.ini
 
 # IDEs
-.idea/ # PyCharm, IntelliJ
+.idea/ # JetBrains (PyCharm, IntelliJ, etc.)
+*.iml
+*.iws
+.project
+.classpath
+.settings/
+
+# 编辑器临时文件
 *.swp # Vim
+*~
+*.bak
+*.tmp
