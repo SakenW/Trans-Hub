@@ -20,14 +20,14 @@ from trans_hub.types import TranslationStatus
 def test_rate_limiter():
     log = structlog.get_logger("test_rate_limiter")
     log.info("--- 开始速率限制器功能测试 ---")
-    DB_FILE = "transhub_ratelimit_test.db"
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    apply_migrations(DB_FILE)
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+    db_file = "transhub_ratelimit_test.db"
+    if os.path.exists(db_file):
+        os.remove(db_file)
+    apply_migrations(db_file)
+    handler = DefaultPersistenceHandler(db_path=db_file)
     rate_limiter = RateLimiter(refill_rate=2, capacity=1)
     config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE}",
+        database_url=f"sqlite:///{db_file}",
         active_engine="debug",
         engine_configs=EngineConfigs(debug=DebugEngineConfig()),
     )
@@ -56,16 +56,16 @@ def test_rate_limiter():
 def test_retry_logic():
     log = structlog.get_logger("test_retry_logic")
     log.info("--- 开始重试逻辑测试 ---")
-    DB_FILE = "transhub_retry_test.db"
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    apply_migrations(DB_FILE)
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+    db_file = "transhub_retry_test.db"
+    if os.path.exists(db_file):
+        os.remove(db_file)
+    apply_migrations(db_file)
+    handler = DefaultPersistenceHandler(db_path=db_file)
     debug_config_with_failure = DebugEngineConfig(
         fail_on_text="cherry", fail_is_retryable=True
     )
     config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE}",
+        database_url=f"sqlite:///{db_file}",
         active_engine="debug",
         engine_configs=EngineConfigs(debug=debug_config_with_failure),
     )
@@ -89,13 +89,13 @@ def test_retry_logic():
 def test_garbage_collection():
     log = structlog.get_logger("test_gc")
     log.info("--- 开始垃圾回收 (GC) 测试 ---")
-    DB_FILE = "transhub_gc_test.db"
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    apply_migrations(DB_FILE)
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+    db_file = "transhub_gc_test.db"
+    if os.path.exists(db_file):
+        os.remove(db_file)
+    apply_migrations(db_file)
+    handler = DefaultPersistenceHandler(db_path=db_file)
     config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE}",
+        database_url=f"sqlite:///{db_file}",
         active_engine="debug",
         engine_configs=EngineConfigs(),
     )
@@ -140,14 +140,14 @@ def test_openai_engine_flow():
         log.warning("OpenAI 引擎未被加载，跳过测试。")
         return
     log.info("--- 开始 OpenAI 引擎流程测试 ---")
-    DB_FILE = "transhub_openai_test.db"
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-    apply_migrations(DB_FILE)
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+    db_file = "transhub_openai_test.db"
+    if os.path.exists(db_file):
+        os.remove(db_file)
+    apply_migrations(db_file)
+    handler = DefaultPersistenceHandler(db_path=db_file)
     try:
         config = TransHubConfig(
-            database_url=f"sqlite:///{DB_FILE}",
+            database_url=f"sqlite:///{db_file}",
             active_engine="openai",
             engine_configs=EngineConfigs(openai=OpenAIEngineConfig()),
         )
@@ -176,9 +176,9 @@ def test_openai_engine_flow():
             if "401" in result.error:
                 log.warning("✅ 测试收到 401 错误，引擎错误处理逻辑工作正常。")
             else:
-                assert False, f"发生非 401 的意外错误: {result.error}"
+                raise AssertionError(f"发生非 401 的意外错误: {result.error}")
         else:
-            assert False, f"翻译结果状态异常: {result.status}"
+            raise AssertionError(f"翻译结果状态异常: {result.status}")
     finally:
         coordinator.close()
 

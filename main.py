@@ -21,16 +21,16 @@ def initialize_trans_hub():
     """一个标准的初始化函数，返回一个配置好的 Coordinator 实例。"""
     setup_logging(log_level="INFO")
 
-    DB_FILE = "my_translations.db"
-    if not os.path.exists(DB_FILE):
-        log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
-        apply_migrations(DB_FILE)
+    db_file = "my_translations.db"
+    if not os.path.exists(db_file):
+        log.info("数据库不存在，正在创建并迁移...", db_path=db_file)
+        apply_migrations(db_file)
 
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+    handler = DefaultPersistenceHandler(db_path=db_file)
 
     # 创建一个最简单的配置对象，它将自动使用默认的免费 'translators' 引擎。
     config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE}", engine_configs=EngineConfigs()
+        database_url=f"sqlite:///{db_file}", engine_configs=EngineConfigs()
     )
 
     coordinator = Coordinator(config=config, persistence_handler=handler)
