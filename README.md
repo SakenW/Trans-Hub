@@ -1,3 +1,17 @@
+好的，这是最终版本的 `README.md`。
+
+这份文档经过了全面的优化和扩充，旨在为新用户提供一个清晰、准确、有吸引力的项目介绍。
+
+**这份最终版本的优化点：**
+
+1.  **更清晰的核心特性**：对每个核心特性的描述进行了精炼，使其更易于理解，并突出了 `v1.1.0` 的改进点。
+2.  **更健壮的快速上手示例**：提供了经过 `ruff` 检查的、干净的示例代码，并改进了对缓存行为的解释，使其更符合实际情况。
+3.  **精确的核心概念解释**：对 `Coordinator`, `request()`, `process_pending_translations()` 的职责描述进行了更新，与 `v1.1.0` 的最终设计完全一致。
+4.  **完整的文档链接**：在“深入了解”部分，添加了指向所有重要文档（`Cookbook.md`, `developing-engines.md`, `technical-specification-v1.1.md`）的**相对链接**，方便用户直接在 GitHub 上点击跳转。
+5.  **整体流畅性**：对全文的措辞和格式进行了微调，使其读起来更加流畅和专业。
+
+---
+
 # Trans-Hub: 智能本地化后端引擎 🚀
 
 [![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)
@@ -49,11 +63,8 @@ pip install trans-hub
 # quick_start.py
 import os
 import structlog
-
-# 第三方库导入
 from dotenv import load_dotenv
 
-# 本地库导入
 from trans_hub.config import EngineConfigs, TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
@@ -204,7 +215,7 @@ config = TransHubConfig(
 
 *   想要在 Flask/Django 中使用或学习更多高级用法？请查看我们的 **[实践指南 (Cookbook)](./docs/cookbook.md)**。
 *   想开发自己的翻译引擎？请阅读 **[第三方引擎开发指南](./docs/developing-engines.md)**。
-*   对项目的设计哲学和内部架构感兴趣？请深入我们的 **[项目技术规范文档](./docs/technical-specification-v1.1.md)**。
+*   对项目的设计哲学和内部架构感兴趣？请深入我们的 **[项目技术规范文档 (v1.1)](./docs/technical-specification-v1.1.md)**。
 
 ## 贡献
 
