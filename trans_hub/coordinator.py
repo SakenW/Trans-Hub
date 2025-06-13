@@ -12,12 +12,9 @@ from typing import Any, Dict, Generator, List, Optional
 import structlog
 
 from trans_hub.config import TransHubConfig
-
 from trans_hub.engine_registry import ENGINE_REGISTRY
 from trans_hub.engines.base import BaseTranslationEngine
-
 from trans_hub.interfaces import PersistenceHandler
-
 from trans_hub.rate_limiter import RateLimiter
 from trans_hub.types import (
     ContentItem,
@@ -27,7 +24,7 @@ from trans_hub.types import (
     TranslationResult,
     TranslationStatus,
 )
-from trans_hub.utils import get_context_hash # get_context_hash 现在返回 str
+from trans_hub.utils import get_context_hash  # get_context_hash 现在返回 str
 
 logger = structlog.get_logger(__name__)
 
@@ -159,7 +156,7 @@ class Coordinator:
                     item=item,
                     engine_result=engine_result,
                     target_lang=target_lang,
-                    retrieved_business_id=retrieved_business_id # <-- 传递获取到的 business_id
+                    retrieved_business_id=retrieved_business_id,  # <-- 传递获取到的 business_id
                 )
                 final_results_to_save.append(result)
                 yield result
@@ -172,7 +169,7 @@ class Coordinator:
         item: ContentItem,
         engine_result: EngineBatchItemResult,
         target_lang: str,
-        retrieved_business_id: Optional[str] = None # <-- 新增参数
+        retrieved_business_id: Optional[str] = None,  # <-- 新增参数
     ) -> TranslationResult:
         """内部辅助方法，将引擎原始输出转换为统一的 TranslationResult DTO。
         现在接受一个可选的 retrieved_business_id。
@@ -186,7 +183,7 @@ class Coordinator:
                 engine=self.active_engine_name,
                 from_cache=False,
                 context_hash=item.context_hash,
-                business_id=retrieved_business_id, # <-- 使用传递进来的 business_id
+                business_id=retrieved_business_id,  # <-- 使用传递进来的 business_id
             )
         elif isinstance(engine_result, EngineError):
             return TranslationResult(
@@ -198,7 +195,7 @@ class Coordinator:
                 error=engine_result.error_message,
                 from_cache=False,
                 context_hash=item.context_hash,
-                business_id=retrieved_business_id, # <-- 使用传递进来的 business_id
+                business_id=retrieved_business_id,  # <-- 使用传递进来的 business_id
             )
         else:
             raise TypeError(
@@ -235,7 +232,7 @@ class Coordinator:
                 context_hash=context_hash,
             )
             content_id = source_result.content_id
-        
+
         # 无论 business_id 是否提供，都需要确保 content 存在
         # 如果没有通过 business_id 找到 content_id (即 business_id 为 None)，
         # 则尝试根据文本内容查找或插入
@@ -277,8 +274,14 @@ class Coordinator:
                 )
                 existing_translation = cursor.fetchone()
 
-                if existing_translation and existing_translation["status"] == TranslationStatus.TRANSLATED.value:
-                    logger.debug(f"翻译 '{text_content[:20]}...' 到 '{lang}' 已存在并已翻译，跳过创建 PENDING 任务。")
+                if (
+                    existing_translation
+                    and existing_translation["status"]
+                    == TranslationStatus.TRANSLATED.value
+                ):
+                    logger.debug(
+                        f"翻译 '{text_content[:20]}...' 到 '{lang}' 已存在并已翻译，跳过创建 PENDING 任务。"
+                    )
                     continue
 
                 params_to_insert.append(

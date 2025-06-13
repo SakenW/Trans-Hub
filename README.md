@@ -1,9 +1,3 @@
-好的，我将为您更新 `README.md` 文件。这份更新将突出 `Trans-Hub` 最新的改进，特别是关于上下文处理、`business_id` 的精确关联和缓存行为的澄清。我还会链接到我们刚刚完成的 `Cookbook.md` 和更新后的技术规范文档。
-
-以下是更新后的 `README.md` 内容：
-
----
-
 # Trans-Hub: 智能本地化后端引擎 🚀
 
 [![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)

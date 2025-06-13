@@ -1,28 +1,34 @@
 # inspect_db.py (最终修正版)
-import sqlite3
-import os
-import sys # 导入 sys 模块，用于日志输出流
-import structlog
-from datetime import datetime
-
-# 导入 structlog 必要的处理器
-from structlog.stdlib import add_logger_name, add_log_level
-from structlog.processors import TimeStamper, JSONRenderer, StackInfoRenderer, format_exc_info
-from structlog.dev import ConsoleRenderer
-
 # 标准库 logging 配置
 import logging
-logging.basicConfig(level=logging.INFO, stream=sys.stdout) # 将标准日志输出到控制台
-logging.getLogger("pydantic").setLevel(logging.INFO) # 避免 Pydantic 大量日志
+import os
+import sqlite3
+import sys  # 导入 sys 模块，用于日志输出流
+from datetime import datetime
+
+import structlog
+from structlog.dev import ConsoleRenderer
+from structlog.processors import (
+    JSONRenderer,
+    StackInfoRenderer,
+    TimeStamper,
+    format_exc_info,
+)
+
+# 导入 structlog 必要的处理器
+from structlog.stdlib import add_log_level, add_logger_name
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)  # 将标准日志输出到控制台
+logging.getLogger("pydantic").setLevel(logging.INFO)  # 避免 Pydantic 大量日志
 
 # 配置 structlog
 structlog.configure(
     processors=[
-        add_logger_name,         # 确保 logger 名称显示
-        add_log_level,           # 确保日志级别显示
-        TimeStamper(fmt="%Y-%m-%dT%H:%M:%S.%fZ", utc=True), # 添加时间戳
-        StackInfoRenderer(),     # 捕获堆栈信息
-        format_exc_info,         # 格式化异常信息
+        add_logger_name,  # 确保 logger 名称显示
+        add_log_level,  # 确保日志级别显示
+        TimeStamper(fmt="%Y-%m-%dT%H:%M:%S.%fZ", utc=True),  # 添加时间戳
+        StackInfoRenderer(),  # 捕获堆栈信息
+        format_exc_info,  # 格式化异常信息
         # 根据环境变量选择渲染器，方便生产环境切换为 JSON
         ConsoleRenderer() if os.getenv("ENV") != "prod" else JSONRenderer(),
     ],
@@ -32,11 +38,12 @@ structlog.configure(
 )
 
 # 获取一个 logger
-log = structlog.get_logger(__name__) # 使用 __name__ 作为 logger 名称
+log = structlog.get_logger(__name__)  # 使用 __name__ 作为 logger 名称
 
 
 # 数据库文件路径，与 context_demo.py 使用的保持一致
 DB_FILE = "my_complex_trans_hub_demo.db"
+
 
 def inspect_database():
     """连接到数据库并打印翻译内容及其解读。"""
@@ -47,7 +54,7 @@ def inspect_database():
     conn = None
     try:
         conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row # 这样可以通过列名访问结果，例如 row['id']
+        conn.row_factory = sqlite3.Row  # 这样可以通过列名访问结果，例如 row['id']
         log.info(f"成功连接到数据库: {DB_FILE}")
 
         # SQL 查询：LEFT JOIN th_translations, th_content, th_sources
@@ -71,7 +78,7 @@ def inspect_database():
         LEFT JOIN
             th_sources s ON c.id = s.content_id AND t.context_hash = s.context_hash;
         """
-        
+
         cursor = conn.cursor()
         cursor.execute(query)
         rows = cursor.fetchall()
@@ -88,9 +95,9 @@ def inspect_database():
             print(f"--- 记录 {i+1} ---")
             print(f"原始数据库行内容 (sqlite3.Row 对象):")
             # 核心修正：使用 row.keys() 迭代列名，然后通过键访问值
-            for key in row.keys(): # <-- 修正点：使用 .keys()
-                print(f"  {key}: {row[key]}") # <-- 修正点：通过键访问值
-            
+            for key in row.keys():  # <-- 修正点：使用 .keys()
+                print(f"  {key}: {row[key]}")  # <-- 修正点：通过键访问值
+
             print("\n解读:")
             print(f"  翻译任务ID (translation_id): {row['translation_id']}")
             print(f"    - 这是该翻译任务在 `th_translations` 表中的唯一标识。")
@@ -100,24 +107,34 @@ def inspect_database():
             print(f"    - 原始文本被翻译成的目标语言代码，遵循 IETF 语言标签（如 'zh-CN', 'fr'）。")
             print(f"  上下文哈希 (context_hash): '{row['context_hash']}'")
             print(f"    - 如果文本在不同场景下有不同译法，这里会是上下文的哈希值。`__GLOBAL__` 表示无特定上下文。")
-            print(f"  翻译结果 (translated_text): '{row['translated_text'] if row['translated_text'] else '暂无翻译结果'}'")
+            print(
+                f"  翻译结果 (translated_text): '{row['translated_text'] if row['translated_text'] else '暂无翻译结果'}'"
+            )
             print(f"    - 翻译引擎返回的最终译文。如果任务状态不是 'TRANSLATED'，则可能为 `None`。")
             print(f"  翻译状态 (translation_status): '{row['translation_status']}'")
-            print(f"    - 翻译任务的当前生命周期状态：\n      - `PENDING`: 待处理，等待翻译引擎拾取。\n      - `TRANSLATING`: 正在处理，已提交给引擎。\n      - `TRANSLATED`: 已成功翻译。\n      - `FAILED`: 翻译失败且重试次数耗尽。\n      - `APPROVED`: 人工审核通过的最终版本。")
+            print(
+                f"    - 翻译任务的当前生命周期状态：\n      - `PENDING`: 待处理，等待翻译引擎拾取。\n      - `TRANSLATING`: 正在处理，已提交给引擎。\n      - `TRANSLATED`: 已成功翻译。\n      - `FAILED`: 翻译失败且重试次数耗尽。\n      - `APPROVED`: 人工审核通过的最终版本。"
+            )
             print(f"  翻译引擎 (translation_engine): '{row['translation_engine']}'")
             print(f"    - 执行此次翻译的引擎名称（例如 'translators', 'openai'）。")
             print(f"  引擎版本 (engine_version): '{row['engine_version']}'")
             print(f"    - 使用的翻译引擎的具体版本号。")
-            
-            business_id = row['business_id']
+
+            business_id = row["business_id"]
             if business_id:
                 print(f"  业务标识符 (business_id): '{business_id}'")
                 print(f"    - 上层应用定义的唯一业务ID，用于追踪此翻译在业务中的位置，存储在 `th_sources` 表。")
-                print(f"  来源最后活跃时间 (source_last_seen_at): '{row['source_last_seen_at']}'")
-                print(f"    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。")
+                print(
+                    f"  来源最后活跃时间 (source_last_seen_at): '{row['source_last_seen_at']}'"
+                )
+                print(
+                    f"    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。"
+                )
             else:
                 print(f"  业务标识符 (business_id): 无 (此翻译未关联业务ID，或其 `th_sources` 记录已被GC。)")
-                print(f"    - 原始请求可能没有提供 `business_id`，或者此翻译是即席翻译而没有关联 `business_id`，或者在 `th_sources` 表中对应的记录已被垃圾回收清理。")
+                print(
+                    f"    - 原始请求可能没有提供 `business_id`，或者此翻译是即席翻译而没有关联 `business_id`，或者在 `th_sources` 表中对应的记录已被垃圾回收清理。"
+                )
 
             print("\n" + "-" * 80 + "\n")
 
@@ -129,6 +146,7 @@ def inspect_database():
         if conn:
             conn.close()
             log.info("数据库连接已关闭。")
+
 
 if __name__ == "__main__":
     inspect_database()

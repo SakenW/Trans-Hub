@@ -7,9 +7,10 @@ import hashlib
 import json
 from typing import Any, Dict, Optional
 
-from trans_hub.types import GLOBAL_CONTEXT_SENTINEL # 导入新定义的常量
+from trans_hub.types import GLOBAL_CONTEXT_SENTINEL  # 导入新定义的常量
 
-def get_context_hash(context: Optional[Dict[str, Any]]) -> str: # <-- 核心修改：返回类型改为 str
+
+def get_context_hash(context: Optional[Dict[str, Any]]) -> str:  # <-- 核心修改：返回类型改为 str
     """为一个上下文（context）字典生成一个确定性的、稳定的哈希值。
 
     哈希过程遵循以下规则：
@@ -32,7 +33,7 @@ def get_context_hash(context: Optional[Dict[str, Any]]) -> str: # <-- 核心修�
 
     """
     if not context:
-        return GLOBAL_CONTEXT_SENTINEL # <-- 核心修改：返回哨兵值
+        return GLOBAL_CONTEXT_SENTINEL  # <-- 核心修改：返回哨兵值
 
     try:
         context_string = json.dumps(
@@ -50,6 +51,4 @@ def get_context_hash(context: Optional[Dict[str, Any]]) -> str: # <-- 核心修�
         return hasher.hexdigest()
 
     except TypeError as e:
-        raise ValueError(
-            "Context contains non-serializable data."
-        ) from e
+        raise ValueError("Context contains non-serializable data.") from e

@@ -9,18 +9,18 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Generator, List, Optional, Dict, Any
+from typing import Any, Dict, Generator, List, Optional
 
 import structlog
 
 # [变更] 导入已更新的 DTOs 和常量
 from trans_hub.interfaces import PersistenceHandler
+from trans_hub.types import GLOBAL_CONTEXT_SENTINEL  # 导入全局上下文哨兵值
 from trans_hub.types import (
     ContentItem,
     SourceUpdateResult,
     TranslationResult,
     TranslationStatus,
-    GLOBAL_CONTEXT_SENTINEL # 导入全局上下文哨兵值
 )
 
 # 获取一个模块级别的日志记录器
@@ -138,7 +138,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
             """
             params = [lang_code] + list(status_values)
             cursor.execute(find_ids_sql, params)
-            
+
             translation_ids = [row["id"] for row in cursor.fetchall()]
 
             if not translation_ids:
@@ -151,7 +151,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
             now = datetime.now(timezone.utc)
             update_params = [TranslationStatus.TRANSLATING.value, now] + translation_ids
             cursor.execute(update_sql, update_params)
-        
+
         # 事务已提交，现在在事务外部获取 ContentItem 详细信息
         for i in range(0, len(translation_ids), batch_size):
             batch_ids = translation_ids[i : i + batch_size]
@@ -162,7 +162,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 WHERE tr.id IN ({','.join('?' for _ in batch_ids)})
             """
             # 核心修正：直接获取游标，不再使用 with 语句
-            read_cursor = self.connection.cursor() 
+            read_cursor = self.connection.cursor()
             read_cursor.execute(get_details_sql, batch_ids)
 
             yield [
@@ -184,7 +184,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
         for res in results:
             content_id = self._get_content_id_from_value(res.original_content)
             if content_id is None:
-                logger.error(f"无法为原始内容 '{res.original_content}' 找到 content_id，跳过保存此翻译结果。")
+                logger.error(
+                    f"无法为原始内容 '{res.original_content}' 找到 content_id，跳过保存此翻译结果。"
+                )
                 continue
 
             update_params_list.append(
@@ -223,12 +225,16 @@ class DefaultPersistenceHandler(PersistenceHandler):
         return row["id"] if row else None
 
     def get_translation(
-        self, text_content: str, target_lang: str, context: Optional[Dict[str, Any]] = None
+        self,
+        text_content: str,
+        target_lang: str,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
         """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。
         用于缓存命中查询。
         """
         from trans_hub.utils import get_context_hash as _get_context_hash_util
+
         context_hash_for_query = _get_context_hash_util(context)
 
         # 核心修正：直接获取游标，不再使用 with 语句
@@ -257,7 +263,12 @@ class DefaultPersistenceHandler(PersistenceHandler):
             """
             cursor.execute(
                 query_sql,
-                (content_id, target_lang, context_hash_for_query, TranslationStatus.TRANSLATED.value)
+                (
+                    content_id,
+                    target_lang,
+                    context_hash_for_query,
+                    TranslationStatus.TRANSLATED.value,
+                ),
             )
             translation_row = cursor.fetchone()
 
@@ -266,25 +277,29 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 retrieved_business_id = self.get_business_id_for_content(
                     content_id=content_id, context_hash=context_hash_for_query
                 )
-                
+
                 return TranslationResult(
                     original_content=text_content,
                     translated_content=translation_row["translation_content"],
                     target_lang=target_lang,
                     status=TranslationStatus.TRANSLATED,
                     engine=translation_row["engine"],
-                    from_cache=True, # 明确标记来自缓存
-                    business_id=retrieved_business_id, # 从 th_sources 获取
+                    from_cache=True,  # 明确标记来自缓存
+                    business_id=retrieved_business_id,  # 从 th_sources 获取
                     context_hash=context_hash_for_query,
                 )
-            logger.debug(f"未找到已翻译的记录：content_id={content_id}, lang_code={target_lang}, context_hash={context_hash_for_query}")
+            logger.debug(
+                f"未找到已翻译的记录：content_id={content_id}, lang_code={target_lang}, context_hash={context_hash_for_query}"
+            )
             return None
         finally:
             # 在这里可以显式关闭游标，但对于单次查询通常不是必需的，连接关闭时会自动处理
             # cursor.close()
             pass
-    
-    def get_business_id_for_content(self, content_id: int, context_hash: str) -> Optional[str]:
+
+    def get_business_id_for_content(
+        self, content_id: int, context_hash: str
+    ) -> Optional[str]:
         """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
         # 核心修正：直接获取游标，不再使用 with 语句
         cursor = self.connection.cursor()
@@ -294,7 +309,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 SELECT business_id FROM th_sources
                 WHERE content_id = ? AND context_hash = ?
                 """,
-                (content_id, context_hash)
+                (content_id, context_hash),
             )
             row = cursor.fetchone()
             return row["business_id"] if row else None
@@ -386,7 +401,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
 if __name__ == "__main__":
     import os
     import sys
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from trans_hub.utils import get_context_hash
 
     logging.basicConfig(
@@ -409,10 +425,14 @@ if __name__ == "__main__":
     try:
         print("\n" + "=" * 20 + " 步骤 1: 准备数据 " + "=" * 20)
         handler.update_or_create_source(
-            text_content="hello", business_id="ui.login.welcome", context_hash=get_context_hash(None)
+            text_content="hello",
+            business_id="ui.login.welcome",
+            context_hash=get_context_hash(None),
         )
         handler.update_or_create_source(
-            text_content="world", business_id="ui.home.title", context_hash=get_context_hash({"k": "v"})
+            text_content="world",
+            business_id="ui.home.title",
+            context_hash=get_context_hash({"k": "v"}),
         )
 
         with handler.transaction() as cursor:
@@ -422,7 +442,13 @@ if __name__ == "__main__":
                 INSERT INTO th_translations (content_id, lang_code, status, engine_version, context_hash)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (1, 'de', TranslationStatus.PENDING.value, 'n/a', get_context_hash(None))
+                (
+                    1,
+                    "de",
+                    TranslationStatus.PENDING.value,
+                    "n/a",
+                    get_context_hash(None),
+                ),
             )
             # content_id=2 ('world') 请求翻译成德语 (带上下文)
             cursor.execute(
@@ -430,7 +456,13 @@ if __name__ == "__main__":
                 INSERT INTO th_translations (content_id, lang_code, context_hash, status, engine_version)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (2, 'de', get_context_hash({"k": "v"}), TranslationStatus.PENDING.value, 'n/a')
+                (
+                    2,
+                    "de",
+                    get_context_hash({"k": "v"}),
+                    TranslationStatus.PENDING.value,
+                    "n/a",
+                ),
             )
         print("数据准备完成。")
 
@@ -502,7 +534,7 @@ if __name__ == "__main__":
 
         cached_world = handler.get_translation("world", "de", {"k": "v"})
         print(f"  > 缓存查询 'world' 结果: {cached_world}")
-        assert cached_world is None 
+        assert cached_world is None
 
         print("\n所有验证成功！DefaultPersistenceHandler (v1.0 第四次修正版) 已与最终版文档对齐并修复所有问题！")
 
