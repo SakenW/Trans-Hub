@@ -7,12 +7,12 @@ build-backend = "poetry.core.masonry.api"
 
 
 # ==============================================================================
-#  项目元数据与依赖 (Poetry 配置) - v1.0.0 发布版
+#  项目元数据与依赖 (Poetry 配置) - v1.1.0 发布版
 # ==============================================================================
 [tool.poetry]
 # --- 基本信息 ---
 name = "trans-hub"
-version = "1.0.0"
+version = "1.1.0" # <-- 核心修改：版本号已更新
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
@@ -45,11 +45,16 @@ python = "^3.9"
 pydantic = "^2.0"
 structlog = "^23.0"
 translators = "^6.0.1"
+# 核心修改：将这两个库移到核心依赖，因为引擎配置加载需要它们
+pydantic-settings = "^2.3.4"
+python-dotenv = "^1.0.1"
+
 
 # --- 可选依赖 (Extras) ---
+# 现在 openai 依赖更纯粹，只包含 openai 库本身
 [tool.poetry.extras]
-openai = ["openai", "pydantic-settings", "python-dotenv"]
-# all = ["openai", "pydantic-settings", "python-dotenv"]  # 可按需启用
+openai = ["openai"]
+
 
 # ==============================================================================
 #  开发依赖 (仅用于本地开发、测试等环境)
@@ -67,9 +72,9 @@ ruff = "^0.1.0"
 mypy = "^1.5"
 
 # ✅ 可选功能相关（用于完整测试）
+# 核心修改：openai 仍然在这里，以便在开发环境中进行测试
 openai = "^1.37.0"
-pydantic-settings = "^2.3.4"
-python-dotenv = "^1.0.1"
+
 
 # ==============================================================================
 #  开发工具配置
@@ -88,13 +93,14 @@ include_trailing_comma = true
 
 [tool.ruff]
 line-length = 88
+# 保持您之前的 ruff 配置
 extend-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
 ignore = [
     "D100", "D104", "D107",
     "D200", "D203", "D204", "D205",
     "D211", "D212", "D213",
     "D400", "D407", "D413", "D415",
-    "E501",  # ⬅️ 添加这一行，忽略行过长错误
+    "E501",  # ⬅️ 忽略行过长错误
 ]
 
 [tool.mypy]
