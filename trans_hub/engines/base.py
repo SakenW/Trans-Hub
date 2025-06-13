@@ -50,9 +50,7 @@ _ConfigType = TypeVar("_ConfigType", bound=BaseEngineConfig)
 # ==============================================================================
 
 
-class BaseTranslationEngine(
-    ABC, Generic[_ConfigType]
-):  # 基类现在是泛型，并参数化为 _ConfigType
+class BaseTranslationEngine(ABC, Generic[_ConfigType]):  # 基类现在是泛型，并参数化为 _ConfigType
     """翻译引擎的抽象基类。所有具体的翻译引擎实现都必须继承此类。
 
     核心职责：
