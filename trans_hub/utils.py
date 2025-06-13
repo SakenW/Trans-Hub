@@ -2,6 +2,7 @@
 
 本模块包含项目范围内的通用工具函数。
 """
+
 import hashlib
 import json
 from typing import Any, Dict, Optional
@@ -50,7 +51,9 @@ def get_context_hash(context: Optional[Dict[str, Any]]) -> Optional[str]:
 
         return hasher.hexdigest()
 
-    except TypeError:
+    except TypeError as e:  # <-- 修改：捕获原始异常实例
         # 如果 context 包含无法序列化为 JSON 的类型，则抛出异常
         # 这是契约违规，应该在调用此函数之前由 Pydantic 模型等进行校验
-        raise ValueError("Context contains non-serializable data.")
+        raise ValueError(
+            "Context contains non-serializable data."
+        ) from e  # <-- 修改：添加 from e

@@ -34,6 +34,7 @@ class TranslatorsEngine(BaseTranslationEngine):
     VERSION = "1.0.0"
 
     def __init__(self, config: TranslatorsEngineConfig):
+        """初始化 TranslatorsEngine，设置翻译服务提供商。"""
         super().__init__(config)
         if ts is None:
             raise ImportError(
@@ -48,6 +49,21 @@ class TranslatorsEngine(BaseTranslationEngine):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> List[EngineBatchItemResult]:
+        """
+        批量翻译文本内容。
+
+        使用指定的翻译服务将输入文本列表翻译为目标语言。
+        若未提供源语言，默认自动检测。
+
+        参数:
+            texts (List[str]): 需要翻译的文本列表。
+            target_lang (str): 目标语言代码，例如 'en' 或 'zh-CN'。
+            source_lang (Optional[str]): 源语言代码，默认为自动检测。
+            context (Optional[BaseContextModel]): 上下文信息，当前未使用。
+
+        返回:
+            List[EngineBatchItemResult]: 包含翻译结果或错误信息的结果列表。
+        """
         results: List[EngineBatchItemResult] = []
         for text in texts:
             try:
@@ -76,5 +92,6 @@ class TranslatorsEngine(BaseTranslationEngine):
         source_lang: str,
         context: Optional[BaseContextModel] = None,  # context 可以设为可选参数
     ) -> List[EngineBatchItemResult]:
+        """异步版本的 translate_batch，当前使用同步实现包装。"""
         # translators 库也支持异步，但我们 v1.0 暂时保持同步实现
         return self.translate_batch(texts, target_lang, source_lang, context)

@@ -18,6 +18,7 @@ from trans_hub.types import TranslationStatus
 
 
 def test_rate_limiter():
+    """测试 RateLimiter 是否能控制请求速率，确保延迟生效。"""
     log = structlog.get_logger("test_rate_limiter")
     log.info("--- 开始速率限制器功能测试 ---")
     db_file = "transhub_ratelimit_test.db"
@@ -54,6 +55,7 @@ def test_rate_limiter():
 
 
 def test_retry_logic():
+    """测试失败可重试逻辑是否按预期工作。"""
     log = structlog.get_logger("test_retry_logic")
     log.info("--- 开始重试逻辑测试 ---")
     db_file = "transhub_retry_test.db"
@@ -87,6 +89,7 @@ def test_retry_logic():
 
 
 def test_garbage_collection():
+    """测试 GC 是否能正确清理过期内容和孤立源。"""
     log = structlog.get_logger("test_gc")
     log.info("--- 开始垃圾回收 (GC) 测试 ---")
     db_file = "transhub_gc_test.db"
@@ -135,6 +138,7 @@ def test_garbage_collection():
 
 
 def test_openai_engine_flow():
+    """测试 OpenAI 引擎完整工作流，包括配置、请求与结果验证。"""
     log = structlog.get_logger("test_openai_engine")
     if "openai" not in ENGINE_REGISTRY:
         log.warning("OpenAI 引擎未被加载，跳过测试。")
@@ -184,6 +188,7 @@ def test_openai_engine_flow():
 
 
 def main():
+    """运行全部功能测试并输出测试结果日志。"""
     if load_dotenv():
         print("✅ .env 文件已加载。")
     else:

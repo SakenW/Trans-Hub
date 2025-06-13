@@ -29,6 +29,8 @@ else:
 
 # 定义一个与我们项目中 OpenAIEngineConfig 完全相同的配置模型
 class TestConfig(BaseSettings):
+    """用于测试 .env 文件中的 OpenAI 配置加载是否正常。"""
+
     model_config = SettingsConfigDict(
         env_prefix="TH_OPENAI_", env_file=".env", extra="ignore"
     )

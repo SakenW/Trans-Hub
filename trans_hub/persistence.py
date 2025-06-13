@@ -4,6 +4,8 @@
 它实现了 `PersistenceHandler` 接口，并负责与数据库进行所有交互。
 此版本已完全根据最终版文档的数据库 Schema 和 DTOs 重写。
 """
+
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -293,7 +295,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 assert cursor.rowcount == expired_sources_count
                 logger.info("过时的源记录已删除。")
             else:
-                logger.info(f"发现 {expired_sources_count} 条可删除的过时源记录 (dry_run)。")
+                logger.info(
+                    f"发现 {expired_sources_count} 条可删除的过时源记录 (dry_run)。"
+                )
 
             # --- 阶段 2: 清理孤立的 th_content 记录 ---
             # 一个 `th_content` 记录是孤立的，当且仅当：
@@ -330,7 +334,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 assert cursor.rowcount == orphan_content_count
                 logger.info("孤立的内容记录已删除。")
             else:
-                logger.info(f"发现 {orphan_content_count} 条可删除的孤立内容记录 (dry_run)。")
+                logger.info(
+                    f"发现 {orphan_content_count} 条可删除的孤立内容记录 (dry_run)。"
+                )
 
         logger.info(f"垃圾回收完成。统计: {stats}")
         return stats
@@ -465,7 +471,9 @@ if __name__ == "__main__":
             assert world_translation["status"] == "FAILED"
             assert world_translation["translation_content"] is None
 
-        print("\n所有验证成功！DefaultPersistenceHandler (v0.1) 已与最终版文档完全对齐！")
+        print(
+            "\n所有验证成功！DefaultPersistenceHandler (v0.1) 已与最终版文档完全对齐！"
+        )
 
     except Exception:
         # 使用 exc_info=True 会打印出完整的堆栈跟踪，便于调试

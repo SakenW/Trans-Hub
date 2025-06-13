@@ -71,7 +71,7 @@ class Coordinator:
             )
 
         # 2. 从注册表中获取引擎的类
-        EngineClass = ENGINE_REGISTRY[self.active_engine_name]
+        engine_class = ENGINE_REGISTRY[self.active_engine_name]
 
         # 3. 从总配置中获取该引擎的特定配置数据
         engine_config_data = getattr(
@@ -82,12 +82,12 @@ class Coordinator:
 
         # 4. 使用引擎自己的 CONFIG_MODEL 来创建其实例化的配置对象
         # Pydantic 会自动处理字典到模型的转换和校验
-        engine_config_instance = EngineClass.CONFIG_MODEL(
+        engine_config_instance = engine_class.CONFIG_MODEL(
             **engine_config_data.model_dump()
         )
 
         # 5. 创建引擎实例并保存
-        self.active_engine: BaseTranslationEngine = EngineClass(
+        self.active_engine: BaseTranslationEngine = engine_class(
             config=engine_config_instance
         )
         # --- 动态创建结束 ---
