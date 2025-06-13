@@ -1,22 +1,17 @@
-"""trans_hub/persistence.py (v1.0 Final - 第四次修正版)
-
-本模块提供了持久化处理器的具体实现。
-它实现了 `PersistenceHandler` 接口，并负责与数据库进行所有交互。
-此版本已修复了 `sqlite3.Cursor` 不支持上下文管理协议的问题。
-"""
+# trans_hub/persistence.py (最终最终修正版 - 修正 Ruff 警告)
 
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+
+# 导入顺序/格式修正：I001
+from datetime import datetime, timedelta, timezone  # 放在其他 from 导入之后
 from typing import Any, Dict, Generator, List, Optional
 
 import structlog
 
-# [变更] 导入已更新的 DTOs 和常量
 from trans_hub.interfaces import PersistenceHandler
-from trans_hub.types import GLOBAL_CONTEXT_SENTINEL  # 导入全局上下文哨兵值
-from trans_hub.types import (
+from trans_hub.types import (  # 移除未使用的导入; GLOBAL_CONTEXT_SENTINEL
     ContentItem,
     SourceUpdateResult,
     TranslationResult,
@@ -34,12 +29,10 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
     def __init__(self, db_path: str):
         """初始化处理器并建立数据库连接。
-        连接在对象生命周期内被复用，避免了频繁创建和销毁连接的开销。
 
         Args:
         ----
             db_path: SQLite 数据库文件的路径。
-
         """
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
@@ -83,7 +76,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
         此方法主要操作 th_content 和 th_sources 表。
         """
         with self.transaction() as cursor:
-            # 步骤 1: 查找或创建内容记录 (`th_content`)
             cursor.execute("SELECT id FROM th_content WHERE value = ?", (text_content,))
             content_row = cursor.fetchone()
 
@@ -98,7 +90,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 is_newly_created = True
                 logger.debug(f"创建了新的内容记录, content_id={content_id}")
 
-            # 步骤 2: 使用 UPSERT 语法高效地更新或创建来源记录 (`th_sources`)
             sql = """
                 INSERT INTO th_sources (business_id, content_id, context_hash, last_seen_at)
                 VALUES (?, ?, ?, ?)
@@ -152,7 +143,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             update_params = [TranslationStatus.TRANSLATING.value, now] + translation_ids
             cursor.execute(update_sql, update_params)
 
-        # 事务已提交，现在在事务外部获取 ContentItem 详细信息
         for i in range(0, len(translation_ids), batch_size):
             batch_ids = translation_ids[i : i + batch_size]
             get_details_sql = f"""
@@ -161,7 +151,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 JOIN th_content c ON tr.content_id = c.id
                 WHERE tr.id IN ({','.join('?' for _ in batch_ids)})
             """
-            # 核心修正：直接获取游标，不再使用 with 语句
             read_cursor = self.connection.cursor()
             read_cursor.execute(get_details_sql, batch_ids)
 
@@ -218,7 +207,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 logger.info(f"成功更新了 {cursor.rowcount} 条翻译记录。")
 
     def _get_content_id_from_value(self, value: str) -> Optional[int]:
-        """辅助方法，用于在 save_translations 中查找 content_id。"""
+        """辅助方法，用于根据内容值查找其在 `th_content` 表中的 ID。"""
         cursor = self.connection.cursor()
         cursor.execute("SELECT id FROM th_content WHERE value = ?", (value,))
         row = cursor.fetchone()
@@ -237,10 +226,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
         context_hash_for_query = _get_context_hash_util(context)
 
-        # 核心修正：直接获取游标，不再使用 with 语句
         cursor = self.connection.cursor()
         try:
-            # 步骤 1: 查找内容 ID
             cursor.execute("SELECT id FROM th_content WHERE value = ?", (text_content,))
             content_row = cursor.fetchone()
             if not content_row:
@@ -248,7 +235,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 return None
             content_id = content_row["id"]
 
-            # 步骤 2: 查找对应的翻译记录
             query_sql = """
                 SELECT
                     tr.translation_content,
@@ -259,7 +245,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 WHERE tr.content_id = ?
                   AND tr.lang_code = ?
                   AND tr.context_hash = ?
-                  AND tr.status = ? -- 只查询已翻译的记录
+                  AND tr.status = ?
             """
             cursor.execute(
                 query_sql,
@@ -273,7 +259,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             translation_row = cursor.fetchone()
 
             if translation_row:
-                # 缓存命中时，尝试从 th_sources 获取 business_id
                 retrieved_business_id = self.get_business_id_for_content(
                     content_id=content_id, context_hash=context_hash_for_query
                 )
@@ -284,8 +269,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
                     target_lang=target_lang,
                     status=TranslationStatus.TRANSLATED,
                     engine=translation_row["engine"],
-                    from_cache=True,  # 明确标记来自缓存
-                    business_id=retrieved_business_id,  # 从 th_sources 获取
+                    from_cache=True,
+                    business_id=retrieved_business_id,
                     context_hash=context_hash_for_query,
                 )
             logger.debug(
@@ -293,15 +278,12 @@ class DefaultPersistenceHandler(PersistenceHandler):
             )
             return None
         finally:
-            # 在这里可以显式关闭游标，但对于单次查询通常不是必需的，连接关闭时会自动处理
-            # cursor.close()
-            pass
+            pass  # 显式地什么都不做，因为游标通常不需要手动关闭
 
     def get_business_id_for_content(
         self, content_id: int, context_hash: str
     ) -> Optional[str]:
-        """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
-        # 核心修正：直接获取游标，不再使用 with 语句
+        """根据 `content_id` 和 `context_hash` 从 `th_sources` 表获取 `business_id`。"""
         cursor = self.connection.cursor()
         try:
             cursor.execute(
@@ -314,7 +296,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             row = cursor.fetchone()
             return row["business_id"] if row else None
         finally:
-            # cursor.close()
             pass
 
     def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
@@ -333,7 +314,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
         )
 
         with self.transaction() as cursor:
-            # --- 阶段 1: 清理过时的 th_sources 记录 ---
             select_expired_sources_sql = (
                 "SELECT COUNT(*) FROM th_sources WHERE last_seen_at < ?"
             )
@@ -352,7 +332,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             else:
                 logger.info(f"发现 {expired_sources_count} 条可删除的过时源记录 (dry_run)。")
 
-            # --- 阶段 2: 清理孤立的 th_content 记录 ---
             select_orphan_content_sql = """
                 SELECT COUNT(c.id)
                 FROM th_content c
@@ -395,9 +374,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             self._conn = None
 
 
-# ==============================================================================
-#  模块自测试代码 (v0.1)
-# ==============================================================================
 if __name__ == "__main__":
     import os
     import sys
@@ -436,7 +412,6 @@ if __name__ == "__main__":
         )
 
         with handler.transaction() as cursor:
-            # content_id=1 ('hello') 请求翻译成德语
             cursor.execute(
                 """
                 INSERT INTO th_translations (content_id, lang_code, status, engine_version, context_hash)
@@ -450,7 +425,6 @@ if __name__ == "__main__":
                     get_context_hash(None),
                 ),
             )
-            # content_id=2 ('world') 请求翻译成德语 (带上下文)
             cursor.execute(
                 """
                 INSERT INTO th_translations (content_id, lang_code, context_hash, status, engine_version)
@@ -478,7 +452,7 @@ if __name__ == "__main__":
         assert all_tasks[1].value == "world"
         assert all_tasks[1].context_hash == get_context_hash({"k": "v"})
 
-        print("\n" + "=" * 20 + " 步骤 3: 模拟翻译并保存结果 " + "=" * 20)
+        print("\n" + "=" * 20 + " 步骤 3: 保存翻译结果 " + "=" * 20)
         mock_results = [
             TranslationResult(
                 original_content="hello",

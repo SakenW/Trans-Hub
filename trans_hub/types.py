@@ -1,13 +1,17 @@
-"""trans_hub/types.py (v0.1 - 最终最终修正版)
+"""trans_hub/types.py (v0.1 - 最终最终修正版 - 修正 Ruff 警告)
 
 本模块定义了 Trans-Hub 引擎的核心数据传输对象 (DTOs)、枚举和数据结构。
 它是应用内部数据契约的“单一事实来源”，已根据最终版文档进行更新。
 所有与外部或模块间交互的数据结构都应在此定义。
 """
 from enum import Enum
-from typing import Any, Dict, Optional, Union  # 确保导入 Dict 和 Any
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
+
+# 移除未使用的导入
+# from typing import Dict, Any
+
 
 # ==============================================================================
 #  枚举 (Enumerations)

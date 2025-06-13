@@ -209,9 +209,8 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
     ) -> List[EngineBatchItemResult]:
         """异步批量翻译文本。
         
-        强烈建议在这里实现真正的异步 API 调用（例如使用 `aiohttp` 或 SDK 的异步客户端）。
-        如果你的 SDK 提供了异步客户端，则这里应该使用 `await self.client.atranslate(...)`。
-        为了示例简单，这里仅为占位符。
+        强烈建议在这里实现真正的异步 API 调用（例如使用 `aiohttp` 或 SDK 的异步客户端），
+        以避免在未来的异步工作流中阻塞事件循环。
         """
         logger.warning("AwesomeEngine 的异步版本尚未实现，将调用同步方法。这在生产环境中可能会阻塞事件循环。")
         # ⚠️ 注意: 在实际生产环境中，请实现真正的异步逻辑，例如：
@@ -534,3 +533,5 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
                 
         return results
 ```
+
+---

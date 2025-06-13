@@ -16,7 +16,7 @@
 ## ✨ 核心特性
 
 *   **零配置启动**: 内置基于 `translators` 库的免费翻译引擎，实现真正的“开箱即用”。
-*   **持久化缓存**: 所有翻译结果都会被自动存储在本地数据库（默认SQLite）中。重复的翻译请求会立即从缓存返回，**`Coordinator.process_pending_translations()` 方法将不会再次处理已成功缓存的任务，从而极大地降低了API调用成本和响应时间。**
+*   **持久化缓存**: 所有翻译结果都会被自动存储在本地数据库（默认SQLite）中。`Coordinator.process_pending_translations()` **只会处理待办（PENDING）或失败（FAILED）的任务**，对于已成功缓存的翻译，它不会重复处理，从而极大地降低了API调用成本和响应时间。
 *   **🔌 真正的插件化架构**:
     *   **按需安装**: 核心库极其轻量。当你想使用更强大的引擎（如 OpenAI）时，只需安装其可选依赖即可。系统会自动检测并启用它们。
     *   **轻松扩展**: 提供清晰的基类，可以方便地开发和接入自定义的翻译引擎。
@@ -43,22 +43,22 @@ pip install trans-hub
 
 ### 2. 编写你的第一个翻译脚本
 
-创建一个 Python 文件（例如 `main.py`）。**你不需要创建 `.env` 文件或进行任何 API 配置！**
+创建一个 Python 文件（例如 `quick_start.py`）。**你不需要创建 `.env` 文件或进行任何 API 配置！**
 
 ```python
-# main.py (简化示例)
+# quick_start.py
 import os
-import sys
 import structlog
 
-# 导入 Trans-Hub 的核心组件
+# 第三方库导入
 from dotenv import load_dotenv
-from trans_hub.config import TransHubConfig, EngineConfigs
+
+# 本地库导入
+from trans_hub.config import EngineConfigs, TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
-from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.logging_config import setup_logging
-from trans_hub.types import TranslationStatus # 从 types 导入 TranslationStatus
+from trans_hub.persistence import DefaultPersistenceHandler
 
 # 获取一个 logger
 log = structlog.get_logger()
@@ -68,13 +68,12 @@ def initialize_trans_hub():
     setup_logging(log_level="INFO")
 
     DB_FILE = "my_translations.db"
-    # 每次运行前删除旧数据库文件，确保干净的演示环境 (仅限演示)
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-        log.info(f"已删除旧数据库文件: {DB_FILE}", db_path=DB_FILE)
     
-    log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
-    apply_migrations(DB_FILE)
+    # 在生产环境中，数据库迁移通常只在部署时执行一次。
+    # 这里我们简化处理，如果数据库文件不存在，则创建并迁移。
+    if not os.path.exists(DB_FILE):
+        log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
+        apply_migrations(DB_FILE)
     
     handler = DefaultPersistenceHandler(db_path=DB_FILE)
     
@@ -96,7 +95,6 @@ def main():
     coordinator = initialize_trans_hub()
     try:
         text_to_translate = "Hello, world!"
-        # 使用标准的 IETF 语言标签
         target_language_code = "zh-CN"
 
         log.info("正在登记翻译任务", text=text_to_translate, lang=target_language_code)
@@ -117,12 +115,12 @@ def main():
                 "翻译完成！",
                 original=first_result.original_content,
                 translation=first_result.translated_content,
-                status=first_result.status,
+                status=first_result.status.name,
                 engine=first_result.engine,
                 business_id=first_result.business_id # 显示关联的业务ID
             )
         else:
-            log.warning("没有需要处理的新任务（可能已翻译过）。")
+            log.warning("没有需要处理的新任务（可能已翻译过，这是缓存的体现）。")
 
     except Exception as e:
         log.critical("程序运行中发生未知严重错误！", exc_info=True)
@@ -138,20 +136,23 @@ if __name__ == "__main__":
 
 在你的终端中运行脚本：
 ```bash
-python main.py
+python quick_start.py
 ```
+第一次运行时，它会进行实际的翻译。
 
-你将会看到类似下面这样的输出，清晰地展示了从原文到译文的整个过程：
-
 ```
-2025-06-13T... [info     ] 已删除旧数据库文件: my_translations.db
-2025-06-13T... [info     ] 数据库不存在，正在创建并迁移...
-2025-06-13T... [info     ] 正在登记翻译任务                       text=Hello, world! lang=zh-CN
-2025-06-13T... [info     ] 为 content_id=1 确保了 1 个新的 PENDING 任务。
-2025-06-13T... [info     ] 正在处理 'zh-CN' 的待翻译任务...
-2025-06-13T... [info     ] 翻译完成！                           original=Hello, world! translation=你好世界！ status=TRANSLATED engine=translators business_id=app.greeting.hello_world
+... [info     ] 数据库不存在，正在创建并迁移...
+... [info     ] 正在登记翻译任务                       text=Hello, world! lang=zh-CN
+... [info     ] 正在处理 'zh-CN' 的待翻译任务...
+... [info     ] 翻译完成！                           original=Hello, world! translation=你好世界！ status=TRANSLATED engine=translators business_id=app.greeting.hello_world
 ```
-就是这么简单！你已经成功地使用 `Trans-Hub` 完成了你的第一个翻译任务。
+再次运行 `python quick_start.py`（不删除数据库文件），你将看到 `Trans-Hub` 的缓存机制生效：
+```
+... [info     ] 正在登记翻译任务                       text=Hello, world! lang=zh-CN
+... [info     ] 正在处理 'zh-CN' 的待翻译任务...
+... [warning  ] 没有需要处理的新任务（可能已翻译过，这是缓存的体现）。
+```
+就是这么简单！`Trans-Hub` 自动为你处理了缓存。
 
 ---
 

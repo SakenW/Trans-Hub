@@ -344,9 +344,14 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
     from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
     from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
     
+    # (可选) 定义你的引擎专用的 Context 模型
+    class YourContext(BaseContextModel):
+        formality: str = "default"
+    
     # 核心：指定泛型参数 YourEngineConfig
     class YourEngine(BaseTranslationEngine[YourEngineConfig]):
         CONFIG_MODEL = YourEngineConfig
+        CONTEXT_MODEL = YourContext # 绑定上下文模型 (如果定义了)
         VERSION = "1.0.0"
         REQUIRES_SOURCE_LANG = False # 根据引擎特性设置
         
@@ -360,9 +365,12 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
             texts: List[str],
             target_lang: str,
             source_lang: Optional[str] = None,
-            context: Optional[Dict[str, Any]] = None, # 注意这里的 context 类型
+            context: Optional[YourContext] = None, # <-- 注意这里 context 的类型是 YourContext 实例
         ) -> List[EngineBatchItemResult]:
             # ... 实现同步翻译逻辑 ...
+            # Coordinator 会自动将上层应用传入的 context 字典转换为 YourContext 实例
+            # 你可以安全地访问 context.formality
+            formality_level = context.formality if context else "default"
             pass
             
         async def atranslate_batch(
@@ -370,7 +378,7 @@ TH_OPENAI_MODEL="gpt-3.5-turbo"
             texts: List[str],
             target_lang: str,
             source_lang: Optional[str] = None,
-            context: Optional[Dict[str, Any]] = None, # 注意这里的 context 类型
+            context: Optional[YourContext] = None, # <-- 注意这里 context 的类型是 YourContext 实例
         ) -> List[EngineBatchItemResult]:
             # ... 实现异步翻译逻辑 (推荐使用真正的异步客户端) ...
             pass

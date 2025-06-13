@@ -1,10 +1,9 @@
-# inspect_db.py (最终修正版)
+# inspect_db.py (最终修正版 - 修正 Ruff 警告)
 # 标准库 logging 配置
 import logging
 import os
 import sqlite3
 import sys  # 导入 sys 模块，用于日志输出流
-from datetime import datetime
 
 import structlog
 from structlog.dev import ConsoleRenderer
@@ -17,6 +16,10 @@ from structlog.processors import (
 
 # 导入 structlog 必要的处理器
 from structlog.stdlib import add_log_level, add_logger_name
+
+# 移除未使用的导入
+# from datetime import datetime
+
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)  # 将标准日志输出到控制台
 logging.getLogger("pydantic").setLevel(logging.INFO)  # 避免 Pydantic 大量日志
@@ -38,10 +41,10 @@ structlog.configure(
 )
 
 # 获取一个 logger
-log = structlog.get_logger(__name__)  # 使用 __name__ 作为 logger 名称
+log = structlog.get_logger(__name__)
 
 
-# 数据库文件路径，与 context_demo.py 使用的保持一致
+# 数据库文件路径，与 main.py 使用的保持一致
 DB_FILE = "my_complex_trans_hub_demo.db"
 
 
@@ -58,7 +61,6 @@ def inspect_database():
         log.info(f"成功连接到数据库: {DB_FILE}")
 
         # SQL 查询：LEFT JOIN th_translations, th_content, th_sources
-        # 使用 LEFT JOIN th_sources 是为了即使没有 business_id 也能获取到翻译记录
         query = """
         SELECT
             t.id AS translation_id,
@@ -84,69 +86,86 @@ def inspect_database():
         rows = cursor.fetchall()
 
         print("\n" + "=" * 80)
-        print("                 Trans-Hub 数据库翻译记录概览与解读")
-        print("=" * 80 + "\n")
+        print("                 Trans-Hub 数据库翻译记录概览与解读")  # <-- 修正 F541
+        print("=" * 80 + "\n")  # <-- 修正 F541
 
         if not rows:
-            print("数据库中没有翻译记录。请运行 main.py 以生成数据。")
+            print("数据库中没有翻译记录。请运行 main.py 以生成数据。")  # <-- 修正 F541
             return
 
         for i, row in enumerate(rows):
-            print(f"--- 记录 {i+1} ---")
-            print(f"原始数据库行内容 (sqlite3.Row 对象):")
-            # 核心修正：使用 row.keys() 迭代列名，然后通过键访问值
-            for key in row.keys():  # <-- 修正点：使用 .keys()
-                print(f"  {key}: {row[key]}")  # <-- 修正点：通过键访问值
+            print(f"--- 记录 {i+1} ---")  # <-- 修正 F541: 保留为 f-string
+            print("原始数据库行内容 (sqlite3.Row 对象):")  # <-- 修正 F541
+            for key in row.keys():
+                print(f"  {key}: {row[key]}")  # <-- 修正 F541: 保留为 f-string
 
-            print("\n解读:")
-            print(f"  翻译任务ID (translation_id): {row['translation_id']}")
-            print(f"    - 这是该翻译任务在 `th_translations` 表中的唯一标识。")
-            print(f"  原始文本 (original_content): '{row['original_content']}'")
-            print(f"    - 该文本是所有翻译的源头，存储在 `th_content` 表中，保证了文本内容的唯一性。")
-            print(f"  目标语言 (target_language): '{row['target_language']}'")
-            print(f"    - 原始文本被翻译成的目标语言代码，遵循 IETF 语言标签（如 'zh-CN', 'fr'）。")
-            print(f"  上下文哈希 (context_hash): '{row['context_hash']}'")
-            print(f"    - 如果文本在不同场景下有不同译法，这里会是上下文的哈希值。`__GLOBAL__` 表示无特定上下文。")
+            print("\n解读:")  # <-- 修正 F541
+            print(
+                f"  翻译任务ID (translation_id): {row['translation_id']}"
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 这是该翻译任务在 `th_translations` 表中的唯一标识。")  # <-- 修正 F541
+            print(
+                f"  原始文本 (original_content): '{row['original_content']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 该文本是所有翻译的源头，存储在 `th_content` 表中，保证了文本内容的唯一性。")  # <-- 修正 F541
+            print(
+                f"  目标语言 (target_language): '{row['target_language']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 原始文本被翻译成的目标语言代码，遵循 IETF 语言标签（如 'zh-CN', 'fr'）。")  # <-- 修正 F541
+            print(
+                f"  上下文哈希 (context_hash): '{row['context_hash']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print(
+                "    - 如果文本在不同场景下有不同译法，这里会是上下文的哈希值。`__GLOBAL__` 表示无特定上下文。"
+            )  # <-- 修正 F541
             print(
                 f"  翻译结果 (translated_text): '{row['translated_text'] if row['translated_text'] else '暂无翻译结果'}'"
-            )
-            print(f"    - 翻译引擎返回的最终译文。如果任务状态不是 'TRANSLATED'，则可能为 `None`。")
-            print(f"  翻译状态 (translation_status): '{row['translation_status']}'")
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 翻译引擎返回的最终译文。如果任务状态不是 'TRANSLATED'，则可能为 `None`。")  # <-- 修正 F541
             print(
-                f"    - 翻译任务的当前生命周期状态：\n      - `PENDING`: 待处理，等待翻译引擎拾取。\n      - `TRANSLATING`: 正在处理，已提交给引擎。\n      - `TRANSLATED`: 已成功翻译。\n      - `FAILED`: 翻译失败且重试次数耗尽。\n      - `APPROVED`: 人工审核通过的最终版本。"
-            )
-            print(f"  翻译引擎 (translation_engine): '{row['translation_engine']}'")
-            print(f"    - 执行此次翻译的引擎名称（例如 'translators', 'openai'）。")
-            print(f"  引擎版本 (engine_version): '{row['engine_version']}'")
-            print(f"    - 使用的翻译引擎的具体版本号。")
+                f"  翻译状态 (translation_status): '{row['translation_status']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print(
+                "    - 翻译任务的当前生命周期状态：\n      - `PENDING`: 待处理，等待翻译引擎拾取。\n      - `TRANSLATING`: 正在处理，已提交给引擎。\n      - `TRANSLATED`: 已成功翻译。\n      - `FAILED`: 翻译失败且重试次数耗尽。\n      - `APPROVED`: 人工审核通过的最终版本。"
+            )  # <-- 修正 F541
+            print(
+                f"  翻译引擎 (translation_engine): '{row['translation_engine']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 执行此次翻译的引擎名称（例如 'translators', 'openai'）。")  # <-- 修正 F541
+            print(
+                f"  引擎版本 (engine_version): '{row['engine_version']}'"
+            )  # <-- 修正 F541: 保留为 f-string
+            print("    - 使用的翻译引擎的具体版本号。")  # <-- 修正 F541
 
             business_id = row["business_id"]
             if business_id:
-                print(f"  业务标识符 (business_id): '{business_id}'")
-                print(f"    - 上层应用定义的唯一业务ID，用于追踪此翻译在业务中的位置，存储在 `th_sources` 表。")
+                print(
+                    f"  业务标识符 (business_id): '{business_id}'"
+                )  # <-- 修正 F541: 保留为 f-string
+                print(
+                    "    - 上层应用定义的唯一业务ID，用于追踪此翻译在业务中的位置，存储在 `th_sources` 表。"
+                )  # <-- 修正 F541
                 print(
                     f"  来源最后活跃时间 (source_last_seen_at): '{row['source_last_seen_at']}'"
-                )
+                )  # <-- 修正 F541: 保留为 f-string
                 print(
-                    f"    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。"
-                )
+                    "    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。"
+                )  # <-- 修正 F541
             else:
-                print(f"  业务标识符 (business_id): 无 (此翻译未关联业务ID，或其 `th_sources` 记录已被GC。)")
                 print(
-                    f"    - 原始请求可能没有提供 `business_id`，或者此翻译是即席翻译而没有关联 `business_id`，或者在 `th_sources` 表中对应的记录已被垃圾回收清理。"
-                )
+                    "  业务标识符 (business_id): 无 (此翻译未关联业务ID，或其 `th_sources` 记录已被GC。)"
+                )  # <-- 修正 F541
+                print(
+                    "    - 原始请求可能没有提供 `business_id`，或者此翻译是即席翻译而没有关联 `business_id`，或者在 `th_sources` 表中对应的记录已被垃圾回收清理。"
+                )  # <-- 修正 F541
 
-            print("\n" + "-" * 80 + "\n")
+            print("\n" + "-" * 80 + "\n")  # <-- 修正 F541
 
     except sqlite3.Error as e:
         log.critical(f"数据库操作失败: {e}", exc_info=True)
-    except Exception as e:
-        log.critical(f"程序运行中发生未知错误: {e}", exc_info=True)
+    except Exception:  # <-- 修正 F841: 移除未使用的变量 e
+        log.critical("程序运行中发生未知错误！", exc_info=True)
     finally:
         if conn:
+            log.info("数据库连接已关闭。")  # <-- 修正 F541
             conn.close()
-            log.info("数据库连接已关闭。")
-
-
-if __name__ == "__main__":
-    inspect_database()

@@ -1,21 +1,17 @@
-# main.py (最终最终修正版)
+# main.py (最终最终修正版 - 再次修正 Ruff 警告)
 import os
-import sys
-import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+# 第三方库导入
 import structlog
-
-# 导入 Trans-Hub 的核心组件
 from dotenv import load_dotenv
 
+# 本地库导入
 from trans_hub.config import EngineConfigs, TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
-from trans_hub.types import TranslationStatus  # 从 types 导入 TranslationStatus
 
 # 获取一个 logger
 log = structlog.get_logger()
@@ -29,7 +25,6 @@ GC_RETENTION_DAYS_FOR_DEMO = 0
 def initialize_trans_hub(db_file: str, gc_retention_days: int) -> Coordinator:
     """一个标准的初始化函数，返回一个配置好的 Coordinator 实例。"""
     setup_logging(log_level="INFO")  # 保持 INFO 级别，除非需要详细调试
-    # setup_logging(log_level="DEBUG") # 如果需要详细调试，请解除注释
 
     # 每次运行前，删除旧数据库文件，确保一个干净的演示环境
     if os.path.exists(db_file):
@@ -85,13 +80,13 @@ def request_and_process(
             log.info(
                 "翻译结果：",
                 original=result.original_content,
-                context=result.context_hash,  # context_hash 现在总是字符串
+                context=result.context_hash,
                 translation=result.translated_content,
                 status=result.status.name,
                 engine=result.engine,
                 business_id=result.business_id
                 if result.business_id
-                else "无 business_id",  # 正确显示 business_id
+                else "无 business_id",
                 source=source_info,
             )
     else:
@@ -226,7 +221,7 @@ def main():
         log.info("GC 干跑报告：", report=gc_report_dry_run)
         if gc_report_dry_run["deleted_sources"] > 0:
             log.info(f"预估将删除 {gc_report_dry_run['deleted_sources']} 条源记录。")
-            log.info(f"其中应该包含 'legacy.feature.old_text'。")
+            log.info("其中应该包含 'legacy.feature.old_text'。")
         else:
             log.info("没有源记录被报告为可删除。这可能意味着所有业务ID的last_seen_at都是最新。")
 
@@ -288,7 +283,7 @@ def main():
         else:
             log.warning("重新请求的任务没有结果。")
 
-    except Exception as e:
+    except Exception:
         log.critical("程序运行中发生未知严重错误！", exc_info=True)
     finally:
         if coordinator:
