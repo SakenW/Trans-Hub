@@ -36,7 +36,10 @@ class PersistenceHandler(Protocol):
     """同步持久化处理器的接口协议。"""
 
     def update_or_create_source(
-        self, text_content: str, business_id: str, context_hash: str  # <-- 修正点：改为 str
+        self,
+        text_content: str,
+        business_id: str,
+        context_hash: str,  # <-- 修正点：改为 str
     ) -> SourceUpdateResult:
         """根据 business_id 更新或创建一个源记录。
         参数 `text` 已更名为 `text_content` 以保持命名一致性。
@@ -80,7 +83,9 @@ class PersistenceHandler(Protocol):
         """关闭数据库连接等资源。"""
         ...
 
-    def transaction(self) -> ContextManager[Any]:  # <-- 修正点：使用 typing.ContextManager
+    def transaction(
+        self,
+    ) -> ContextManager[Any]:  # <-- 修正点：使用 typing.ContextManager
         """提供一个同步数据库事务上下文管理器。"""
         ...
 
@@ -95,7 +100,10 @@ class AsyncPersistenceHandler(Protocol):
     """
 
     async def update_or_create_source(
-        self, text_content: str, business_id: str, context_hash: str  # <-- 修正点：改为 str
+        self,
+        text_content: str,
+        business_id: str,
+        context_hash: str,  # <-- 修正点：改为 str
     ) -> SourceUpdateResult:
         """根据 business_id 更新或创建一个源记录。"""
         ...

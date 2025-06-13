@@ -115,7 +115,9 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         self,
         texts: List[str],
         target_lang: str,
-        source_lang: Optional[str] = None,  # 核心修复：与基类签名保持一致，改为 Optional[str]
+        source_lang: Optional[
+            str
+        ] = None,  # 核心修复：与基类签名保持一致，改为 Optional[str]
         context: Optional[BaseContextModel] = None,
     ) -> List[EngineBatchItemResult]:
         """异步版本的 translate_batch，当前使用同步实现包装。

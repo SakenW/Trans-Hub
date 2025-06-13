@@ -64,7 +64,9 @@ class Coordinator:
             config.engine_configs, self.active_engine_name, None
         )
         if not engine_config_data:
-            raise ValueError(f"在配置中未找到活动引擎 '{self.active_engine_name}' 的配置。")
+            raise ValueError(
+                f"在配置中未找到活动引擎 '{self.active_engine_name}' 的配置。"
+            )
 
         engine_config_instance = engine_class.CONFIG_MODEL(
             **engine_config_data.model_dump()
@@ -104,7 +106,9 @@ class Coordinator:
             else self.config.retry_policy.initial_backoff
         )
 
-        logger.info(f"开始处理 '{target_lang}' 的待翻译任务 (max_retries={max_retries})")
+        logger.info(
+            f"开始处理 '{target_lang}' 的待翻译任务 (max_retries={max_retries})"
+        )
 
         content_batches = self.handler.stream_translatable_items(
             lang_code=target_lang,
@@ -141,7 +145,9 @@ class Coordinator:
                     )
 
                     if not has_retryable_errors:
-                        logger.info(f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。")
+                        logger.info(
+                            f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。"
+                        )
                         break
 
                     logger.warning(
@@ -163,7 +169,9 @@ class Coordinator:
                     logger.info(f"退避 {backoff_time:.2f} 秒后重试...")
                     time.sleep(backoff_time)
                 else:
-                    logger.error(f"已达到最大重试次数 ({max_retries})，放弃当前批次的重试。")
+                    logger.error(
+                        f"已达到最大重试次数 ({max_retries})，放弃当前批次的重试。"
+                    )
 
             final_results_to_save: List[TranslationResult] = []
             for item, engine_result in zip(batch, engine_results):
@@ -330,7 +338,8 @@ class Coordinator:
         for code in lang_codes:
             if not lang_code_pattern.match(code):
                 raise ValueError(
-                    f"提供的语言代码 '{code}' 格式无效。 " "请使用标准格式，例如 'en', 'de', 'zh-CN'。"
+                    f"提供的语言代码 '{code}' 格式无效。 "
+                    "请使用标准格式，例如 'en', 'de', 'zh-CN'。"
                 )
 
     def close(self):

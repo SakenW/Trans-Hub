@@ -44,7 +44,9 @@ def find_project_root() -> Path:
         if (parent / "pyproject.toml").exists():
             log.debug("项目根目录已找到。", root_path=str(parent))
             return parent
-    raise FileNotFoundError("无法找到项目根目录 (pyproject.toml 文件未找到)。请确保从项目内部运行此脚本。")
+    raise FileNotFoundError(
+        "无法找到项目根目录 (pyproject.toml 文件未找到)。请确保从项目内部运行此脚本。"
+    )
 
 
 # --- 动态构建数据库文件路径 ---
@@ -114,15 +116,23 @@ def inspect_database():
             print(f"  翻译任务ID (translation_id): {row['translation_id']}")
             print("    - 这是该翻译任务在 `th_translations` 表中的唯一标识。")
             print(f"  原始文本 (original_content): '{row['original_content']}'")
-            print("    - 该文本是所有翻译的源头，存储在 `th_content` 表中，保证了文本内容的唯一性。")
+            print(
+                "    - 该文本是所有翻译的源头，存储在 `th_content` 表中，保证了文本内容的唯一性。"
+            )
             print(f"  目标语言 (target_language): '{row['target_language']}'")
-            print("    - 原始文本被翻译成的目标语言代码，遵循 IETF 语言标签（如 'zh-CN', 'fr'）。")
+            print(
+                "    - 原始文本被翻译成的目标语言代码，遵循 IETF 语言标签（如 'zh-CN', 'fr'）。"
+            )
             print(f"  上下文哈希 (context_hash): '{row['context_hash']}'")
-            print("    - 如果文本在不同场景下有不同译法，这里会是上下文的哈希值。`__GLOBAL__` 表示无特定上下文。")
+            print(
+                "    - 如果文本在不同场景下有不同译法，这里会是上下文的哈希值。`__GLOBAL__` 表示无特定上下文。"
+            )
             print(
                 f"  翻译结果 (translated_text): '{row['translated_text'] if row['translated_text'] else '暂无翻译结果'}'"
             )
-            print("    - 翻译引擎返回的最终译文。如果任务状态不是 'TRANSLATED'，则可能为 `None`。")
+            print(
+                "    - 翻译引擎返回的最终译文。如果任务状态不是 'TRANSLATED'，则可能为 `None`。"
+            )
             print(f"  翻译状态 (translation_status): '{row['translation_status']}'")
             print(
                 "    - 翻译任务的当前生命周期状态：\n      - `PENDING`: 待处理，等待翻译引擎拾取。\n      - `TRANSLATING`: 正在处理，已提交给引擎。\n      - `TRANSLATED`: 已成功翻译。\n      - `FAILED`: 翻译失败且重试次数耗尽。\n      - `APPROVED`: 人工审核通过的最终版本。"
@@ -135,13 +145,19 @@ def inspect_database():
             business_id = row["business_id"]
             if business_id:
                 print(f"  业务标识符 (business_id): '{business_id}'")
-                print("    - 上层应用定义的唯一业务ID，用于追踪此翻译在业务中的位置，存储在 `th_sources` 表。")
+                print(
+                    "    - 上层应用定义的唯一业务ID，用于追踪此翻译在业务中的位置，存储在 `th_sources` 表。"
+                )
                 print(
                     f"  来源最后活跃时间 (source_last_seen_at): '{row['source_last_seen_at']}'"
                 )
-                print("    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。")
+                print(
+                    "    - 此 `business_id` 最后一次被 `request()` 方法访问或更新的时间，用于垃圾回收 (GC)。"
+                )
             else:
-                print("  业务标识符 (business_id): 无 (此翻译未关联业务ID，或其 `th_sources` 记录已被GC。)")
+                print(
+                    "  业务标识符 (business_id): 无 (此翻译未关联业务ID，或其 `th_sources` 记录已被GC。)"
+                )
                 print(
                     "    - 原始请求可能没有提供 `business_id`，或者此翻译是即席翻译而没有关联 `business_id`，或者在 `th_sources` 表中对应的记录已被垃圾回收清理。"
                 )

@@ -223,7 +223,9 @@ def main():
             log.info(f"预估将删除 {gc_report_dry_run['deleted_sources']} 条源记录。")
             log.info("其中应该包含 'legacy.feature.old_text'。")
         else:
-            log.info("没有源记录被报告为可删除。这可能意味着所有业务ID的last_seen_at都是最新。")
+            log.info(
+                "没有源记录被报告为可删除。这可能意味着所有业务ID的last_seen_at都是最新。"
+            )
 
         log.info("\n" + "-" * 50 + "\n")
         log.info("第二次运行 GC (实际删除模式: dry_run=False)...")
@@ -234,7 +236,9 @@ def main():
         log.info("GC 实际执行报告：", report=gc_report_actual)
         if gc_report_actual["deleted_sources"] > 0:
             log.info(f"实际已删除 {gc_report_actual['deleted_sources']} 条源记录。")
-            log.info("请检查数据库文件，'legacy.feature.old_text' 相关的 th_sources 记录应该已被删除。")
+            log.info(
+                "请检查数据库文件，'legacy.feature.old_text' 相关的 th_sources 记录应该已被删除。"
+            )
         else:
             log.info("没有源记录被删除。")
 

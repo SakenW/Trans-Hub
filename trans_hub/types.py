@@ -69,8 +69,12 @@ class TranslationResult(BaseModel):
     error: Optional[str] = None
 
     # 来源与上下文标识
-    business_id: Optional[str] = Field(default=None, description="与此内容关联的业务ID。")
-    context_hash: str = Field(description="用于区分不同上下文翻译的哈希值。现在总是非NULL。")
+    business_id: Optional[str] = Field(
+        default=None, description="与此内容关联的业务ID。"
+    )
+    context_hash: str = Field(
+        description="用于区分不同上下文翻译的哈希值。现在总是非NULL。"
+    )
 
 
 class SourceUpdateResult(BaseModel):

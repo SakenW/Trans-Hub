@@ -40,10 +40,14 @@ def discover_engines():
                     log.info("✅ 成功发现并注册引擎", engine_name=engine_name)
         except ModuleNotFoundError as e:
             log.warning(
-                "⚠️ 跳过加载引擎，因缺少依赖", engine_name=module_name, missing_dependency=e.name
+                "⚠️ 跳过加载引擎，因缺少依赖",
+                engine_name=module_name,
+                missing_dependency=e.name,
             )
         except Exception:
-            log.error("加载引擎模块时发生未知错误", module_name=module_name, exc_info=True)
+            log.error(
+                "加载引擎模块时发生未知错误", module_name=module_name, exc_info=True
+            )
 
 
 # 在模块加载时自动执行一次发现

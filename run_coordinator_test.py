@@ -105,7 +105,9 @@ def main():
         root_log.info("======== Trans-Hub v1.1 功能验证开始 ========")
         setup_test_environment()
         test_gc_workflow()
-        root_log.info("🎉======== 所有测试成功通过！Trans-Hub v1.1 功能验证完成！========🎉")
+        root_log.info(
+            "🎉======== 所有测试成功通过！Trans-Hub v1.1 功能验证完成！========🎉"
+        )
     except Exception:
         root_log.error("❌ 测试过程中发生未捕获的异常！", exc_info=True)
         raise

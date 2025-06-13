@@ -27,7 +27,9 @@ class DebugEngineConfig(BaseSettings, BaseEngineConfig):
     model_config = SettingsConfigDict(extra="ignore")
 
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
-    fail_on_text: Optional[str] = Field(default=None, description="如果文本匹配此字符串，则翻译失败")
+    fail_on_text: Optional[str] = Field(
+        default=None, description="如果文本匹配此字符串，则翻译失败"
+    )
     fail_is_retryable: bool = Field(default=True, description="失败是否可重试")
     translation_map: dict[str, str] = Field(
         default_factory=dict, description="一个原文到译文的映射"
