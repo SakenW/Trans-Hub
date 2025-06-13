@@ -18,13 +18,12 @@ authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 
-# --- 链接信息 (会显示在 PyPI 页面) ---
-homepage = "https://github.com/SakenW/trans-hub" # 替换为你的 GitHub 地址
-repository = "https://github.com/SakenW/trans-hub" # 替换为你的 GitHub 地址
-documentation = "https://github.com/SakenW/trans-hub/blob/main/README.md" # 链接到 README 或更详细的文档
+# --- 链接信息 ---
+homepage = "https://github.com/SakenW/trans-hub"
+repository = "https://github.com/SakenW/trans-hub"
+documentation = "https://github.com/SakenW/trans-hub/blob/main/README.md"
 
-# --- PyPI 分类器 (非常重要！) ---
-# 帮助用户在 PyPI 上更好地发现和了解你的项目。
+# --- PyPI 分类器 ---
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -40,50 +39,37 @@ classifiers = [
     "Topic :: Text Processing",
 ]
 
-# --- 核心依赖 (项目的最小运行集) ---
-# 这些是用户运行 `pip install trans-hub` 时会安装的包。
+# --- 核心依赖 ---
 [tool.poetry.dependencies]
 python = "^3.9"
-
 pydantic = "^2.0"
 structlog = "^23.0"
-
+translators = "^6.0.1"
 
 # --- 可选依赖 (Extras) ---
-# 这使得用户可以按需安装功能，例如 `pip install "trans-hub[openai]"`。
-translators = "^6.0.1"
 [tool.poetry.extras]
-# 定义一个名为 'openai' 的功能集。
 openai = ["openai", "pydantic-settings", "python-dotenv"]
+# all = ["openai", "pydantic-settings", "python-dotenv"]  # 可按需启用
 
-# 未来可以增加其他引擎
-# deepl = ["deepl"]
-# google = ["google-cloud-translate"]
-
-# 定义一个名为 'all' 的特殊功能集，它包含了所有可选功能。
-# all = ["openai", "pydantic-settings", "python-dotenv", "deepl"]
-
-
-# --- 开发依赖 (仅在开发和测试时需要) ---
-# 通过 `poetry install --with dev` 安装。
+# ==============================================================================
+#  开发依赖 (仅用于本地开发、测试等环境)
+# ==============================================================================
 [tool.poetry.group.dev.dependencies]
-# 测试框架
+# ✅ 测试相关
 pytest = "^7.4"
 pytest-cov = "^4.1"
-pytest-asyncio = "^0.21.0" # 用于未来测试异步代码
+pytest-asyncio = "^0.21.0"
 
-# 代码风格与检查
+# ✅ 格式化与检查
 black = "^23.0"
 isort = "^5.12"
 ruff = "^0.1.0"
 mypy = "^1.5"
 
-# [重要] 开发时，我们也需要安装所有可选依赖，以确保能运行所有测试。
-# 这是最直接的方式，确保 `poetry install --with dev` 能安装所有东西。
+# ✅ 可选功能相关（用于完整测试）
 openai = "^1.37.0"
 pydantic-settings = "^2.3.4"
 python-dotenv = "^1.0.1"
-
 
 # ==============================================================================
 #  开发工具配置
@@ -91,20 +77,23 @@ python-dotenv = "^1.0.1"
 
 [tool.black]
 line-length = 88
-target-version = ['py39']
+target-version = ["py39"]
+skip-string-normalization = false  # 默认行为，推荐保留
 
 [tool.isort]
 profile = "black"
 line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
 
 [tool.ruff]
 line-length = 88
-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
+extend-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
 ignore = [
-    # 保持原有的
-    "D100", "D104", "D107", 
-    # [新增] 临时忽略所有 docstring 格式问题
-    "D200", "D203", "D204", "D205", "D211", "D212", "D213", "D400", "D415", "D407", "D413"
+    "D100", "D104", "D107",
+    "D200", "D203", "D204", "D205",
+    "D211", "D212", "D213",
+    "D400", "D407", "D413", "D415"
 ]
 
 [tool.mypy]
@@ -112,3 +101,6 @@ python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+strict_optional = true
+show_error_codes = true
+pretty = true
