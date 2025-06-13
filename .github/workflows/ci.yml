@@ -1,4 +1,4 @@
-# .github/workflows/ci.yml
+# .github/workflows/ci.yml (v1.1 最终版)
 
 name: CI/CD Pipeline
 
@@ -12,6 +12,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false # 确保即使一个 Python 版本失败，其他版本的测试也会继续运行
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
@@ -20,37 +21,39 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 步骤 2: 设置 Python 环境
+    # 步骤 2: 安装 Poetry
+    # 这个 action 会处理好所有路径问题
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest 
+    
+    # 步骤 3: 设置 Python 环境，并配置 Poetry 缓存
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    
-    # === [核心修正] 步骤 3: 使用专业的 Action 安装 Poetry ===
-    # 这个 action 会处理好所有路径问题和缓存
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        # 你可以在这里指定 poetry 的版本
-        version: latest 
-    
+        cache: 'poetry' # <-- 专业的做法：让 setup-python 自动处理 Poetry 缓存
+
     # 步骤 4: 安装项目依赖
-    # `snok/install-poetry` 已经处理了缓存，但我们也可以在这里保留 poetry 的缓存配置
     - name: Install dependencies
-      run: poetry install --with dev --all-extras
+      run: poetry install --with dev # <-- 移除了 --all-extras，因为 extras 依赖已经在 dev group 中
       
-    # === 后续步骤保持不变 ===
-
-    - name: Lint with Ruff
-      run: poetry run ruff check .
-
-    - name: Check formatting with Black and isort
+    # 步骤 5: 运行代码质量检查 (Linter + Formatter)
+    # Ruff 可以同时处理 linting 和 formatting，简化步骤
+    - name: Lint and check formatting with Ruff
       run: |
-        poetry run black --check .
-        poetry run isort --check-only .
+        poetry run ruff check .
+        poetry run ruff format --check .
 
+    # 步骤 6: 运行静态类型检查
     - name: Type check with Mypy
       run: poetry run mypy .
       
-    - name: Run tests
+    # 步骤 7: 运行功能测试脚本
+    - name: Run end-to-end tests
       run: poetry run python run_coordinator_test.py
+      
+    # 步骤 8: (可选但推荐) 运行演示脚本作为一个简单的集成测试
+    - name: Run complex workflow demo
+      run: poetry run python demo_complex_workflow.py
