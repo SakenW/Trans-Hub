@@ -1,4 +1,6 @@
-"""trans_hub/interfaces.py (v0.2)
+# trans_hub/interfaces.py (v1.1 修正版)
+"""
+trans_hub/interfaces.py
 
 本模块使用 typing.Protocol 定义了核心组件的接口（或称协议）。
 此版本已根据最终版文档的术语和数据传输对象（DTOs）进行更新，
@@ -6,7 +8,16 @@
 """
 
 from contextlib import AbstractContextManager
-from typing import Any, AsyncGenerator, Generator, List, Optional, Protocol
+from typing import (
+    Any,
+    AsyncGenerator,
+    ContextManager,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Protocol,
+)
 
 # 导入 AbstractContextManager 用于事务上下文
 from trans_hub.types import (
@@ -25,7 +36,7 @@ class PersistenceHandler(Protocol):
     """同步持久化处理器的接口协议。"""
 
     def update_or_create_source(
-        self, text_content: str, business_id: str, context_hash: Optional[str]
+        self, text_content: str, business_id: str, context_hash: str  # <-- 修正点：改为 str
     ) -> SourceUpdateResult:
         """根据 business_id 更新或创建一个源记录。
         参数 `text` 已更名为 `text_content` 以保持命名一致性。
@@ -46,27 +57,31 @@ class PersistenceHandler(Protocol):
         """将一批翻译结果保存到数据库中。"""
         ...
 
+    def get_translation(
+        self,
+        text_content: str,
+        target_lang: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[TranslationResult]:
+        """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
+        ...
+
+    def get_business_id_for_content(
+        self, content_id: int, context_hash: str
+    ) -> Optional[str]:  # <-- 修正点：添加新方法
+        """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
+        ...
+
     def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
-        """执行垃圾回收，清理过时和孤立的数据。
-        Args:
-            retention_days: 数据保留天数。
-            dry_run: 如果为 True，则只报告将要删除的数据，不实际执行删除。
-        Returns:
-            包含垃圾回收结果的字典。
-        """
+        """执行垃圾回收，清理过时和孤立的数据。"""
         ...
 
     def close(self) -> None:
         """关闭数据库连接等资源。"""
         ...
 
-    def transaction(self) -> AbstractContextManager[Any]:
-        """提供一个同步数据库事务上下文管理器。
-        可以与 `with` 语句一起使用，例如 `with handler.transaction() as db_session:`。
-        实际实现应根据其数据库访问方式返回合适的上下文管理器（例如，一个数据库连接或会话）。
-        Returns:
-            一个上下文管理器。
-        """
+    def transaction(self) -> ContextManager[Any]:  # <-- 修正点：使用 typing.ContextManager
+        """提供一个同步数据库事务上下文管理器。"""
         ...
 
 
@@ -76,7 +91,7 @@ class AsyncPersistenceHandler(Protocol):
     """
 
     async def update_or_create_source(
-        self, text_content: str, business_id: str, context_hash: Optional[str]
+        self, text_content: str, business_id: str, context_hash: str  # <-- 修正点：改为 str
     ) -> SourceUpdateResult:
         """根据 business_id 更新或创建一个源记录。"""
         ...
@@ -95,6 +110,21 @@ class AsyncPersistenceHandler(Protocol):
         """将一批翻译结果保存到数据库中。"""
         ...
 
+    async def get_translation(
+        self,
+        text_content: str,
+        target_lang: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[TranslationResult]:
+        """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
+        ...
+
+    async def get_business_id_for_content(
+        self, content_id: int, context_hash: str
+    ) -> Optional[str]:  # <-- 修正点：添加新方法
+        """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
+        ...
+
     async def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
         """执行垃圾回收，清理过时和孤立的数据。"""
         ...
@@ -105,15 +135,6 @@ class AsyncPersistenceHandler(Protocol):
 
     async def transaction(
         self,
-    ) -> AbstractContextManager[
-        Any
-    ]:  # 注意：async context managers 通常使用 AsyncContextManager
-        """提供一个异步数据库事务上下文管理器。
-        可以与 `async with` 语句一起使用。
-        Returns:
-            一个异步上下文管理器。
-        """
-        # 理论上应该使用 `typing.AsyncContextManager` 但为了 Mypy 兼容性，
-        # 且考虑到 `AbstractContextManager` 是 `typing.ContextManager` 的超类，
-        # 在某些情况下 Mypy 可能更宽松。若仍报错，可以尝试 `typing.AsyncContextManager`。
+    ) -> AbstractContextManager[Any]:  # 保持 AbstractContextManager
+        """提供一个异步数据库事务上下文管理器。"""
         ...
