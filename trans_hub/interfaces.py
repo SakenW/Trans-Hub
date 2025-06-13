@@ -5,9 +5,8 @@
 """
 from typing import AsyncGenerator, Generator, List, Optional, Protocol
 
-# 导入已更新的数据传输对象 (DTOs)
 from trans_hub.types import (
-    ContentItem,  # 变更: TextItem -> ContentItem
+    ContentItem,
     SourceUpdateResult,
     TranslationResult,
     TranslationStatus,
