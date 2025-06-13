@@ -11,10 +11,7 @@ import openai
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from trans_hub.engines.base import (
-    BaseContextModel,
-    BaseTranslationEngine,
-)
+from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
