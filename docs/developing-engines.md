@@ -3,12 +3,13 @@
 欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的动态发现架构，这个过程比你想象的要简单得多。
 
 ## 目录
+
 1.  [开发哲学：引擎的职责](#1-开发哲学引擎的职责)
 2.  [准备工作：环境设置](#2-准备工作环境设置)
 3.  [开发流程：三步完成一个新引擎](#3-开发流程三步完成一个新引擎)
-    *   [第一步：创建引擎文件](#第一步创建引擎文件)
-    *   [第二步：实现引擎代码](#第二步实现引擎代码)
-    *   [第三步：注册引擎配置](#第三步注册引擎配置)
+    - [第一步：创建引擎文件](#第一步创建引擎文件)
+    - [第二步：实现引擎代码](#第二步实现引擎代码)
+    - [第三步：注册引擎配置](#第三步注册引擎配置)
 4.  [编写测试：验证你的引擎](#4-编写测试验证你的引擎)
 5.  [提交你的贡献](#5-提交你的贡献)
 6.  [高级主题：处理上下文 (Context)](#6-高级主题处理上下文-context)
@@ -20,20 +21,21 @@
 
 在 `Trans-Hub` 的架构中，一个 `Engine` 的职责被严格限定在：
 
-*   **接收一个字符串列表和目标语言**。
-*   **与一个特定的外部翻译 API 进行通信**。
-*   **正确地将 API 的成功和失败结果，包装成 `EngineSuccess` 或 `EngineError` 对象**。
-*   **返回一个结果列表**，其顺序和长度必须与输入完全对应。
-*   **通过 `EngineError` 的 `is_retryable` 属性，准确指示错误是否可重试**。
+- **接收一个字符串列表和目标语言**。
+- **与一个特定的外部翻译 API 进行通信**。
+- **正确地将 API 的成功和失败结果，包装成 `EngineSuccess` 或 `EngineError` 对象**。
+- **返回一个结果列表**，其顺序和长度必须与输入完全对应。
+- **通过 `EngineError` 的 `is_retryable` 属性，准确指示错误是否可重试**。
 
 引擎**不需要**关心：
-*   数据库操作
-*   缓存命中/未命中逻辑
-*   **`business_id` 的关联、存储或持久化**
-*   **上下文哈希 (`context_hash`) 的生成** (这由 `trans_hub.utils.get_context_hash` 负责)
-*   重试逻辑
-*   速率限制
-*   其他更高级的协调任务
+
+- 数据库操作
+- 缓存命中/未命中逻辑
+- **`business_id` 的关联、存储或持久化**
+- **上下文哈希 (`context_hash`) 的生成** (这由 `trans_hub.utils.get_context_hash` 负责)
+- 重试逻辑
+- 速率限制
+- 其他更高级的协调任务
 
 所有这些复杂的任务都由 `Coordinator` 或 `PersistenceHandler` 来处理。你只需要专注于实现最纯粹、最高效的“翻译”这一步。
 
@@ -124,7 +126,7 @@ class AwesomeEngineConfig(BaseSettings, BaseEngineConfig):
 # 核心：将 BaseTranslationEngine 泛型化为你定义的配置模型
 class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
     """一个对接 AwesomeTranslate 服务的翻译引擎。"""
-    
+
     # 将你的配置模型与引擎类绑定
     CONFIG_MODEL = AwesomeEngineConfig
     # （可选）绑定你的上下文模型，如果定义了的话
@@ -139,13 +141,13 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
             config: AwesomeEngineConfig 配置对象。
         """
         super().__init__(config)
-        
+
         # 检查必要的依赖是否安装
         if awesome_sdk is None:
             raise ImportError(
                 "要使用 AwesomeEngine，请先安装 'awesome-sdk' 库: pip install awesome-sdk"
             )
-        
+
         # 验证关键配置项
         if not self.config.api_key:
             raise ValueError("AwesomeEngine requires an API key. Please set TH_AWESOME_API_KEY.")
@@ -166,10 +168,10 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
     ) -> List[EngineBatchItemResult]:
         """同步批量翻译文本。"""
         results: List[EngineBatchItemResult] = []
-        
+
         # 从上下文对象中获取额外参数，如果定义了上下文模型的话
         formality_level = context.formality if context else "default"
-        
+
         for text in texts:
             try:
                 # 调用 SDK/API
@@ -182,22 +184,22 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
                 )
                 # 将成功的响应包装成 EngineSuccess
                 results.append(EngineSuccess(translated_text=api_response.translated_text))
-                
+
             except awesome_sdk.AuthError as e:
                 # 认证错误通常不可重试
                 logger.error(f"AwesomeEngine Auth Error for text '{text}': {e}", exc_info=True)
                 results.append(EngineError(error_message=f"认证错误: {e}", is_retryable=False))
-                
+
             except awesome_sdk.ServiceError as e:
                 # 服务端错误（如 5xx）通常可重试
                 logger.error(f"AwesomeEngine Service Error for text '{text}': {e}", exc_info=True)
                 results.append(EngineError(error_message=f"服务错误: {e}", is_retryable=True))
-                
+
             except Exception as e:
                 # 其他所有未预期错误，我们保守地假设为可重试的
                 logger.error(f"AwesomeEngine Unexpected Error for text '{text}': {e}", exc_info=True)
                 results.append(EngineError(error_message=f"未知错误: {e}", is_retryable=True))
-                
+
         return results
 
     async def atranslate_batch(
@@ -208,7 +210,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         context: Optional[AwesomeContext] = None, # <-- 注意这里 context 的类型是 AwesomeContext 实例
     ) -> List[EngineBatchItemResult]:
         """异步批量翻译文本。
-        
+
         强烈建议在这里实现真正的异步 API 调用（例如使用 `aiohttp` 或 SDK 的异步客户端），
         以避免在未来的异步工作流中阻塞事件循环。
         """
@@ -222,7 +224,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         #     except Exception as e:
         #         async_results.append(EngineError(error_message=str(e), is_retryable=True))
         # return async_results
-        
+
         # 当前仅为示例，直接调用同步方法
         return self.translate_batch(texts, target_lang, source_lang, context)
 
@@ -247,7 +249,7 @@ from trans_hub.engines.awesome_engine import AwesomeEngineConfig
 class EngineConfigs(BaseModel):
     """所有引擎配置的聚合模型。"""
     # ... 其他引擎配置 ...
-    
+
     # 2. 在这里添加你的新引擎配置字段
     # 字段名必须是小写的引擎名，且与 TH_ACTIVE_ENGINE 中使用的名称一致 (例如 "awesome")
     awesome: Optional[AwesomeEngineConfig] = None # 注意这里是 Optional，表示该引擎配置是可选的
@@ -278,10 +280,10 @@ from trans_hub.utils import get_context_hash # 导入 get_context_hash
 def test_awesome_engine_flow():
     """测试 AwesomeEngine 翻译流程。"""
     logger.info("--- 开始测试 AwesomeEngine 翻译流程 ---")
-    
+
     # 假设你的 .env 文件中有 TH_AWESOME_API_KEY 和 TH_AWESOME_REGION
     # 加载 .env 文件（确保在程序入口处调用）
-    dotenv.load_dotenv() 
+    dotenv.load_dotenv()
 
     # 创建 TransHubConfig 实例，指定 AwesomeEngine
     config = TransHubConfig(
@@ -296,7 +298,7 @@ def test_awesome_engine_flow():
 
     # 模拟持久化处理器（可使用内存实现或 Mock）
     mock_persistence_handler = MockPersistenceHandler()
-    
+
     coordinator = Coordinator(
         config=config,
         persistence_handler=mock_persistence_handler
@@ -352,15 +354,17 @@ if __name__ == "__main__":
 如果你的引擎支持更高级的功能（比如术语表、正式/非正式语气等），你可以通过 `Context` 机制来实现。
 
 1.  **定义 Context 模型**: 在你的引擎文件中，创建一个继承自 `BaseContextModel` 的 Pydantic 模型。
+
     ```python
     # your_engine.py
     from trans_hub.engines.base import BaseContextModel
     from pydantic import Field # 如果需要 Field
-    
+
     class YourContext(BaseContextModel):
         formality: str = Field(default="default", description="翻译的正式程度")
         # ... 其他自定义上下文字段
     ```
+
 2.  **绑定到引擎**: 在你的引擎类中，指定 `CONTEXT_MODEL`。
     ```python
     # your_engine.py
@@ -369,17 +373,18 @@ if __name__ == "__main__":
         # ...
     ```
 3.  **在 `translate_batch` 中使用**: 当上层应用通过 `coordinator.request(..., context={'formality': 'formal'})` 传入一个字典时，`Coordinator` 会自动使用你的引擎的 `CONTEXT_MODEL` (`YourContext`) 来验证这个字典，并将其转换为 `YourContext` 的实例，然后传递给 `translate_batch` 或 `atranslate_batch` 方法。
+
     ```python
     # your_engine.py
     from typing import Optional, Dict, Any # 确保 Optional, Dict, Any 已导入
     # ...
-    
+
     # 明确 context 的类型为 YourContext 实例
     def translate_batch(
-        self, 
-        texts: List[str], 
-        target_lang: str, 
-        source_lang: Optional[str] = None, 
+        self,
+        texts: List[str],
+        target_lang: str,
+        source_lang: Optional[str] = None,
         context: Optional[YourContext] = None # <-- 这里的 context 已是 YourContext 实例
     ) -> List[EngineBatchItemResult]:
         formality = "default"
@@ -443,14 +448,14 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
             config: AwesomeEngineConfig 配置对象。
         """
         super().__init__(config)
-        
+
         if awesome_sdk is None:
             raise ImportError(
                 "要使用 AwesomeEngine，请先安装 'awesome-sdk' 库: pip install awesome-sdk"
             )
         if not self.config.api_key:
             raise ValueError("AwesomeEngine requires an API key. Please set TH_AWESOME_API_KEY.")
-        
+
         # 初始化第三方 SDK 客户端
         self.client = awesome_sdk.Client(api_key=self.config.api_key, region=self.config.region)
         logger.info(f"AwesomeEngine 初始化完成，使用区域: {self.config.region}")
@@ -464,9 +469,9 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
     ) -> List[EngineBatchItemResult]:
         """同步批量翻译。"""
         results: List[EngineBatchItemResult] = []
-        
+
         formality_level = context.formality if context else "default" # 从上下文对象中获取正式程度
-        
+
         for text in texts:
             try:
                 # 假设 SDK 的同步翻译方法
@@ -486,7 +491,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
             except Exception as e:
                 logger.error(f"AwesomeEngine Unexpected Error for text '{text}': {e}", exc_info=True)
                 results.append(EngineError(error_message=f"未知错误: {e}", is_retryable=True))
-                
+
         return results
 
     async def atranslate_batch(
@@ -497,13 +502,13 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         context: Optional[AwesomeContext] = None, # 明确上下文类型
     ) -> List[EngineBatchItemResult]:
         """异步批量翻译。
-        
+
         强烈建议在这里实现真正的异步 API 调用，以避免阻塞事件循环。
         """
         results: List[EngineBatchItemResult] = []
-        
+
         formality_level = context.formality if context else "default"
-        
+
         for text in texts:
             try:
                 # 假设 SDK 的异步翻译方法
@@ -530,7 +535,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
             except Exception as e:
                 logger.error(f"AwesomeEngine Unexpected Error (Async) for text '{text}': {e}", exc_info=True)
                 results.append(EngineError(error_message=f"未知错误: {e}", is_retryable=True))
-                
+
         return results
 ```
 

@@ -5,6 +5,7 @@
 ---
 
 ## **目录**
+
 1.  [快速入门：你的第一个翻译任务](#1-快速入门你的第一个翻译任务)
 2.  [升级引擎：从免费到强大 (例如 OpenAI)](#2-升级引擎从免费到强大-例如-openai)
 3.  [智能缓存：工作原理与验证](#3-智能缓存工作原理与验证)
@@ -23,16 +24,19 @@
 这个食谱展示了如何用最少的配置，在几分钟内开始使用 `Trans-Hub`。
 
 ### **目标**
+
 使用 `Trans-Hub` 的内置免费翻译引擎，将 "Hello, world!" 翻译成中文。
 
 ### **步骤**
 
 1.  **安装 `Trans-Hub`**:
+
     ```bash
     pip install trans-hub
     ```
 
 2.  **创建你的翻译脚本 (例如 `quick_start.py`)**:
+
     ```python
     # quick_start.py
     import os
@@ -78,7 +82,7 @@
 
             log.info(f"正在处理 '{target_language_code}' 的待翻译任务...")
             results = list(coordinator.process_pending_translations(target_lang=target_language_code))
-            
+
             if results:
                 first_result = results[0]
                 log.info(
@@ -119,17 +123,20 @@
 当内置的免费引擎无法满足你的质量或规模需求时，你可以轻松切换到更强大的引擎，如 OpenAI。
 
 ### **目标**
+
 使用 OpenAI 翻译引擎。
 
 ### **步骤**
 
 1.  **安装 OpenAI 依赖**:
+
     ```bash
     pip install "trans-hub[openai]"
     ```
 
 2.  **配置 `.env` 文件**:
     在项目根目录创建 `.env` 文件，并添加你的 OpenAI API 密钥和可选的端点。
+
     ```env
     # .env
     TH_OPENAI_ENDPOINT="https://api.openai.com/v1" # 如果是 Azure OpenAI，需要修改
@@ -163,12 +170,13 @@
 `Trans-Hub` 自动缓存所有翻译结果。这个食谱将解释其工作原理，并教你如何验证缓存。
 
 ### **目标**
+
 理解并验证 `Trans-Hub` 的缓存机制。
 
 ### **工作原理**
 
-*   **`request()`**: 当你请求一个翻译时，`Trans-Hub` 会检查数据库中是否已存在**相同内容、相同目标语言、相同上下文**的**已成功翻译**的记录。
-*   **`process_pending_translations()`**: 这个方法**只处理**状态为 `PENDING` 或 `FAILED` 的任务。如果一个翻译请求因为缓存命中而没有创建 `PENDING` 任务，这个方法自然就不会处理它。
+- **`request()`**: 当你请求一个翻译时，`Trans-Hub` 会检查数据库中是否已存在**相同内容、相同目标语言、相同上下文**的**已成功翻译**的记录。
+- **`process_pending_translations()`**: 这个方法**只处理**状态为 `PENDING` 或 `FAILED` 的任务。如果一个翻译请求因为缓存命中而没有创建 `PENDING` 任务，这个方法自然就不会处理它。
 
 ### **步骤 1：观察缓存行为**
 
@@ -217,6 +225,7 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
 运行此脚本，你会看到日志明确地显示 `from_cache=True`。
 
 ## **4. 上下文翻译：一词多义的艺术**
@@ -224,6 +233,7 @@ if __name__ == "__main__":
 同一个词在不同语境下可能有不同的含义。`Trans-Hub` 支持在翻译请求中添加上下文，以实现更精准的本地化。
 
 ### **目标**
+
 翻译 "Apple" 作为“水果”和“公司”的两种不同含义。
 
 ### **步骤**
@@ -262,7 +272,7 @@ def main():
 
         log.info(f"正在处理所有待翻译任务...")
         results = list(coordinator.process_pending_translations(target_lang=target_lang))
-        
+
         for result in results:
             log.info(
                 "翻译结果：",
@@ -283,18 +293,19 @@ if __name__ == "__main__":
 
 你会看到两条翻译结果，每条都有不同的 `context_hash`。
 
-*   **解读**：`Trans-Hub` 成功地将这两个请求视为独立的翻译任务并分别存储。翻译结果的质量取决于你所使用的翻译引擎。默认的 `translators` 引擎可能无法区分，但 **OpenAI 等高级引擎通常能根据上下文给出不同的翻译**（例如“苹果”和“苹果公司”）。
+- **解读**：`Trans-Hub` 成功地将这两个请求视为独立的翻译任务并分别存储。翻译结果的质量取决于你所使用的翻译引擎。默认的 `translators` 引擎可能无法区分，但 **OpenAI 等高级引擎通常能根据上下文给出不同的翻译**（例如“苹果”和“苹果公司”）。
 
 ## **5. 数据生命周期：使用垃圾回收 (GC)**
 
 `Trans-Hub` 内置的垃圾回收（GC）功能允许你定期清理数据库中过时或不再活跃的业务关联 (`th_sources` 表)。
 
 ### **目标**
+
 演示如何配置和执行 GC，清理不再使用的 `business_id` 记录。
 
 ### **步骤**
 
-1.  **修改初始化配置**：
+1.  **修改初始化配置**:
     在 `TransHubConfig` 中设置 `gc_retention_days`。
 
     ```python
@@ -307,10 +318,12 @@ if __name__ == "__main__":
     ```
 
 2.  **在你的应用中定期调用 GC**:
+    建议在独立的维护脚本或定时任务中执行此操作。
+
     ```python
-    # 在一个独立的维护脚本或定时任务中
+    # ...
     log.info("--- 运行垃圾回收 (GC) ---")
-    
+
     # 建议先进行“干跑”，检查将要删除的内容
     gc_report_dry_run = coordinator.run_garbage_collection(dry_run=True)
     log.info("GC 干跑报告：", report=gc_report_dry_run)
@@ -322,23 +335,25 @@ if __name__ == "__main__":
 
 ### **工作原理**
 
-*   `request(business_id=...)` 调用会更新 `th_sources` 表中对应 `business_id` 的 `last_seen_at` 时间戳。
-*   `run_garbage_collection(retention_days=N)` 会删除 `th_sources` 表中所有 `last_seen_at` 时间戳早于 N 天的记录。
-*   **重要**：GC 清理的是**业务ID的关联**，通常不会删除 `th_translations` 中的翻译结果本身，这些结果仍然可以作为缓存使用。
+- 每次调用 `request(business_id=...)` 都会更新 `th_sources` 表中对应 `business_id` 的 `last_seen_at` 时间戳。
+- `run_garbage_collection(retention_days=N)` 会删除所有 `last_seen_at` **日期**早于 N 天的记录。
+- **特别说明 `retention_days=0`**: 这个设置意味着 GC 将会清理所有 `last_seen_at` **在今天之前**的记录，并**保留所有今天**被访问过的记录。因此，在一个单次运行的脚本中调用 GC，通常不会清理掉任何记录，因为它们都是“今天”创建的。
+- **重要**：GC 清理的是**业务 ID 的关联** (`th_sources` 表)，通常不会删除 `th_translations` 中的翻译结果本身。这些翻译结果仍然可以作为缓存使用。
 
 ## **6. 错误处理与重试策略**
 
 `Trans-Hub` 内置了指数退避的自动重试机制，以应对临时的 API 错误。
 
 ### **目标**
+
 理解 `Trans-Hub` 如何处理翻译过程中的错误和重试。
 
 ### **工作原理**
 
-*   **配置**：你可以在 `coordinator.process_pending_translations` 方法中控制 `max_retries` 和 `initial_backoff`。
-*   **错误类型**：`Trans-Hub` 依赖翻译引擎返回的 `EngineError` 中的 `is_retryable` 标志来决定是否重试。
-    *   `is_retryable=True` (如 5xx 错误): 会自动重试。
-    *   `is_retryable=False` (如 4xx 认证错误): 不会重试，任务状态直接变为 `FAILED`。
+- **配置**：你可以在 `coordinator.process_pending_translations` 方法中控制 `max_retries` 和 `initial_backoff`。
+- **错误类型**：`Trans-Hub` 依赖翻译引擎返回的 `EngineError` 中的 `is_retryable` 标志来决定是否重试。
+  - `is_retryable=True` (如 5xx 错误): 会自动重试。
+  - `is_retryable=False` (如 4xx 认证错误): 不会重试，任务状态直接变为 `FAILED`。
 
 当重试发生时，你会在日志中看到类似“批次中包含可重试的错误...将在退避后重试...”的信息。
 
@@ -347,6 +362,7 @@ if __name__ == "__main__":
 对于有严格调用频率限制的付费翻译服务，速率限制器是必不可少的。
 
 ### **目标**
+
 配置 `Trans-Hub` 以限制对翻译 API 的调用速率。
 
 ### **步骤**
@@ -360,31 +376,34 @@ from trans_hub.rate_limiter import RateLimiter
 # 每秒允许 1 个请求，桶容量为 5 个请求
 rate_limiter = RateLimiter(rate=1, burst=5)
 coordinator = Coordinator(
-    config=config, 
-    persistence_handler=handler, 
+    config=config,
+    persistence_handler=handler,
     rate_limiter=rate_limiter # <-- 传入速率限制器
 )
 # ...
 ```
+
 之后，`coordinator.process_pending_translations` 在每次调用翻译引擎前都会自动遵守此速率限制。
 
 ## **8. 异步工作流 (进阶)**
 
 `Trans-Hub` 的 `BaseTranslationEngine` 提供了 `atranslate_batch` 异步方法，为未来更高并发的异步 `Coordinator` 奠定基础。
 
-*   **引擎开发者**: 在开发自定义引擎时，强烈建议实现 `atranslate_batch` 方法，并使用真正的异步客户端（如 `aiohttp`）来调用外部 API。
-*   **当前 `Coordinator`**: 请注意，目前 `Coordinator` 实例本身是同步的。未来的版本计划引入一个完全异步的 `AsyncCoordinator`，以充分利用异步引擎的性能。
+- **引擎开发者**: 在开发自定义引擎时，强烈建议实现 `atranslate_batch` 方法，并使用真正的异步客户端（如 `aiohttp`）来调用外部 API。
+- **当前 `Coordinator`**: 请注意，目前 `Coordinator` 实例本身是同步的。未来的版本计划引入一个完全异步的 `AsyncCoordinator`，以充分利用异步引擎的性能。
 
 ## **9. 集成到 Web 框架 (以 Flask 为例)**
 
 在 Web 应用中，你通常需要将 `Trans-Hub` 的 `Coordinator` 实例绑定到应用的生命周期。
 
 ### **目标**
+
 在 Flask 应用中，实现一个高效的、非阻塞的翻译请求接口。
 
 ### **最佳实践**
 
 Web 接口的职责应该是**快速响应**。因此，`process_pending_translations` **不应该**在请求处理线程中直接调用。正确的模式是：
+
 1.  接口首先尝试从缓存中获取结果。
 2.  如果缓存未命中，则 `request` 一个新任务。
 3.  立即返回 `202 Accepted` 响应，告知客户端任务已接受。
@@ -456,7 +475,7 @@ def translate_text():
             business_id=data.get('business_id'),
             context=data.get('context')
         )
-        
+
         # 3. 告知客户端任务已接受，将在后台处理
         return jsonify({"message": "Translation task has been accepted and is being processed in the background."}), 202
 
@@ -476,6 +495,7 @@ if __name__ == '__main__':
 有时候，你可能想直接查看 `Trans-Hub` 在数据库中到底存储了什么。为此，我们提供了一个方便的辅助工具脚本。
 
 ### **目标**
+
 使用 `tools/inspect_db.py` 脚本，以一种带解读的、人类可读的格式，打印出数据库中所有的翻译记录。
 
 ### **步骤**

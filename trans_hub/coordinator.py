@@ -1,5 +1,5 @@
-"""trans_hub/coordinator.py (v1.0 Final - 最终最终修正版)
-
+# trans_hub/coordinator.py (v1.1 最终版)
+"""
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 它采用动态引擎发现机制，并负责编排所有核心工作流，包括任务处理、重试、
 速率限制、请求处理和垃圾回收等。
@@ -24,8 +24,9 @@ from trans_hub.types import (
     TranslationResult,
     TranslationStatus,
 )
-from trans_hub.utils import get_context_hash  # get_context_hash 现在返回 str
+from trans_hub.utils import get_context_hash
 
+# 获取一个 logger
 logger = structlog.get_logger(__name__)
 
 
@@ -82,15 +83,29 @@ class Coordinator:
         target_lang: str,
         batch_size: int = 50,
         limit: Optional[int] = None,
-        max_retries: int = 2,
-        initial_backoff: float = 1.0,
+        max_retries: Optional[int] = None,
+        initial_backoff: Optional[float] = None,
     ) -> Generator[TranslationResult, None, None]:
-        """处理指定语言的待翻译任务，内置重试和速率限制逻辑。"""
+        """处理指定语言的待翻译任务，内置重试和速率限制逻辑。
+
+        在处理过程中，如果一个任务关联了 business_id，它的 last_seen_at 时间戳会被更新。
+        """
         self._validate_lang_codes([target_lang])
+
+        # 如果未提供重试参数，则从配置中获取
+        max_retries = (
+            max_retries
+            if max_retries is not None
+            else self.config.retry_policy.max_attempts
+        )
+        initial_backoff = (
+            initial_backoff
+            if initial_backoff is not None
+            else self.config.retry_policy.initial_backoff
+        )
 
         logger.info(f"开始处理 '{target_lang}' 的待翻译任务 (max_retries={max_retries})")
 
-        # stream_translatable_items 返回 ContentItem，不包含 business_id
         content_batches = self.handler.stream_translatable_items(
             lang_code=target_lang,
             statuses=[TranslationStatus.PENDING, TranslationStatus.FAILED],
@@ -102,17 +117,22 @@ class Coordinator:
             logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
             texts_to_translate = [item.value for item in batch]
 
+            # 未来优化点: 为了将原始 context 字典传递给引擎，
+            # ContentItem DTO 和 stream_translatable_items 方法需要被重构以携带它。
+            # 当前，我们无法直接获取原始 context，因此将其设为 None。
+            # 这对于我们现有的引擎（translators, debug）是可接受的。
+            context_for_engine = None
+
             engine_results: List[EngineBatchItemResult] = []
             for attempt in range(max_retries + 1):
                 try:
                     if self.rate_limiter:
-                        logger.debug("正在等待速率限制器令牌...")
                         self.rate_limiter.acquire(1)
-                        logger.debug("已获取速率限制器令牌，继续执行翻译。")
 
                     engine_results = self.active_engine.translate_batch(
                         texts=texts_to_translate,
                         target_lang=target_lang,
+                        context=context_for_engine,
                     )
 
                     has_retryable_errors = any(
@@ -125,8 +145,8 @@ class Coordinator:
                         break
 
                     logger.warning(
-                        f"批次中包含可重试的错误 (尝试次数: {attempt + 1}/{max_retries + 1})。"
-                        "将在退避后重试批次..."
+                        f"批次中包含可重试的错误 (尝试次数: {attempt + 1}/{max_retries + 1})。",
+                        extra_info="将在退避后重试批次...",
                     )
 
                 except Exception as e:
@@ -147,16 +167,20 @@ class Coordinator:
 
             final_results_to_save: List[TranslationResult] = []
             for item, engine_result in zip(batch, engine_results):
-                # 核心修改：在转换为 TranslationResult 时，从 persistence_handler 动态获取 business_id
                 retrieved_business_id = self.handler.get_business_id_for_content(
                     content_id=item.content_id, context_hash=item.context_hash
                 )
+
+                # 核心修正：如果找到了 business_id，就更新它的活跃时间！
+                # 这确保了被处理的任务不会被 GC 错误地清理。
+                if retrieved_business_id:
+                    self.handler.touch_source(retrieved_business_id)
 
                 result = self._convert_to_translation_result(
                     item=item,
                     engine_result=engine_result,
                     target_lang=target_lang,
-                    retrieved_business_id=retrieved_business_id,  # <-- 传递获取到的 business_id
+                    retrieved_business_id=retrieved_business_id,
                 )
                 final_results_to_save.append(result)
                 yield result
@@ -169,11 +193,9 @@ class Coordinator:
         item: ContentItem,
         engine_result: EngineBatchItemResult,
         target_lang: str,
-        retrieved_business_id: Optional[str] = None,  # <-- 新增参数
+        retrieved_business_id: Optional[str] = None,
     ) -> TranslationResult:
-        """内部辅助方法，将引擎原始输出转换为统一的 TranslationResult DTO。
-        现在接受一个可选的 retrieved_business_id。
-        """
+        """内部辅助方法，将引擎原始输出转换为统一的 TranslationResult DTO。"""
         if isinstance(engine_result, EngineSuccess):
             return TranslationResult(
                 original_content=item.value,
@@ -183,7 +205,7 @@ class Coordinator:
                 engine=self.active_engine_name,
                 from_cache=False,
                 context_hash=item.context_hash,
-                business_id=retrieved_business_id,  # <-- 使用传递进来的 business_id
+                business_id=retrieved_business_id,
             )
         elif isinstance(engine_result, EngineError):
             return TranslationResult(
@@ -195,7 +217,7 @@ class Coordinator:
                 error=engine_result.error_message,
                 from_cache=False,
                 context_hash=item.context_hash,
-                business_id=retrieved_business_id,  # <-- 使用传递进来的 business_id
+                business_id=retrieved_business_id,
             )
         else:
             raise TypeError(
@@ -210,21 +232,20 @@ class Coordinator:
         context: Optional[Dict[str, Any]] = None,
         source_lang: Optional[str] = None,
     ) -> None:
-        """统一的翻译请求入口。
-        负责根据传入的文本和目标语言，创建或更新源记录，并生成待翻译任务。
-        """
+        """统一的翻译请求入口。"""
         self._validate_lang_codes(target_langs)
         if source_lang:
             self._validate_lang_codes([source_lang])
 
         logger.debug(
-            f"收到翻译请求: business_id='{business_id}', "
-            f"目标语言={target_langs}, 内容='{text_content[:30]}...'"
+            "收到翻译请求",
+            business_id=business_id,
+            target_langs=target_langs,
+            text_content=text_content[:30] + "...",
         )
         context_hash = get_context_hash(context)
         content_id: Optional[int] = None
 
-        # 如果提供了 business_id，则先更新或创建源记录 (th_sources)
         if business_id:
             source_result = self.handler.update_or_create_source(
                 text_content=text_content,
@@ -233,9 +254,6 @@ class Coordinator:
             )
             content_id = source_result.content_id
 
-        # 无论 business_id 是否提供，都需要确保 content 存在
-        # 如果没有通过 business_id 找到 content_id (即 business_id 为 None)，
-        # 则尝试根据文本内容查找或插入
         with self.handler.transaction() as cursor:
             if content_id is None:
                 cursor.execute(
@@ -251,12 +269,8 @@ class Coordinator:
                     content_id = cursor.lastrowid
 
             if content_id is None:
-                raise RuntimeError(
-                    "Failed to determine content_id for translation task."
-                )
+                raise RuntimeError("无法为翻译任务确定 content_id。")
 
-            # 插入或忽略新的翻译任务
-            # 不再在 th_translations 中存储 business_id
             insert_sql = """
                 INSERT OR IGNORE INTO th_translations
                 (content_id, lang_code, context_hash, status, source_lang_code, engine_version)
@@ -264,12 +278,8 @@ class Coordinator:
             """
             params_to_insert = []
             for lang in target_langs:
-                # 检查是否已存在 TRANSLATED 状态的翻译
                 cursor.execute(
-                    """
-                    SELECT status FROM th_translations
-                    WHERE content_id = ? AND lang_code = ? AND context_hash = ?
-                    """,
+                    "SELECT status FROM th_translations WHERE content_id = ? AND lang_code = ? AND context_hash = ?",
                     (content_id, lang, context_hash),
                 )
                 existing_translation = cursor.fetchone()
@@ -279,9 +289,6 @@ class Coordinator:
                     and existing_translation["status"]
                     == TranslationStatus.TRANSLATED.value
                 ):
-                    logger.debug(
-                        f"翻译 '{text_content[:20]}...' 到 '{lang}' 已存在并已翻译，跳过创建 PENDING 任务。"
-                    )
                     continue
 
                 params_to_insert.append(
@@ -300,13 +307,15 @@ class Coordinator:
                 logger.info(
                     f"为 content_id={content_id} 确保了 {cursor.rowcount} 个新的 PENDING 任务。"
                 )
-            else:
-                logger.info(f"为 content_id={content_id} 未创建新的 PENDING 任务 (可能已存在或已翻译)。")
 
     def run_garbage_collection(
-        self, retention_days: int, dry_run: bool = False
+        self, retention_days: Optional[int] = None, dry_run: bool = False
     ) -> dict:
         """运行垃圾回收进程。"""
+        # 核心修正：如果未提供 retention_days，则从配置中获取
+        if retention_days is None:
+            retention_days = self.config.gc_retention_days
+
         logger.info(
             f"Coordinator 正在启动垃圾回收 (retention_days={retention_days}, dry_run={dry_run})..."
         )

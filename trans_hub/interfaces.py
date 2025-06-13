@@ -84,6 +84,10 @@ class PersistenceHandler(Protocol):
         """提供一个同步数据库事务上下文管理器。"""
         ...
 
+    def touch_source(self, business_id: str) -> None:
+        """更新指定 business_id 的 last_seen_at 时间戳到当前时间。"""
+        ...
+
 
 class AsyncPersistenceHandler(Protocol):
     """异步持久化处理器的接口协议。
