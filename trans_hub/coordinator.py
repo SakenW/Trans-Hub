@@ -7,13 +7,7 @@
 
 import re
 import time
-from typing import (
-    Any,
-    Dict,
-    Generator,
-    List,
-    Optional,
-)
+from typing import Any, Dict, Generator, List, Optional
 
 # 引入 Dict 和 Any，用于 context
 import structlog
@@ -22,14 +16,10 @@ from trans_hub.config import TransHubConfig
 
 # 核心变更: 导入引擎注册表和总配置模型
 from trans_hub.engine_registry import ENGINE_REGISTRY
-from trans_hub.engines.base import (
-    BaseTranslationEngine,
-)
+from trans_hub.engines.base import BaseTranslationEngine
 
 # 确保 BaseTranslationEngine 已导入，其泛型现在应已正确配置
-from trans_hub.interfaces import (
-    PersistenceHandler,
-)
+from trans_hub.interfaces import PersistenceHandler
 
 # 确保 PersistenceHandler 协议已更新
 # 导入其他依赖

@@ -14,10 +14,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 导入基类和相关模型，并引入泛型支持
-from trans_hub.engines.base import (
-    BaseContextModel,
-    BaseTranslationEngine,
-)
+from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 
 # 导入 _ConfigType
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess

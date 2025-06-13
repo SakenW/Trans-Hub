@@ -7,19 +7,13 @@
 
 import logging  # 标准 logging 模块
 import sys
-from typing import (
-    List,
-    Literal,
-    Union,
-)
+from typing import List, Literal, Union
 
 import structlog
 from structlog.dev import ConsoleRenderer
 
 # 导入 structlog 的处理器和渲染器
-from structlog.processors import (
-    JSONRenderer,
-)
+from structlog.processors import JSONRenderer
 
 # 导入 structlog 相关的类型，特别是 Processor
 from structlog.typing import Processor

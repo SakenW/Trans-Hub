@@ -5,9 +5,7 @@
 并包含了对事务管理和垃圾回收参数的协议扩展。
 """
 
-from contextlib import (
-    AbstractContextManager,
-)
+from contextlib import AbstractContextManager
 from typing import Any, AsyncGenerator, Generator, List, Optional, Protocol
 
 # 导入 AbstractContextManager 用于事务上下文
