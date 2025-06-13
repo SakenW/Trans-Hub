@@ -1,3 +1,9 @@
+好的，我将为您更新 `README.md` 文件。这份更新将突出 `Trans-Hub` 最新的改进，特别是关于上下文处理、`business_id` 的精确关联和缓存行为的澄清。我还会链接到我们刚刚完成的 `Cookbook.md` 和更新后的技术规范文档。
+
+以下是更新后的 `README.md` 内容：
+
+---
+
 # Trans-Hub: 智能本地化后端引擎 🚀
 
 [![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)
@@ -16,7 +22,7 @@
 ## ✨ 核心特性
 
 *   **零配置启动**: 内置基于 `translators` 库的免费翻译引擎，实现真正的“开箱即用”。
-*   **持久化缓存**: 所有翻译结果都会被自动存储在本地数据库（默认SQLite）中。重复的翻译请求会立即从缓存返回，极大地降低了API调用成本和响应时间。
+*   **持久化缓存**: 所有翻译结果都会被自动存储在本地数据库（默认SQLite）中。重复的翻译请求会立即从缓存返回，**`Coordinator.process_pending_translations()` 方法将不会再次处理已成功缓存的任务，从而极大地降低了API调用成本和响应时间。**
 *   **🔌 真正的插件化架构**:
     *   **按需安装**: 核心库极其轻量。当你想使用更强大的引擎（如 OpenAI）时，只需安装其可选依赖即可。系统会自动检测并启用它们。
     *   **轻松扩展**: 提供清晰的基类，可以方便地开发和接入自定义的翻译引擎。
@@ -25,8 +31,8 @@
     *   在 API 入口处进行严格的参数校验，防止无效数据进入系统。
 *   **⚙️ 精准的策略控制**:
     *   内置**速率限制器**，保护你的API密钥不因请求过快而被服务商封禁。
-    *   支持带**上下文（Context）**的翻译，实现对同一文本在不同场景下的不同译法。
-*   **生命周期管理**: 内置**垃圾回收（GC）**功能，可定期清理过时和不再使用的数据。
+    *   支持带**上下文（Context）**的翻译，实现对同一文本在不同场景下的不同译法。**上下文处理现在更精确，通过 `__GLOBAL__` 哨兵值确保数据库唯一性。**
+*   **生命周期管理**: 内置**垃圾回收（GC）**功能，可定期清理过时和不再使用的业务关联数据（`th_sources` 表中的 `last_seen_at` 字段）。
 *   **专业级可观测性**: 支持结构化的 JSON 日志和调用链 ID (`correlation_id`)。
 
 ## 🚀 快速上手：零配置体验
@@ -46,7 +52,7 @@ pip install trans-hub
 创建一个 Python 文件（例如 `main.py`）。**你不需要创建 `.env` 文件或进行任何 API 配置！**
 
 ```python
-# main.py
+# main.py (简化示例)
 import os
 import sys
 import structlog
@@ -58,6 +64,7 @@ from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.logging_config import setup_logging
+from trans_hub.types import TranslationStatus # 从 types 导入 TranslationStatus
 
 # 获取一个 logger
 log = structlog.get_logger()
@@ -67,9 +74,13 @@ def initialize_trans_hub():
     setup_logging(log_level="INFO")
 
     DB_FILE = "my_translations.db"
-    if not os.path.exists(DB_FILE):
-        log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
-        apply_migrations(DB_FILE)
+    # 每次运行前删除旧数据库文件，确保干净的演示环境 (仅限演示)
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+        log.info(f"已删除旧数据库文件: {DB_FILE}", db_path=DB_FILE)
+    
+    log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
+    apply_migrations(DB_FILE)
     
     handler = DefaultPersistenceHandler(db_path=DB_FILE)
     
@@ -94,31 +105,17 @@ def main():
         # 使用标准的 IETF 语言标签
         target_language_code = "zh-CN"
 
-        # --- 使用 try...except 块来优雅地处理预期的错误 ---
-        try:
-            log.info("正在登记翻译任务", text=text_to_translate, lang=target_language_code)
-            coordinator.request(
-                target_langs=[target_language_code],
-                text_content=text_to_translate,
-                business_id="app.greeting.hello_world"
-            )
-        except ValueError as e:
-            # 捕获我们自己定义的输入验证错误
-            log.error(
-                "无法登记翻译任务，输入参数有误。",
-                reason=str(e),
-                suggestion="请检查你的语言代码是否符合 'en' 或 'zh-CN' 这样的标准格式。"
-            )
-            # 优雅地退出
-            sys.exit(1)
-
-        # --- 执行翻译工作 ---
-        log.info(f"正在处理 '{target_language_code}' 的待翻译任务...")
-        results_generator = coordinator.process_pending_translations(
-            target_lang=target_language_code
+        log.info("正在登记翻译任务", text=text_to_translate, lang=target_language_code)
+        coordinator.request(
+            target_langs=[target_language_code],
+            text_content=text_to_translate,
+            business_id="app.greeting.hello_world" # 关联一个业务ID
         )
-        
-        results = list(results_generator)
+
+        log.info(f"正在处理 '{target_language_code}' 的待翻译任务...")
+        results = list(coordinator.process_pending_translations(
+            target_lang=target_language_code
+        ))
         
         if results:
             first_result = results[0]
@@ -127,16 +124,15 @@ def main():
                 original=first_result.original_content,
                 translation=first_result.translated_content,
                 status=first_result.status,
-                engine=first_result.engine
+                engine=first_result.engine,
+                business_id=first_result.business_id # 显示关联的业务ID
             )
         else:
             log.warning("没有需要处理的新任务（可能已翻译过）。")
 
     except Exception as e:
-        # 捕获所有其他意外的、严重的错误
         log.critical("程序运行中发生未知严重错误！", exc_info=True)
     finally:
-        # 确保 coordinator 实例存在时才调用 close
         if 'coordinator' in locals() and coordinator:
             coordinator.close()
 
@@ -154,9 +150,12 @@ python main.py
 你将会看到类似下面这样的输出，清晰地展示了从原文到译文的整个过程：
 
 ```
-2024-06-12T... [info     ] 正在登记翻译任务...                    text=Hello, world! lang=zh-CN
-2024-06-12T... [info     ] 正在处理 'zh-CN' 的待翻译任务...
-2024-06-12T... [info     ] 翻译完成！                           original=Hello, world! translation=你好，世界！ status=TRANSLATED engine=translators
+2025-06-13T... [info     ] 已删除旧数据库文件: my_translations.db
+2025-06-13T... [info     ] 数据库不存在，正在创建并迁移...
+2025-06-13T... [info     ] 正在登记翻译任务                       text=Hello, world! lang=zh-CN
+2025-06-13T... [info     ] 为 content_id=1 确保了 1 个新的 PENDING 任务。
+2025-06-13T... [info     ] 正在处理 'zh-CN' 的待翻译任务...
+2025-06-13T... [info     ] 翻译完成！                           original=Hello, world! translation=你好世界！ status=TRANSLATED engine=translators business_id=app.greeting.hello_world
 ```
 就是这么简单！你已经成功地使用 `Trans-Hub` 完成了你的第一个翻译任务。
 
@@ -175,13 +174,15 @@ pip install "trans-hub[openai]"
 在项目根目录创建 `.env` 文件。
 ```env
 # .env
-TH_OPENAI_ENDPOINT="https://your-api-endpoint.com/v1"
+TH_OPENAI_ENDPOINT="https://api.openai.com/v1" # 例如，如果你使用 Azure OpenAI，需要修改此端点
 TH_OPENAI_API_KEY="your-secret-key"
+TH_OPENAI_MODEL="gpt-3.5-turbo" # 推荐使用 gpt-4 或其他更高级模型以获得更好质量
 ```
 > 💡 查看 [`.env.example`](./.env.example) 获取所有可用配置。
 
 **3. 在初始化时激活引擎**:
 只需在创建配置时，明确指定 `active_engine` 即可。
+
 ```python
 # 在你的初始化代码中
 # ...
@@ -191,7 +192,7 @@ config = TransHubConfig(
     database_url=f"sqlite:///{DB_FILE}",
     active_engine="openai",  # <-- 明确指定使用 openai
     engine_configs=EngineConfigs(
-        openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载
+        openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载和配置验证
     )
 )
 # ...
@@ -199,16 +200,16 @@ config = TransHubConfig(
 
 ## 核心概念
 
-*   **Coordinator**: 你的主要交互对象，负责编排整个翻译流程。
+*   **Coordinator**: 你的主要交互对象，负责编排整个翻译流程，包括从 `PersistenceHandler` 获取任务、调用 `Engine` 进行翻译、应用重试和速率限制，并**动态协调 `business_id` 等业务信息以构建完整的 `TranslationResult`**。
 *   **Engine**: 翻译服务的具体实现。`Trans-Hub` 会自动检测你安装了哪些引擎的依赖，并使其可用。
-*   **`request()`**: 用于“登记”一个翻译需求，非常轻量。
-*   **`process_pending_translations()`**: 用于“执行”翻译工作，会真实地调用API，建议在后台执行。
+*   **`request()`**: 用于“登记”一个翻译需求，非常轻量。它会**更新 `th_sources` 表中对应 `business_id` 的活跃时间戳**，并创建或更新 `th_translations` 表中的 `PENDING` 任务（如果该翻译尚未成功缓存）。
+*   **`process_pending_translations()`**: 用于“执行”翻译工作，会真实地调用API，建议在后台执行。它**只会处理状态为 `PENDING` 或 `FAILED` 的任务**，并返回翻译结果。已成功翻译并缓存的任务不会被此方法再次“处理”。
 
 ## 深入了解
 
-*   想要在 Flask/Django 中使用？请查看我们的 **[Cookbook](./docs/cookbook.md)**。
+*   想要在 Flask/Django 中使用或学习更多高级用法？请查看我们的 **[实践指南 (Cookbook)](./docs/cookbook.md)**。
 *   想开发自己的翻译引擎？请阅读 **[第三方引擎开发指南](./docs/developing-engines.md)**。
-*   对项目的设计哲学和内部架构感兴趣？请深入我们的 **[技术规范文档](./docs/technical-specification-v1.md)**。
+*   对项目的设计哲学和内部架构感兴趣？请深入我们的 **[项目技术规范文档](./docs/technical-specification-v1.1.md)**。
 
 ## 贡献
 
@@ -221,3 +222,5 @@ config = TransHubConfig(
 ## 许可证
 
 `Trans-Hub` 采用 [MIT 许可证](./LICENSE.md)。
+
+---

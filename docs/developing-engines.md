@@ -28,12 +28,14 @@
 
 引擎**不需要**关心：
 *   数据库操作
-*   缓存
+*   缓存命中/未命中逻辑
+*   **`business_id` 的关联、存储或持久化**
+*   **上下文哈希 (`context_hash`) 的生成** (这由 `trans_hub.utils.get_context_hash` 负责)
 *   重试逻辑
 *   速率限制
-*   上下文哈希的生成
+*   其他更高级的协调任务
 
-所有这些复杂的任务都由 `Coordinator` 来处理。你只需要专注于实现最纯粹、最高效的“翻译”这一步。
+所有这些复杂的任务都由 `Coordinator` 或 `PersistenceHandler` 来处理。你只需要专注于实现最纯粹、最高效的“翻译”这一步。
 
 ### **2. 准备工作：环境设置**
 
@@ -65,7 +67,7 @@ poetry install --with dev
 打开你刚创建的 `awesome_engine.py` 文件，编写引擎的核心逻辑。这通常包含以下几个部分：
 
 1.  **必要的导入**: 导入 `typing` 相关类型，以及 `pydantic`, `pydantic_settings`。最重要的是，从 `trans_hub.engines.base` 导入 `BaseTranslationEngine`, `BaseEngineConfig`, `BaseContextModel`。
-2.  **（可选）上下文模型**: 如果你的引擎需要额外的上下文信息（如语气、领域），请定义一个继承自 `BaseContextModel` 的 Pydantic 模型。
+2.  **（可选）上下文模型**: 如果你的引擎需要额外的上下文信息（如语气、领域），请定义一个继承自 `BaseContextModel` 的 Pydantic 模型。**当 `Coordinator` 调用你的引擎的 `translate_batch` 方法时，它会确保传入的 `context` 参数是你的 `CONTEXT_MODEL` 的实例（或 `None`），而不是原始的字典。**
 3.  **配置模型**: 定义一个继承自 **`pydantic_settings.BaseSettings` 和 `trans_hub.engines.base.BaseEngineConfig`** 的 Pydantic 模型。这是确保你的配置能从环境变量加载并与 `BaseTranslationEngine` 泛型兼容的关键。
 4.  **引擎主类**: 实现你的引擎主类，它必须继承自 `BaseTranslationEngine` 并**明确指定泛型参数为你的配置模型**。
 
@@ -73,14 +75,13 @@ poetry install --with dev
 # trans_hub/engines/awesome_engine.py
 
 import logging # 用于日志记录
-from typing import List, Optional
+from typing import List, Optional, Dict, Any # 确保导入 Dict 和 Any (用于 context 参数类型)
 
 # 导入 pydantic 相关
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict # 确保导入 SettingsConfigDict
 
 # 导入 Trans-Hub 的基类和返回类型
-# 核心：导入 BaseEngineConfig
 from trans_hub.engines.base import BaseTranslationEngine, BaseEngineConfig, BaseContextModel
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
@@ -99,6 +100,7 @@ logger = logging.getLogger(__name__)
 
 
 # （可选）1. 定义 Context 模型 (如果引擎支持上下文信息)
+# 这将确保从 Coordinator 传入的 context 是一个结构化的 Pydantic 对象
 class AwesomeContext(BaseContextModel):
     """AwesomeTranslate 引擎的上下文模型。"""
     formality: str = "default"  # 例如，"default", "formal", "informal"
@@ -108,7 +110,6 @@ class AwesomeContext(BaseContextModel):
 # 核心：同时继承 BaseSettings 和 BaseEngineConfig
 class AwesomeEngineConfig(BaseSettings, BaseEngineConfig):
     """AwesomeTranslate 引擎的配置模型。"""
-    # model_config 用于 pydantic-settings 的配置
     model_config = SettingsConfigDict(
         extra="ignore"  # 忽略环境变量中未在模型中定义的额外字段
     )
@@ -161,12 +162,12 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         texts: List[str],
         target_lang: str,
         source_lang: Optional[str] = None,
-        context: Optional[AwesomeContext] = None, # 明确上下文类型
+        context: Optional[AwesomeContext] = None, # <-- 注意这里 context 的类型是 AwesomeContext 实例
     ) -> List[EngineBatchItemResult]:
         """同步批量翻译文本。"""
         results: List[EngineBatchItemResult] = []
         
-        # 从上下文中获取额外参数，如果定义了上下文模型的话
+        # 从上下文对象中获取额外参数，如果定义了上下文模型的话
         formality_level = context.formality if context else "default"
         
         for text in texts:
@@ -204,7 +205,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         texts: List[str],
         target_lang: str,
         source_lang: Optional[str] = None,
-        context: Optional[AwesomeContext] = None, # 明确上下文类型
+        context: Optional[AwesomeContext] = None, # <-- 注意这里 context 的类型是 AwesomeContext 实例
     ) -> List[EngineBatchItemResult]:
         """异步批量翻译文本。
         
@@ -271,6 +272,7 @@ class EngineConfigs(BaseModel):
 
 # ... 其他导入 ...
 from trans_hub.engines.awesome_engine import AwesomeEngine, AwesomeEngineConfig, AwesomeContext
+from trans_hub.utils import get_context_hash # 导入 get_context_hash
 
 # ...
 
@@ -304,15 +306,16 @@ def test_awesome_engine_flow():
     test_text = "Hello, world!"
     business_id = "test.awesome.greeting"
     target_lang = "zh-CN"
-    # 示例上下文
-    context_data = AwesomeContext(formality="formal")
+    # 示例上下文：创建 AwesomeContext 实例，然后转换为字典传入 request
+    context_data_instance = AwesomeContext(formality="formal")
+    context_data_dict = context_data_instance.model_dump() # 将 Pydantic 模型转换为字典传入 request
 
     # 发送翻译请求
     coordinator.request(
         target_langs=[target_lang],
         text_content=test_text,
         business_id=business_id,
-        context=context_data.model_dump() # 将 Pydantic 模型转换为字典传入
+        context=context_data_dict # 将 Pydantic 模型转换为字典传入
     )
 
     # 处理待翻译任务
@@ -322,7 +325,10 @@ def test_awesome_engine_flow():
     result = translation_results[0]
     assert result.status == TranslationStatus.TRANSLATED
     assert result.translated_content # 检查翻译结果非空
-    assert "Translated by AwesomeEngine" in result.translated_content # 根据你的_debug_translate实现调整
+    assert result.engine == "awesome" # 确保使用了你的引擎
+    assert result.business_id == business_id # 确保 business_id 被正确关联
+    assert result.context_hash == get_context_hash(context_data_dict) # 确保 context_hash 正确
+
     logger.info(f"AwesomeEngine 翻译结果: {result.translated_content}")
 
     # 清理（可选，取决于 MockPersistenceHandler）
@@ -363,22 +369,27 @@ if __name__ == "__main__":
         CONTEXT_MODEL = YourContext # 绑定你的 Context 模型
         # ...
     ```
-3.  **在 `translate_batch` 中使用**: `Coordinator` 会自动验证并传入正确的 `context` 对象。
+3.  **在 `translate_batch` 中使用**: 当上层应用通过 `coordinator.request(..., context={'formality': 'formal'})` 传入一个字典时，`Coordinator` 会自动使用你的引擎的 `CONTEXT_MODEL` (`YourContext`) 来验证这个字典，并将其转换为 `YourContext` 的实例，然后传递给 `translate_batch` 或 `atranslate_batch` 方法。
     ```python
     # your_engine.py
-    from typing import Optional # 确保 Optional 已导入
+    from typing import Optional, Dict, Any # 确保 Optional, Dict, Any 已导入
     # ...
     
-    # 明确 context 的类型为 YourContext
-    def translate_batch(self, ..., context: Optional[YourContext] = None):
+    # 明确 context 的类型为 YourContext 实例
+    def translate_batch(
+        self, 
+        texts: List[str], 
+        target_lang: str, 
+        source_lang: Optional[str] = None, 
+        context: Optional[YourContext] = None # <-- 这里的 context 已是 YourContext 实例
+    ) -> List[EngineBatchItemResult]:
         formality = "default"
         if context:
-            formality = context.formality # Mypy 现在会识别 context 为 YourContext 类型
+            formality = context.formality # Mypy 现在会识别 context 为 YourContext 类型，可以直接访问其属性
         # 使用 formality 值来调用 API
         api_response = self.client.translate(..., formality=formality)
         # ...
     ```
-当上层应用调用 `coordinator.request` 时，传入的 `context` 参数应该是一个字典。`Coordinator` 会使用你的引擎的 `CONTEXT_MODEL` 来验证并将其转换为正确的 Pydantic 对象，然后传递给 `translate_batch` 或 `atranslate_batch`。
 
 ### **7. 一份完整的示例：`AwesomeEngine`**
 
@@ -386,7 +397,7 @@ if __name__ == "__main__":
 # trans_hub/engines/awesome_engine.py (完整示例)
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any # 确保导入 Dict 和 Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -455,7 +466,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         """同步批量翻译。"""
         results: List[EngineBatchItemResult] = []
         
-        formality_level = context.formality if context else "default" # 从上下文中获取正式程度
+        formality_level = context.formality if context else "default" # 从上下文对象中获取正式程度
         
         for text in texts:
             try:
@@ -523,5 +534,3 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
                 
         return results
 ```
-
----
