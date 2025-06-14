@@ -1,10 +1,12 @@
-# trans_hub/coordinator.py (v1.1 最终版)
+# trans_hub/coordinator.py
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
+
 它采用动态引擎发现机制，并负责编排所有核心工作流，包括任务处理、重试、
 速率限制、请求处理和垃圾回收等。
 """
-
+import asyncio
+import json  # 核心修复：导入 json 库
 import re
 import time
 from typing import Any, Dict, Generator, List, Optional
@@ -33,6 +35,7 @@ logger = structlog.get_logger(__name__)
 class Coordinator:
     """同步版本的主协调器。
     实现了动态引擎加载、重试、速率限制等所有核心功能。
+    v1.1.1: 增加了对纯异步引擎的“异步感知”支持，并修复了上下文传递问题。
     """
 
     def __init__(
@@ -68,10 +71,12 @@ class Coordinator:
                 f"在配置中未找到活动引擎 '{self.active_engine_name}' 的配置。"
             )
 
+        # 实例化引擎配置
         engine_config_instance = engine_class.CONFIG_MODEL(
             **engine_config_data.model_dump()
         )
 
+        # 实例化活动引擎
         self.active_engine: BaseTranslationEngine[Any] = engine_class(
             config=engine_config_instance
         )
@@ -83,18 +88,16 @@ class Coordinator:
     def process_pending_translations(
         self,
         target_lang: str,
-        batch_size: int = 50,
+        batch_size: Optional[int] = None,
         limit: Optional[int] = None,
         max_retries: Optional[int] = None,
         initial_backoff: Optional[float] = None,
     ) -> Generator[TranslationResult, None, None]:
-        """处理指定语言的待翻译任务，内置重试和速率限制逻辑。
-
-        在处理过程中，如果一个任务关联了 business_id，它的 last_seen_at 时间戳会被更新。
-        """
+        """处理指定语言的待翻译任务，内置重试和速率限制逻辑。"""
         self._validate_lang_codes([target_lang])
 
-        # 如果未提供重试参数，则从配置中获取
+        # 如果未提供参数，则从配置中获取默认值
+        batch_size = batch_size if batch_size is not None else self.config.batch_size
         max_retries = (
             max_retries
             if max_retries is not None
@@ -118,14 +121,35 @@ class Coordinator:
         )
 
         for batch in content_batches:
+            if not batch:
+                continue
+
             logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
             texts_to_translate = [item.value for item in batch]
 
-            # 未来优化点: 为了将原始 context 字典传递给引擎，
-            # ContentItem DTO 和 stream_translatable_items 方法需要被重构以携带它。
-            # 当前，我们无法直接获取原始 context，因此将其设为 None。
-            # 这对于我们现有的引擎（translators, debug）是可接受的。
-            context_for_engine = None
+            context_dict = batch[0].context
+            validated_context = None
+            if context_dict and self.active_engine.CONTEXT_MODEL:
+                try:
+                    validated_context = self.active_engine.CONTEXT_MODEL.model_validate(
+                        context_dict
+                    )
+                except Exception as e:
+                    logger.error(
+                        "上下文验证失败，将作为错误处理整个批次",
+                        context=context_dict,
+                        error=str(e),
+                        exc_info=True,
+                    )
+                    engine_results = [
+                        EngineError(
+                            error_message=f"无效的上下文: {e}", is_retryable=False
+                        )
+                    ] * len(batch)
+                    yield from self._process_and_save_batch_results(
+                        batch, engine_results, target_lang
+                    )
+                    continue
 
             engine_results: List[EngineBatchItemResult] = []
             for attempt in range(max_retries + 1):
@@ -133,11 +157,26 @@ class Coordinator:
                     if self.rate_limiter:
                         self.rate_limiter.acquire(1)
 
-                    engine_results = self.active_engine.translate_batch(
-                        texts=texts_to_translate,
-                        target_lang=target_lang,
-                        context=context_for_engine,
-                    )
+                    if self.active_engine.IS_ASYNC_ONLY:
+                        logger.debug(
+                            "调用纯异步引擎...", engine=self.active_engine_name
+                        )
+                        engine_results = asyncio.run(
+                            self.active_engine.atranslate_batch(
+                                texts=texts_to_translate,
+                                target_lang=target_lang,
+                                source_lang=self.config.source_lang,
+                                context=validated_context,
+                            )
+                        )
+                    else:
+                        logger.debug("调用同步引擎...", engine=self.active_engine_name)
+                        engine_results = self.active_engine.translate_batch(
+                            texts=texts_to_translate,
+                            target_lang=target_lang,
+                            source_lang=self.config.source_lang,
+                            context=validated_context,
+                        )
 
                     has_retryable_errors = any(
                         isinstance(r, EngineError) and r.is_retryable
@@ -173,28 +212,37 @@ class Coordinator:
                         f"已达到最大重试次数 ({max_retries})，放弃当前批次的重试。"
                     )
 
-            final_results_to_save: List[TranslationResult] = []
-            for item, engine_result in zip(batch, engine_results):
-                retrieved_business_id = self.handler.get_business_id_for_content(
-                    content_id=item.content_id, context_hash=item.context_hash
-                )
+            yield from self._process_and_save_batch_results(
+                batch, engine_results, target_lang
+            )
 
-                # 核心修正：如果找到了 business_id，就更新它的活跃时间！
-                # 这确保了被处理的任务不会被 GC 错误地清理。
-                if retrieved_business_id:
-                    self.handler.touch_source(retrieved_business_id)
+    def _process_and_save_batch_results(
+        self,
+        batch: List[ContentItem],
+        engine_results: List[EngineBatchItemResult],
+        target_lang: str,
+    ) -> Generator[TranslationResult, None, None]:
+        """内部辅助方法，将引擎结果转换为 DTO，保存到数据库，并逐个返回。"""
+        final_results_to_save: List[TranslationResult] = []
+        for item, engine_result in zip(batch, engine_results):
+            retrieved_business_id = self.handler.get_business_id_for_content(
+                content_id=item.content_id, context_hash=item.context_hash
+            )
 
-                result = self._convert_to_translation_result(
-                    item=item,
-                    engine_result=engine_result,
-                    target_lang=target_lang,
-                    retrieved_business_id=retrieved_business_id,
-                )
-                final_results_to_save.append(result)
-                yield result
+            if retrieved_business_id:
+                self.handler.touch_source(retrieved_business_id)
 
-            if final_results_to_save:
-                self.handler.save_translations(final_results_to_save)
+            result = self._convert_to_translation_result(
+                item=item,
+                engine_result=engine_result,
+                target_lang=target_lang,
+                retrieved_business_id=retrieved_business_id,
+            )
+            final_results_to_save.append(result)
+            yield result
+
+        if final_results_to_save:
+            self.handler.save_translations(final_results_to_save)
 
     def _convert_to_translation_result(
         self,
@@ -252,6 +300,8 @@ class Coordinator:
             text_content=text_content[:30] + "...",
         )
         context_hash = get_context_hash(context)
+        # 核心修复: 将 context 字典序列化为 JSON 字符串，以便存入数据库
+        context_json = json.dumps(context) if context else None
         content_id: Optional[int] = None
 
         if business_id:
@@ -264,6 +314,7 @@ class Coordinator:
 
         with self.handler.transaction() as cursor:
             if content_id is None:
+                # 首先尝试查找现有的 content_id
                 cursor.execute(
                     "SELECT id FROM th_content WHERE value = ?", (text_content,)
                 )
@@ -271,6 +322,7 @@ class Coordinator:
                 if row:
                     content_id = row["id"]
                 else:
+                    # 如果不存在，则插入新的内容
                     cursor.execute(
                         "INSERT INTO th_content (value) VALUES (?)", (text_content,)
                     )
@@ -279,10 +331,11 @@ class Coordinator:
             if content_id is None:
                 raise RuntimeError("无法为翻译任务确定 content_id。")
 
+            # 核心修复: 在 INSERT 语句中加入 context 列
             insert_sql = """
                 INSERT OR IGNORE INTO th_translations
-                (content_id, lang_code, context_hash, status, source_lang_code, engine_version)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (content_id, lang_code, context_hash, status, source_lang_code, engine_version, context)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             params_to_insert = []
             for lang in target_langs:
@@ -299,6 +352,7 @@ class Coordinator:
                 ):
                     continue
 
+                # 核心修复: 在参数元组中添加 context_json
                 params_to_insert.append(
                     (
                         content_id,
@@ -307,6 +361,7 @@ class Coordinator:
                         TranslationStatus.PENDING.value,
                         source_lang,
                         self.active_engine.VERSION,
+                        context_json,  # <--- 添加此参数
                     )
                 )
 
@@ -320,7 +375,6 @@ class Coordinator:
         self, retention_days: Optional[int] = None, dry_run: bool = False
     ) -> dict:
         """运行垃圾回收进程。"""
-        # 核心修正：如果未提供 retention_days，则从配置中获取
         if retention_days is None:
             retention_days = self.config.gc_retention_days
 

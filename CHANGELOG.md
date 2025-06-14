@@ -7,6 +7,32 @@
 
 ---
 
+## **[1.1.1] - 2024-06-15**
+
+这是一个关键的架构修复版本，解决了同步 `Coordinator` 与纯异步引擎的兼容性问题，并修正了多处文档与代码不一致的地方。
+
+### 🐛 修复 (Fixed)
+
+- **修复了 `Coordinator` 无法驱动纯异步引擎的核心问题**：
+
+  - 在 `BaseTranslationEngine` 中引入了 `IS_ASYNC_ONLY` 标志。
+  - `Coordinator.process_pending_translations` 现在是“异步感知”的：当检测到活动引擎的 `IS_ASYNC_ONLY` 标志为 `True` 时，它会自动使用 `asyncio.run()` 来调用引擎的 `atranslate_batch` 方法。
+  - 这使得 `OpenAIEngine` 等纯异步引擎现在可以被 `Coordinator` 无缝驱动，解决了之前版本中该功能无法使用的问题。
+
+- **修复了上下文（Context）无法传递给引擎的问题**:
+
+  - `Coordinator` 现在可以正确地从持久化层获取上下文信息，并使用引擎定义的 `CONTEXT_MODEL` 进行验证和转换，然后将其传递给翻译引擎。
+
+- **修复了 `OpenAIEngine` 的性能问题**:
+  - `atranslate_batch` 方法已重构为使用 `asyncio.gather` 并发执行翻译请求，显著提高了处理批次任务的效率。
+
+### 🚀 变更 (Changed)
+
+- **文档与代码一致性修正**：
+  - **`RateLimiter`**: 在 `Cookbook` 和其他文档中，`RateLimiter` 的初始化参数已从不正确的 `rate`/`burst` 修正为 `refill_rate`/`capacity`。
+  - **核心类型导入**: 在 `Cookbook` 和开发指南中，为核心数据传输对象（如 `TranslationResult`）明确添加了从 `trans_hub.types` 的导入路径。
+  - **`EngineError` 用法澄清**: 在《第三方引擎开发指南》中，用醒目的提示框明确指出，引擎在遇到错误时应 `return` 一个 `EngineError` 对象，而不是 `raise` 它。
+
 ## **[1.1.0] - 2024-06-14**
 
 这是一个重要的维护和健壮性更新版本，主要解决了在实际复杂场景中发现的数据一致性和数据流问题，使系统更加可靠和可预测。
@@ -16,12 +42,6 @@
 - **`__GLOBAL__` 哨兵值**: 在 `trans_hub.types` 中引入了 `GLOBAL_CONTEXT_SENTINEL` 常量。此常量用于在数据库 `context_hash` 字段中表示“无特定上下文”的情况，以确保 `UNIQUE` 约束能够正确工作，防止重复记录。
 - **`PersistenceHandler.get_translation()` 方法**: 新增了一个公共接口，用于直接从缓存中查询已成功翻译的结果，返回一个 `TranslationResult` DTO，方便上层应用直接获取已缓存的翻译。
 - **`PersistenceHandler.get_business_id_for_content()` 方法**: 新增了一个内部方法，用于根据 `content_id` 和 `context_hash` 动态查询关联的 `business_id`，作为 `business_id` 数据流优化的关键一环。
-
-好的，当然。
-
-根据我们的所有修复和讨论，以下是 `CHANGELOG.md` 中 `v1.1.0` 版本的“变更 (Changed)”部分的最终完整版。它详细记录了我们所做的所有重要的架构和逻辑优化。
-
----
 
 ### 🚀 变更 (Changed)
 
@@ -121,5 +141,3 @@
 - 解决了在特定环境（Conda + Poetry + 云同步盘）下，`.env` 文件无法被可靠加载的问题，最终通过“修改环境变量名”和“主动加载”两种策略定位并解决了问题。
 - 修复了多个在开发过程中由测试驱动发现的逻辑错误，如**垃圾回收**的级联删除计数问题、重试逻辑与配置传递问题等。
 - 解决了多个因依赖项未正确导入或配置导致的 `ModuleNotFoundError`、`NameError` 和 Mypy 类型检查错误，特别是关于 `BaseTranslationEngine` 的泛型兼容性、`PersistenceHandler` 协议的方法签名、以及 `logging_config` 的类型定义。
-
----

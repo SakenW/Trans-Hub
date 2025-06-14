@@ -51,7 +51,7 @@ import os
 import structlog
 from dotenv import load_dotenv
 
-from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.logging_config import setup_logging
@@ -76,10 +76,7 @@ def initialize_trans_hub():
 
     # 创建一个最简单的配置对象。
     # 它将自动使用默认的、免费的 'translators' 引擎。
-    config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE}",
-        engine_configs=EngineConfigs()
-    )
+    config = TransHubConfig()
 
     coordinator = Coordinator(config=config, persistence_handler=handler)
     return coordinator
@@ -186,24 +183,35 @@ TH_OPENAI_MODEL="gpt-3.5-turbo" # 推荐使用 gpt-4 或其他更高级模型以
 ```python
 # 在你的初始化代码中
 # ...
+from trans_hub.config import EngineConfigs, TransHubConfig
 from trans_hub.engines.openai import OpenAIEngineConfig
 
-config = TransHubConfig(
-    database_url=f"sqlite:///{DB_FILE}",
-    active_engine="openai",  # <-- 明确指定使用 openai
-    engine_configs=EngineConfigs(
-        openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载和配置验证
+# ...
+
+def initialize_trans_hub():
+    # ... (与之前相同的初始化代码) ...
+    handler = DefaultPersistenceHandler(db_path=DB_FILE)
+
+    # 创建一个配置，并明确激活 'openai' 引擎
+    config = TransHubConfig(
+        active_engine="openai",
+        engine_configs=EngineConfigs(
+            openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载和配置验证
+        )
     )
-)
+    
+    coordinator = Coordinator(config=config, persistence_handler=handler)
+    return coordinator
+
 # ...
 ```
 
 ## 核心概念
 
-- **Coordinator**: 你的主要交互对象，负责编排整个翻译流程，包括从 `PersistenceHandler` 获取任务、调用 `Engine` 进行翻译、应用重试和速率限制，并**动态协调 `business_id` 等业务信息以构建完整的 `TranslationResult`**。
+- **Coordinator**: 你的主要交互对象，负责编排整个翻译流程。**它现在可以智能地驱动同步和异步两种引擎**，应用重试和速率限制，并协调业务信息以构建完整的 `TranslationResult`。
 - **Engine**: 翻译服务的具体实现。`Trans-Hub` 会自动检测你安装了哪些引擎的依赖，并使其可用。
-- **`request()`**: 用于“登记”一个翻译需求，非常轻量。它会**更新 `th_sources` 表中对应 `business_id` 的活跃时间戳**，并创建或更新 `th_translations` 表中的 `PENDING` 任务（如果该翻译尚未成功缓存）。
-- **`process_pending_translations()`**: 用于“执行”翻译工作，会真实地调用 API，建议在后台执行。它**只会处理状态为 `PENDING` 或 `FAILED` 的任务**，并返回翻译结果。已成功翻译并缓存的任务不会被此方法再次“处理”。
+- **`request()`**: 用于“登记”一个翻译需求，非常轻量。它会更新 `th_sources` 表中对应 `business_id` 的活跃时间戳，并创建或更新 `th_translations` 表中的 `PENDING` 任务。
+- **`process_pending_translations()`**: 用于“执行”翻译工作，会真实地调用 API，建议在后台执行。它只会处理状态为 `PENDING` 或 `FAILED` 的任务，并返回翻译结果。
 
 ## 深入了解
 
@@ -222,5 +230,3 @@ config = TransHubConfig(
 ## 许可证
 
 `Trans-Hub` 采用 [MIT 许可证](./LICENSE.md)。
-
----

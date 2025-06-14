@@ -1,17 +1,13 @@
-"""trans_hub/types.py (v0.1 - 最终最终修正版 - 修正 Ruff 警告)
-
+# trans_hub/types.py
+"""
 本模块定义了 Trans-Hub 引擎的核心数据传输对象 (DTOs)、枚举和数据结构。
 它是应用内部数据契约的“单一事实来源”，已根据最终版文档进行更新。
 所有与外部或模块间交互的数据结构都应在此定义。
 """
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union  # 恢复导入 Dict 和 Any
 
 from pydantic import BaseModel, Field
-
-# 移除未使用的导入
-# from typing import Dict, Any
-
 
 # ==============================================================================
 #  枚举 (Enumerations)
@@ -36,8 +32,8 @@ class TranslationStatus(str, Enum):
 class EngineSuccess(BaseModel):
     """代表从翻译引擎返回的单次 *成功* 的翻译结果。"""
 
+    # 移除了未使用的 detected_source_lang 字段，保持 DTO 简洁
     translated_text: str
-    detected_source_lang: Optional[str] = None
 
 
 class EngineError(BaseModel):
@@ -85,13 +81,15 @@ class SourceUpdateResult(BaseModel):
 
 
 class ContentItem(BaseModel):
-    """[修正] 内部处理时，代表一个待翻译任务的结构化对象。
-    不再包含 business_id，因为它应该由 Coordinator 动态从 th_sources 获取。
-    """
+    """内部处理时，代表一个待翻译任务的结构化对象。"""
 
     content_id: int
     value: str
     context_hash: str  # 现在是 NOT NULL
+
+    # 核心修复: 添加 context 字段以打通从持久化层到 Coordinator 的数据流。
+    # 这个字段将携带从数据库中读取的、原始的 JSON 上下文（已解析为 dict）。
+    context: Optional[Dict[str, Any]] = None
 
 
 # ==============================================================================

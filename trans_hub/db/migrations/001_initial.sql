@@ -1,4 +1,4 @@
--- Trans-Hub Schema: Version 1 (基于 v0.1 最终版文档 - 最终最终修正版)
+-- Trans-Hub Schema: Version 1 (基于 v1.1.1 修复版)
 -- 本文件定义了 Trans-Hub 核心引擎的初始数据库结构。
 
 -- ==============================================================================
@@ -17,16 +17,18 @@ PRAGMA journal_mode = WAL;
 -- ==============================================================================
 
 -- 1. 元数据表 (th_meta)
+-- 用于存储数据库自身的元数据，如 schema 版本。
 CREATE TABLE IF NOT EXISTS th_meta (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
 );
 
 -- 初始化 schema 版本号。
-INSERT INTO th_meta (key, value) VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO th_meta (key, value) VALUES ('schema_version', '1');
 
 
 -- 2. 内容表 (th_content)
+-- 存储唯一的、去重后的原始文本。
 CREATE TABLE IF NOT EXISTS th_content (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     value TEXT NOT NULL UNIQUE,
@@ -56,12 +58,13 @@ CREATE TABLE IF NOT EXISTS th_translations (
     lang_code TEXT NOT NULL,
     context_hash TEXT NOT NULL DEFAULT '__GLOBAL__',
 
+    -- 核心修复: 添加 context 列，用于存储原始上下文的 JSON 字符串。
+    context TEXT,
+
     translation_content TEXT,
     engine TEXT,
-    engine_version TEXT NOT NULL,
+    engine_version TEXT, -- 注意：此列在 v1.1.1 中由 Coordinator.request 写入，但不再由 save_translations 更新
     score REAL,
-
-    -- business_id TEXT, -- <-- 核心修改：移除 th_translations.business_id 字段
 
     status TEXT NOT NULL CHECK(status IN ('PENDING', 'TRANSLATING', 'TRANSLATED', 'FAILED', 'APPROVED')),
     retry_count INTEGER NOT NULL DEFAULT 0,
@@ -69,6 +72,7 @@ CREATE TABLE IF NOT EXISTS th_translations (
     
     FOREIGN KEY(content_id) REFERENCES th_content(id) ON DELETE CASCADE,
     
+    -- 确保一个内容针对特定语言和上下文的翻译是唯一的
     UNIQUE(content_id, lang_code, context_hash)
 );
 
