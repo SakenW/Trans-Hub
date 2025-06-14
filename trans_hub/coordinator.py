@@ -80,6 +80,14 @@ class Coordinator:
         self.active_engine: BaseTranslationEngine[Any] = engine_class(
             config=engine_config_instance
         )
+
+        # 核心修补: 在初始化时检查源语言依赖
+        if self.active_engine.REQUIRES_SOURCE_LANG and not self.config.source_lang:
+            raise ValueError(
+                f"活动引擎 '{self.active_engine_name}' 需要提供源语言 (REQUIRES_SOURCE_LANG=True), "
+                f"但全局配置 'source_lang' 未设置。"
+            )
+
         logger.info(
             f"Coordinator 初始化完成。活动引擎: '{self.active_engine_name}', "
             f"速率限制器: {'已启用' if self.rate_limiter else '未启用'}"
@@ -286,12 +294,9 @@ class Coordinator:
         text_content: str,
         business_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
-        source_lang: Optional[str] = None,
     ) -> None:
         """统一的翻译请求入口。"""
         self._validate_lang_codes(target_langs)
-        if source_lang:
-            self._validate_lang_codes([source_lang])
 
         logger.debug(
             "收到翻译请求",
@@ -359,9 +364,9 @@ class Coordinator:
                         lang,
                         context_hash,
                         TranslationStatus.PENDING.value,
-                        source_lang,
+                        self.config.source_lang,  # <-- 使用全局配置
                         self.active_engine.VERSION,
-                        context_json,  # <--- 添加此参数
+                        context_json,
                     )
                 )
 

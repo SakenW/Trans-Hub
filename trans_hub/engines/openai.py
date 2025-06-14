@@ -91,7 +91,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
         # 核心修复: 修正 logger.info 的调用方式，符合 structlog 的用法
         logger.info(
-            "openai_engine_initialized",  # 事件名称
+            "openai_engine.initialized",  # 事件名称
             model=self.config.model,  # 结构化上下文
             endpoint=str(self.config.endpoint),
         )
