@@ -9,7 +9,8 @@ import asyncio
 import json  # 核心修复：导入 json 库
 import re
 import time
-from typing import Any, Dict, Generator, List, Optional
+from collections.abc import Generator
+from typing import Any, Optional
 
 import structlog
 
@@ -159,7 +160,7 @@ class Coordinator:
                     )
                     continue
 
-            engine_results: List[EngineBatchItemResult] = []
+            engine_results: list[EngineBatchItemResult] = []
             for attempt in range(max_retries + 1):
                 try:
                     if self.rate_limiter:
@@ -226,12 +227,12 @@ class Coordinator:
 
     def _process_and_save_batch_results(
         self,
-        batch: List[ContentItem],
-        engine_results: List[EngineBatchItemResult],
+        batch: list[ContentItem],
+        engine_results: list[EngineBatchItemResult],
         target_lang: str,
     ) -> Generator[TranslationResult, None, None]:
         """内部辅助方法，将引擎结果转换为 DTO，保存到数据库，并逐个返回。"""
-        final_results_to_save: List[TranslationResult] = []
+        final_results_to_save: list[TranslationResult] = []
         for item, engine_result in zip(batch, engine_results):
             retrieved_business_id = self.handler.get_business_id_for_content(
                 content_id=item.content_id, context_hash=item.context_hash
@@ -290,10 +291,10 @@ class Coordinator:
 
     def request(
         self,
-        target_langs: List[str],
+        target_langs: list[str],
         text_content: str,
         business_id: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> None:
         """统一的翻译请求入口。"""
         self._validate_lang_codes(target_langs)
@@ -390,7 +391,7 @@ class Coordinator:
             retention_days=retention_days, dry_run=dry_run
         )
 
-    def _validate_lang_codes(self, lang_codes: List[str]):
+    def _validate_lang_codes(self, lang_codes: list[str]):
         """内部辅助方法：校验语言代码列表中的每个代码是否符合标准格式。"""
         lang_code_pattern = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
 

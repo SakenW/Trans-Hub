@@ -6,8 +6,9 @@
 import datetime
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -123,10 +124,10 @@ class DefaultPersistenceHandler(PersistenceHandler):
     def stream_translatable_items(
         self,
         lang_code: str,
-        statuses: List[TranslationStatus],
+        statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> Generator[List[ContentItem], None, None]:
+    ) -> Generator[list[ContentItem], None, None]:
         """以流式方式获取待翻译的内容批次。"""
         status_values = tuple(s.value for s in statuses)
         limit_clause = f"LIMIT {limit}" if limit is not None else ""
@@ -183,7 +184,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
             ]
             read_cursor.close()
 
-    def save_translations(self, results: List[TranslationResult]) -> None:
+    def save_translations(self, results: list[TranslationResult]) -> None:
         """将一批翻译结果保存到数据库中。"""
         if not results:
             return
@@ -247,7 +248,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
         self,
         text_content: str,
         target_lang: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
         """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
         from trans_hub.utils import get_context_hash as _get_context_hash_util

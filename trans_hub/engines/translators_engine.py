@@ -5,7 +5,7 @@
 """
 
 import logging  # 导入 logging 模块
-from typing import List, Optional
+from typing import Optional
 
 # 使用 try-except 来处理可选依赖，如果未安装则不加载
 try:
@@ -65,11 +65,11 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     def translate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """
         批量翻译文本内容。
 
@@ -85,7 +85,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         返回:
             List[EngineBatchItemResult]: 包含翻译结果或错误信息的结果列表。
         """
-        results: List[EngineBatchItemResult] = []
+        results: list[EngineBatchItemResult] = []
         for text in texts:
             try:
                 # 调用 translators 库
@@ -113,13 +113,13 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     async def atranslate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[
             str
         ] = None,  # 核心修复：与基类签名保持一致，改为 Optional[str]
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """异步版本的 translate_batch，当前使用同步实现包装。
 
         虽然 `translators` 库也支持异步，但在此 v1.0 版本中，

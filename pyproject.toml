@@ -7,12 +7,12 @@ build-backend = "poetry.core.masonry.api"
 
 
 # ==============================================================================
-#  项目元数据与依赖 (Poetry 配置) - v1.1.0 发布版
+#  项目元数据与依赖 (Poetry 配置)
 # ==============================================================================
 [tool.poetry]
 # --- 基本信息 ---
 name = "trans-hub"
-version = "1.1.0" # <-- 核心修改：版本号已更新
+version = "1.1.0"
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
@@ -45,19 +45,17 @@ python = "^3.9"
 pydantic = "^2.0"
 structlog = "^23.0"
 translators = "^6.0.1"
-# 核心修改：将这两个库移到核心依赖，因为引擎配置加载需要它们
 pydantic-settings = "^2.3.4"
 python-dotenv = "^1.0.1"
 
 
 # --- 可选依赖 (Extras) ---
-# 现在 openai 依赖更纯粹，只包含 openai 库本身
 [tool.poetry.extras]
 openai = ["openai"]
 
 
 # ==============================================================================
-#  开发依赖 (仅用于本地开发、测试等环境)
+#  开发依赖 (统一使用 Ruff 和 Mypy)
 # ==============================================================================
 [tool.poetry.group.dev.dependencies]
 # ✅ 测试相关
@@ -65,44 +63,49 @@ pytest = "^7.4"
 pytest-cov = "^4.1"
 pytest-asyncio = "^0.21.0"
 
-# ✅ 格式化与检查
-black = "^23.0"
-isort = "^5.12"
-ruff = "^0.1.0"
+# ✅ 格式化、检查与类型检查
+# <--- 核心修改：移除了 black 和 isort，只保留 ruff 和 mypy
+ruff = "^0.4.0" # 建议更新到最新版本以获得最佳体验
 mypy = "^1.5"
 
 # ✅ 可选功能相关（用于完整测试）
-# 核心修改：openai 仍然在这里，以便在开发环境中进行测试
 openai = "^1.37.0"
 
 
 # ==============================================================================
-#  开发工具配置
+#  开发工具统一配置 (全部由 Ruff 和 Mypy 管理)
 # ==============================================================================
 
-[tool.black]
-line-length = 88
-target-version = ["py39"]
-skip-string-normalization = false  # 默认行为，推荐保留
-
-[tool.isort]
-profile = "black"
-line_length = 88
-multi_line_output = 3
-include_trailing_comma = true
-
+# --- Ruff 统一配置 (格式化 + Linter) ---
 [tool.ruff]
+# 通用配置，对 Linter 和 Formatter 都生效
 line-length = 88
-# 保持您之前的 ruff 配置
-extend-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
+target-version = "py39"
+
+[tool.ruff.lint]
+# 选择要启用的 linter 规则
+# I: isort 规则，替代 isort
+# E, W, F: Pyflakes 和 pycodestyle 规则
+# 其他是你之前选择的规则，都很好
+select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
 ignore = [
+    # 忽略文档字符串相关的规则 (按需保留)
     "D100", "D104", "D107",
     "D200", "D203", "D204", "D205",
     "D211", "D212", "D213",
     "D400", "D407", "D413", "D415",
-    "E501",  # ⬅️ 忽略行过长错误
+    # E501 (line too long) 由 ruff format 自动处理，通常可以忽略
+    "E501",
 ]
 
+[tool.ruff.format]
+# Ruff Formatter 的配置
+# 默认就是 "black" 兼容模式，通常无需额外配置
+# skip-string-normalization = false 是默认值，这里无需再写
+
+# <--- 核心修改：[tool.black] 和 [tool.isort] 已被完全移除
+
+# --- MyPy 类型检查配置 ---
 [tool.mypy]
 python_version = "3.9"
 warn_return_any = true

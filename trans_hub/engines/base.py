@@ -8,7 +8,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Generic, List, Optional, Type, TypeVar
+from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel
 
@@ -73,11 +73,11 @@ class BaseTranslationEngine(
     # 指定该引擎所使用的配置模型类型。必须是 BaseEngineConfig 的子类。
     # 现在 `CONFIG_MODEL` 的类型是 `Type[_ConfigType]`，它可以是 `BaseEngineConfig`
     # 或其任何子类，与泛型参数一致。
-    CONFIG_MODEL: Type[_ConfigType]
+    CONFIG_MODEL: type[_ConfigType]
 
     # 指定该引擎所使用的上下文模型类型。必须是 BaseContextModel 的子类。
     # Coordinator 将使用此模型来验证和结构化传入的上下文。
-    CONTEXT_MODEL: Type[BaseContextModel] = BaseContextModel
+    CONTEXT_MODEL: type[BaseContextModel] = BaseContextModel
 
     # 引擎的版本号，用于数据持久化和问题追踪。
     VERSION: str = "1.0.0"
@@ -103,11 +103,11 @@ class BaseTranslationEngine(
     @abstractmethod
     def translate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """批量翻译一组文本。这是一个同步（阻塞）方法。
 
         重要约束：
@@ -129,11 +129,11 @@ class BaseTranslationEngine(
     @abstractmethod
     async def atranslate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """批量翻译一组文本的异步版本。
 
         约束与同步版本完全相同。

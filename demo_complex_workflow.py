@@ -1,6 +1,6 @@
 # demo_complex_workflow.py (最终最终修正版 - 再次修正 Ruff 警告)
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 # 第三方库导入
 import structlog
@@ -47,7 +47,7 @@ def initialize_trans_hub(db_file: str, gc_retention_days: int) -> Coordinator:
 
 
 def request_and_process(
-    coordinator: Coordinator, tasks: List[Dict[str, Any]], target_lang: str
+    coordinator: Coordinator, tasks: list[dict[str, Any]], target_lang: str
 ):
     """辅助函数：登记任务并处理它们。"""
     log.info(f"\n---> 开始登记 {len(tasks)} 个任务到 {target_lang} <---")

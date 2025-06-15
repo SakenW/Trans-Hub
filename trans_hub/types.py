@@ -5,7 +5,7 @@
 所有与外部或模块间交互的数据结构都应在此定义。
 """
 from enum import Enum
-from typing import Any, Dict, Optional, Union  # 恢复导入 Dict 和 Any
+from typing import Any, Optional, Union  # 恢复导入 Dict 和 Any
 
 from pydantic import BaseModel, Field
 
@@ -89,7 +89,7 @@ class ContentItem(BaseModel):
 
     # 核心修复: 添加 context 字段以打通从持久化层到 Coordinator 的数据流。
     # 这个字段将携带从数据库中读取的、原始的 JSON 上下文（已解析为 dict）。
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[dict[str, Any]] = None
 
 
 # ==============================================================================

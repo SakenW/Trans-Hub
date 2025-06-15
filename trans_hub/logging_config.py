@@ -7,7 +7,7 @@
 
 import logging  # 标准 logging 模块
 import sys
-from typing import List, Literal, Union
+from typing import Literal, Union
 
 import structlog
 from structlog.dev import ConsoleRenderer
@@ -38,7 +38,7 @@ def setup_logging(
     """
     # 定义 structlog 的基础处理器链（不包含最终渲染器）
     # 明确 `shared_processors` 的类型为 `List[Processor]`
-    shared_processors: List[Processor] = [
+    shared_processors: list[Processor] = [
         # 添加 structlog 的上下文信息到日志记录中
         structlog.contextvars.merge_contextvars,
         # 添加日志级别、时间戳等标准信息

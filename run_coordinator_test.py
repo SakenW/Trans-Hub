@@ -8,7 +8,7 @@ Trans-Hub 核心功能端到端测试脚本。
 import datetime
 import os
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import structlog
 from dotenv import load_dotenv
@@ -59,7 +59,7 @@ def run_engine_test(
     db_path: str,
     text_to_translate: str,
     target_lang: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
     source_lang: Optional[str] = None,
 ):
     """一个通用的引擎测试函数，执行完整的翻译和缓存验证流程。"""

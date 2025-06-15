@@ -3,7 +3,7 @@
 提供一个用于开发和测试的调试翻译引擎。
 此版本修正了其配置读取逻辑和继承关系。
 """
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import Field
 
@@ -71,20 +71,20 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
 
     def translate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """同步批量翻译方法。"""
         return [self._process_text(text, target_lang) for text in texts]
 
     async def atranslate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """异步批量翻译方法。"""
         return self.translate_batch(texts, target_lang, source_lang, context)

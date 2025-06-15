@@ -7,14 +7,10 @@ trans_hub/interfaces.py
 并包含了对事务管理和垃圾回收参数的协议扩展。
 """
 
+from collections.abc import AsyncGenerator, Generator
 from contextlib import AbstractContextManager
 from typing import (
     Any,
-    AsyncGenerator,
-    ContextManager,
-    Dict,
-    Generator,
-    List,
     Optional,
     Protocol,
 )
@@ -49,14 +45,14 @@ class PersistenceHandler(Protocol):
     def stream_translatable_items(
         self,
         lang_code: str,
-        statuses: List[TranslationStatus],
+        statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> Generator[List[ContentItem], None, None]:
+    ) -> Generator[list[ContentItem], None, None]:
         """以流式方式获取待翻译的内容批次。"""
         ...
 
-    def save_translations(self, results: List[TranslationResult]) -> None:
+    def save_translations(self, results: list[TranslationResult]) -> None:
         """将一批翻译结果保存到数据库中。"""
         ...
 
@@ -64,7 +60,7 @@ class PersistenceHandler(Protocol):
         self,
         text_content: str,
         target_lang: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
         """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
         ...
@@ -85,7 +81,9 @@ class PersistenceHandler(Protocol):
 
     def transaction(
         self,
-    ) -> ContextManager[Any]:  # <-- 修正点：使用 typing.ContextManager
+    ) -> AbstractContextManager[
+        Any
+    ]:  # <-- 修正点：使用 contextlib.AbstractContextManager
         """提供一个同步数据库事务上下文管理器。"""
         ...
 
@@ -111,14 +109,14 @@ class AsyncPersistenceHandler(Protocol):
     async def stream_translatable_items(
         self,
         lang_code: str,
-        statuses: List[TranslationStatus],
+        statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> AsyncGenerator[List[ContentItem], None]:
+    ) -> AsyncGenerator[list[ContentItem], None]:
         """以流式方式获取待翻译的内容批次。"""
         ...
 
-    async def save_translations(self, results: List[TranslationResult]) -> None:
+    async def save_translations(self, results: list[TranslationResult]) -> None:
         """将一批翻译结果保存到数据库中。"""
         ...
 
@@ -126,7 +124,7 @@ class AsyncPersistenceHandler(Protocol):
         self,
         text_content: str,
         target_lang: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
         """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
         ...

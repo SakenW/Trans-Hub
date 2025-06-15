@@ -5,7 +5,7 @@
 此引擎是为纯异步操作而设计的，并通过 `IS_ASYNC_ONLY` 标志向 Coordinator 表明这一点。
 """
 import asyncio
-from typing import List, Optional
+from typing import Optional
 
 import structlog
 
@@ -98,11 +98,11 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     def translate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[OpenAIContext] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """同步批量翻译方法。此方法不应被调用。"""
         raise NotImplementedError(
             "OpenAI 引擎是为纯异步操作设计的。Coordinator 应该调用 atranslate_batch。"
@@ -159,11 +159,11 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     async def atranslate_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         target_lang: str,
         source_lang: Optional[str] = None,
         context: Optional[OpenAIContext] = None,
-    ) -> List[EngineBatchItemResult]:
+    ) -> list[EngineBatchItemResult]:
         """异步批量翻译，通过 asyncio.gather 并发执行。"""
         if not source_lang:
             # 此检查是双重保险，因为 REQUIRES_SOURCE_LANG=True 时，Coordinator 不应传入 None
