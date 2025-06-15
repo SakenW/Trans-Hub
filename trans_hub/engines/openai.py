@@ -10,7 +10,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Optional, cast
 
 import structlog
-from pydantic import Field, HttpUrl, SecretStr
+from pydantic import HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.engines.base import (
@@ -50,11 +50,29 @@ class OpenAIContext(BaseContextModel):
 class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     """OpenAI 引擎的特定配置。"""
 
-    model_config = SettingsConfigDict(extra="ignore")
-    api_key: SecretStr = Field(validation_alias="TH_OPENAI_API_KEY")
-    endpoint: HttpUrl = Field(validation_alias="TH_OPENAI_ENDPOINT")
-    model: str = Field(default="gpt-3.5-turbo", validation_alias="TH_OPENAI_MODEL")
-    temperature: float = Field(default=0.1, validation_alias="TH_OPENAI_TEMPERATURE")
+    model_config = SettingsConfigDict(
+        env_prefix="TH_",  # 所有环境变量都以 TH_ 开头
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # === 修改开始 ===
+    # 重命名字段以匹配环境变量（减去前缀），并移除 'alias'。
+    # 这种方式让映射关系更明确，并解决了 mypy 的问题。
+    # Pydantic 现在会自动寻找 TH_OPENAI_API_KEY。
+    openai_api_key: SecretStr
+
+    # 会寻找 TH_OPENAI_ENDPOINT，并带有默认值。
+    openai_endpoint: HttpUrl = cast(HttpUrl, "https://api.openai.com/v1")
+
+    # 会寻找 TH_OPENAI_MODEL，并带有默认值。
+    openai_model: str = "gpt-3.5-turbo"
+
+    # 会寻找 TH_OPENAI_TEMPERATURE，并带有默认值。
+    openai_temperature: float = 0.1
+    # === 修改结束 ===
+
     default_prompt_template: str = (
         "你是一个专业的翻译引擎。"
         "请将以下文本从 {source_lang} 翻译成 {target_lang}。"
@@ -82,20 +100,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 "要使用 OpenAIEngine, 请先安装 'openai' 库: pip install \"trans-hub[openai]\""
             )
 
-        # MYPY 修复 (misc, valid-type):
-        # __init__ 中的检查已经保证 _AsyncOpenAI 不是 None。
-        # mypy 可以通过这个逻辑，因此不再需要复杂的 cast。
+        # === 修改开始 ===
+        # 更新对配置属性的访问，以匹配配置模型中新的字段名。
         self.client = _AsyncOpenAI(
-            api_key=self.config.api_key.get_secret_value(),
-            base_url=str(self.config.endpoint),
+            api_key=self.config.openai_api_key.get_secret_value(),
+            base_url=str(self.config.openai_endpoint),
         )
 
         logger.info(
             "openai_engine.initialized",
-            model=self.config.model,
-            endpoint=str(self.config.endpoint),
+            model=self.config.openai_model,
+            endpoint=str(self.config.openai_endpoint),
             msg="OpenAI 引擎初始化成功",
         )
+        # === 修改结束 ===
 
     def translate_batch(
         self,
@@ -117,9 +135,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         prompt_template: str,
     ) -> EngineBatchItemResult:
         """异步翻译单个文本，并处理其特定错误。"""
-        # MYPY 修复 (union-attr):
         # 添加 assert 明确告诉 mypy，如果代码能执行到这里，_openai 模块必然已被加载。
-        # 这消除了 mypy 对 `_openai.APIError` 访问的疑虑。
         assert _openai, "OpenAI 模块应在初始化时加载"
 
         prompt = prompt_template.format(
@@ -127,9 +143,9 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         )
         try:
             response = await self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.config.openai_model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=self.config.temperature,
+                temperature=self.config.openai_temperature,
                 max_tokens=len(text.encode("utf-8")) * 2 + 100,
             )
 

@@ -1,5 +1,3 @@
-
---- START OF FILE docs/guides/01_quickstart.md ---
 # **指南 1：快速入门**
 
 欢迎使用 `Trans-Hub`！本指南将向您展示如何在短短几分钟内，利用 `Trans-Hub` 的零配置特性，完成您的第一个翻译任务。您不需要任何 API 密钥或复杂的设置。
@@ -153,6 +151,3 @@ WARNING  没有需要处理的新任务（可能已翻译过，这是缓存的�
 `Coordinator.process_pending_translations()` 发现这个翻译请求已经成功完成并缓存在数据库中，因此它跳过了 API 调用，为您节省了时间和成本。
 
 **恭喜您！** 您已经成功地体验了 `Trans-Hub` 的核心功能。现在，您可以继续探索更多高级用法。
-
---- END OF FILE docs/guides/01_quickstart.md ---
-
