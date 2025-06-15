@@ -215,9 +215,15 @@ def initialize_trans_hub():
 
 ## 深入了解
 
-- 想要在 Flask/Django 中使用或学习更多高级用法？请查看我们的 **[实践指南 (Cookbook)](./docs/cookbook.md)**。
-- 想开发自己的翻译引擎？请阅读 **[第三方引擎开发指南](./docs/developing-engines.md)**。
-- 对项目的设计哲学和内部架构感兴趣？请深入我们的 **[项目技术规范文档 (v1.1)](./docs/technical-specification-v1.1.md)**。
+我们为您准备了详尽的文档库，覆盖了从快速入门到架构设计的方方面面。
+
+### ➡️ [**探索官方文档中心 (Explore the Official Documentation Hub)**](./docs/INDEX.md)
+
+在文档中心，您可以找到：
+-   **使用指南**: 循序渐进的教程，带您掌握高级功能。
+-   **API 参考**: 所有公共类和方法精确的定义。
+-   **架构文档**: 深入了解 `Trans-Hub` 的内部工作原理。
+-   **贡献指南**: 学习如何为项目贡献新的翻译引擎。
 
 ## 贡献
 
