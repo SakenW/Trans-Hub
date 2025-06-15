@@ -57,6 +57,9 @@ jobs:
     # 这是最重要的补充：真正地运行你的测试套件！
     - name: Run tests with Pytest and generate coverage report
       run: poetry run pytest --cov=trans_hub --cov-report=xml
+      timeout-minutes: 15
+      env:
+        PYTEST_ADDOPTS: '--color=yes'
       # --cov=trans_hub: 指定要计算覆盖率的包名
       # --cov-report=xml: 生成 Codecov 等服务可以使用的 XML 格式报告
 
@@ -75,3 +78,4 @@ jobs:
       run: |
         poetry run python run_coordinator_test.py
         poetry run python demo_complex_workflow.py
+      timeout-minutes: 20
