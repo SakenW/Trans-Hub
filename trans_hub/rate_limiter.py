@@ -2,6 +2,7 @@
 
 提供一个简单的、基于令牌桶算法的同步速率限制器。
 """
+
 import time
 from threading import Lock
 

@@ -3,6 +3,7 @@
 提供了 Trans-Hub 的默认持久化实现，基于 SQLite。
 封装了所有数据库交互，保证了事务的原子性。
 """
+
 import datetime
 import json
 import sqlite3

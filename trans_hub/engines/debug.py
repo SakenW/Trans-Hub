@@ -3,6 +3,7 @@
 提供一个用于开发和测试的调试翻译引擎。
 此版本修正了其配置读取逻辑和继承关系。
 """
+
 from typing import Optional
 
 from pydantic import Field

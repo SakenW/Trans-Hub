@@ -3,6 +3,7 @@
 一个独立的、最小化的脚本，专门用于测试 pydantic-settings
 是否能从 .env 文件中成功加载配置。
 """
+
 import os
 from typing import Optional
 

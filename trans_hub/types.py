@@ -4,6 +4,7 @@
 它是应用内部数据契约的“单一事实来源”，已根据最终版文档进行更新。
 所有与外部或模块间交互的数据结构都应在此定义。
 """
+
 from enum import Enum
 from typing import Any, Optional, Union  # 恢复导入 Dict 和 Any
 

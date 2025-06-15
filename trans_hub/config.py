@@ -3,6 +3,7 @@
 定义了 Trans-Hub 项目的主配置模型和相关的子模型。
 这是所有配置的“单一事实来源”，上层应用应该创建并传递 TransHubConfig 对象。
 """
+
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator

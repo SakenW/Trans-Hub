@@ -3,6 +3,7 @@
 本模块负责管理数据库的 Schema 版本。
 它提供了应用迁移脚本、检查当前版本等功能。
 """
+
 import logging
 import sqlite3
 from pathlib import Path

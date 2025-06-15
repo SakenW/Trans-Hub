@@ -4,6 +4,7 @@
 提供一个使用 OpenAI API (GPT 模型) 进行翻译的引擎。
 此引擎是为纯异步操作而设计的，并通过 `IS_ASYNC_ONLY` 标志向 Coordinator 表明这一点。
 """
+
 import asyncio
 from typing import Optional
 
