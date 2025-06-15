@@ -199,7 +199,7 @@ def initialize_trans_hub():
             openai=OpenAIEngineConfig() # 创建实例以触发 .env 加载和配置验证
         )
     )
-    
+
     coordinator = Coordinator(config=config, persistence_handler=handler)
     return coordinator
 
@@ -220,10 +220,11 @@ def initialize_trans_hub():
 ### ➡️ [**探索官方文档中心 (Explore the Official Documentation Hub)**](./docs/INDEX.md)
 
 在文档中心，您可以找到：
--   **使用指南**: 循序渐进的教程，带您掌握高级功能。
--   **API 参考**: 所有公共类和方法精确的定义。
--   **架构文档**: 深入了解 `Trans-Hub` 的内部工作原理。
--   **贡献指南**: 学习如何为项目贡献新的翻译引擎。
+
+- **使用指南**: 循序渐进的教程，带您掌握高级功能。
+- **API 参考**: 所有公共类和方法精确的定义。
+- **架构文档**: 深入了解 `Trans-Hub` 的内部工作原理。
+- **贡献指南**: 学习如何为项目贡献新的翻译引擎。
 
 ## 贡献
 

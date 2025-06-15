@@ -16,6 +16,7 @@
 
 1.  **安装 OpenAI 依赖**:
     `Trans-Hub` 使用 `extras` 机制来管理可选依赖。要使用 OpenAI 引擎，请安装 `openai` extra：
+
     ```bash
     pip install "trans-hub[openai]"
     ```
@@ -48,13 +49,13 @@
             active_engine="openai",
             engine_configs=EngineConfigs(
                 # 创建 OpenAIEngineConfig 实例以触发 .env 加载和配置验证
-                openai=OpenAIEngineConfig() 
+                openai=OpenAIEngineConfig()
             )
         )
-        
+
         coordinator = Coordinator(config=config, persistence_handler=handler)
         return coordinator
-    
+
     # ... (在 main 函数中调用此初始化函数) ...
     ```
 
@@ -118,9 +119,11 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
 ### **预期输出**
 
 当使用 OpenAI 等高级引擎时，您会看到两条不同的翻译结果，例如：
+
 - `original=Apple, translation=苹果, business_id=product.fruit.apple`
 - `original=Apple, translation=苹果公司, business_id=tech.company.apple_inc`
 
@@ -151,7 +154,7 @@ if __name__ == "__main__":
     ```python
     # gc_demo.py
     # ... (初始化 coordinator) ...
-    
+
     log.info("--- 运行垃圾回收 (GC) ---")
 
     # 建议先进行“干跑”（dry_run=True），检查将要删除的内容，而不会实际删除
@@ -164,6 +167,7 @@ if __name__ == "__main__":
     ```
 
 ### **工作原理**
+
 - 每次调用 `request(business_id=...)` 都会更新 `th_sources` 表中对应 `business_id` 的 `last_seen_at` 时间戳。
 - `run_garbage_collection()` 会删除所有 `last_seen_at` **日期**早于指定保留天数的业务关联记录。
 - **重要**: GC 清理的是**业务 ID 的关联** (`th_sources` 表)，通常不会删除 `th_translations` 中的翻译结果本身。这些翻译结果仍然可以作为缓存使用。
@@ -192,8 +196,8 @@ def initialize_with_rate_limiter():
 
     # **注意参数名已更新**
     # 每秒补充 1 个令牌，桶的总容量为 5 个令牌
-    rate_limiter = RateLimiter(refill_rate=1, capacity=5) 
-    
+    rate_limiter = RateLimiter(refill_rate=1, capacity=5)
+
     coordinator = Coordinator(
         config=config,
         persistence_handler=handler,
@@ -219,6 +223,7 @@ def initialize_with_rate_limiter():
 ### **最佳实践**
 
 Web 接口的职责应该是**快速响应**。因此，重量级的 `process_pending_translations` **不应该**在请求处理线程中直接调用。正确的模式是：
+
 1.  接口首先尝试从缓存中获取结果。
 2.  如果缓存未命中，则调用轻量级的 `request()` 登记一个新任务。
 3.  立即返回 `202 Accepted` 响应，告知客户端任务已接受。
@@ -273,7 +278,7 @@ def translate_text():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request must be a JSON"}), 400
-        
+
     text = data.get('text')
     target_lang = data.get('target_lang', 'zh-CN')
 

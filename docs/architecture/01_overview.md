@@ -94,7 +94,7 @@ graph TD
   - **`IS_ASYNC_ONLY` (bool)**: 一个布尔标志，默认为 `False`。如果一个引擎（如 `OpenAIEngine`）被设计为纯异步，它应将此标志设置为 `True`。`Coordinator` 会检查此标志，并相应地决定是调用同步的 `translate_batch` 方法，还是通过 `asyncio.run()` 调用异步的 `atranslate_batch` 方法。
 - **核心抽象方法**: `translate_batch` (同步批量翻译) 和 `atranslate_batch` (异步批量翻译)。所有具体引擎必须实现这两个方法，并确保返回的列表长度和顺序与输入文本列表严格一一对应。
 
-*（关于如何开发一个新引擎的详细指南，请参见 [贡献文档](../contributing/developing_engines.md)）*
+_（关于如何开发一个新引擎的详细指南，请参见 [贡献文档](../contributing/developing_engines.md)）_
 
 ---
 

@@ -96,7 +96,6 @@ poetry install --with dev
 >
 > 这是因为 `EngineError` 是一个 Pydantic 模型，而不是一个异常类。直接抛出它会导致 `TypeError: exceptions must derive from BaseException`。`Coordinator` 期望收到一个与输入列表长度完全对应的结果列表，其中失败的项由 `EngineError` 对象表示。
 
-
 #### **第三步：注册引擎配置**
 
 这是最后一步，也是最简单的一步。为了让 `Coordinator` 能够为你的引擎创建和传递配置，你需要在 `trans_hub/config.py` 中“注册”你的配置模型。
@@ -106,8 +105,8 @@ poetry install --with dev
 ```python
 # trans_hub/config.py
 
-from typing import Optional 
-from pydantic import BaseModel 
+from typing import Optional
+from pydantic import BaseModel
 
 # 1. 导入你的新配置模型
 from trans_hub.engines.awesome_engine import AwesomeEngineConfig
@@ -116,10 +115,10 @@ from trans_hub.engines.awesome_engine import AwesomeEngineConfig
 class EngineConfigs(BaseModel):
     """所有引擎配置的聚合模型。"""
     # ... 其他引擎配置 ...
-    
+
     # 2. 在这里添加你的新引擎配置字段
     # 字段名必须是小写的引擎名，且与 TH_ACTIVE_ENGINE 中使用的名称一致 (例如 "awesome")
-    awesome: Optional[AwesomeEngineConfig] = None 
+    awesome: Optional[AwesomeEngineConfig] = None
 ```
 
 **完成了！** `engine_registry` 会在你下次运行程序时自动发现并加载你的 `AwesomeEngine`。用户只需在他们的 `.env` 文件中配置 `TH_ACTIVE_ENGINE="awesome"` 并提供相应的 `TH_AWESOME_API_KEY` 等环境变量，即可使用你的引擎。
@@ -127,11 +126,13 @@ class EngineConfigs(BaseModel):
 ### **4. 编写测试：验证你的引擎**
 
 为了确保你的引擎能够稳定工作，并能被我们的测试套件覆盖，你应该为它编写测试。一个好的测试至少应该验证：
+
 1.  引擎在给定有效输入时，能返回正确的 `EngineSuccess` 结果。
 2.  引擎能正确处理 API 错误，并返回相应的 `EngineError` 对象。
 3.  `Coordinator` 能够正确加载和驱动你的引擎。
 
 <!-- 修改点：添加了一段解释，说明为什么在测试中手动创建配置实例。 -->
+
 在单元测试中，我们推荐手动创建配置实例并传入明确的值（如 `"fake-key"`），而不是依赖于 `.env` 文件。这遵循了测试的“隔离性”原则，确保测试不依赖于外部环境，从而使测试结果更加稳定和可预测。
 
 以下是一个使用 `pytest` 和 `pytest-mock` 的测试示例，你可以将其添加到项目的测试套件中。
@@ -175,7 +176,7 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
         )
     )
     coordinator = Coordinator(config=config, persistence_handler=mock_persistence_handler)
-    
+
     # 3. 执行翻译流程
     results = list(coordinator.process_pending_translations(target_lang="zh-CN"))
 
@@ -186,7 +187,7 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
     assert result.translated_content == "你好，世界！"
     assert result.engine == "awesome"
     assert result.business_id == "test.greeting"
-    
+
     # 5. 确认外部 SDK 被正确调用
     # 这里的参数名 (api_key, region) 必须匹配外部 awesome_sdk.Client 的 API，而不是我们内部的字段名
     mock_sdk.Client.assert_called_once_with(api_key="fake-key", region="test-region")
@@ -294,16 +295,16 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         super().__init__(config)
         if awesome_sdk is None:
             raise ImportError("要使用 AwesomeEngine，请先安装 'awesome-sdk' 库")
-        
+
         # Pydantic 已经保证了 awesome_api_key 的存在，所以无需额外检查
-        
+
         # <!-- 修改点：添加了注释，解释内部字段名和外部 SDK 参数名的映射关系 -->
         # 使用更新后的字段名访问配置。
         # 注意：我们将内部配置字段 (self.config.awesome_api_key) 的值，
         # 传递给外部 awesome_sdk.Client 所期望的参数 (api_key)。
         # 这种映射是引擎开发者的核心职责之一。
         self.client = awesome_sdk.Client(
-            api_key=self.config.awesome_api_key, 
+            api_key=self.config.awesome_api_key,
             region=self.config.awesome_region
         )
         logger.info(f"AwesomeEngine 初始化完成，使用区域: {self.config.awesome_region}")
@@ -347,9 +348,10 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         context: Optional[AwesomeContext] = None,
     ) -> List[EngineBatchItemResult]:
         """异步批量翻译。
-        
+
         因为这是一个同步引擎，我们在这里只是简单地调用同步版本。
         在真正的异步引擎中，这里应该使用异步客户端（如 aiohttp）进行非阻塞的 API 调用。
         """
         logger.warning("AwesomeEngine 的异步版本尚未实现，将回退到同步方法。")
         return self.translate_batch(texts, target_lang, source_lang, context)
+```
