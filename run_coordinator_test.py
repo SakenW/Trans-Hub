@@ -23,10 +23,7 @@ from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationStatus
 
-try:
-    from trans_hub.engines.translators_engine import TranslatorsEngineConfig
-except ModuleNotFoundError:
-    from trans_hub.engines.translators import TranslatorsEngineConfig
+from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 
 log = structlog.get_logger()
 
@@ -235,7 +232,7 @@ def main():
             db_path_openai = setup_test_environment("openai_test.db")
             run_engine_test(
                 engine_name="openai",
-                engine_config_instance=OpenAIEngineConfig(),
+                engine_config_instance=OpenAIEngineConfig(api_key=openai_api_key),
                 db_path=db_path_openai,
                 text_to_translate="The art of programming is the skill of controlling complexity.",
                 target_lang="fr",

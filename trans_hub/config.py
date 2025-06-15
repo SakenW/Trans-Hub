@@ -12,11 +12,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from trans_hub.engines.debug import DebugEngineConfig
 from trans_hub.engines.openai import OpenAIEngineConfig
 
-try:
-    from trans_hub.engines.translators_engine import TranslatorsEngineConfig
-except ModuleNotFoundError:
-    # 如果文件名是 translators.py，则尝试备用路径
-    from trans_hub.engines.translators import TranslatorsEngineConfig
+from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 
 # ==============================================================================
 #  策略配置模型 (未来可扩展)

@@ -11,7 +11,7 @@ import json  # 核心修复：导入 json 库
 import re
 import time
 from collections.abc import Generator
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import structlog
 
@@ -151,11 +151,11 @@ class Coordinator:
                         error=str(e),
                         exc_info=True,
                     )
-                    engine_results = [
-                        EngineError(
+                    batch_results: list[EngineBatchItemResult] = []
+                    for _ in range(len(batch)):
+                        engine_results.append(EngineError(
                             error_message=f"无效的上下文: {e}", is_retryable=False
-                        )
-                    ] * len(batch)
+                        ))
                     yield from self._process_and_save_batch_results(
                         batch, engine_results, target_lang
                     )
@@ -171,7 +171,7 @@ class Coordinator:
                         logger.debug(
                             "调用纯异步引擎...", engine=self.active_engine_name
                         )
-                        engine_results = asyncio.run(
+                        batch_results = asyncio.run(
                             self.active_engine.atranslate_batch(
                                 texts=texts_to_translate,
                                 target_lang=target_lang,
@@ -181,7 +181,7 @@ class Coordinator:
                         )
                     else:
                         logger.debug("调用同步引擎...", engine=self.active_engine_name)
-                        engine_results = self.active_engine.translate_batch(
+                        batch_results = self.active_engine.translate_batch(
                             texts=texts_to_translate,
                             target_lang=target_lang,
                             source_lang=self.config.source_lang,
@@ -190,13 +190,13 @@ class Coordinator:
 
                     has_retryable_errors = any(
                         isinstance(r, EngineError) and r.is_retryable
-                        for r in engine_results
+                        for r in batch_results
                     )
 
                     if not has_retryable_errors:
                         logger.info(
-                            f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。"
-                        )
+                        f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。"
+                    )
                         break
 
                     logger.warning(
@@ -218,12 +218,12 @@ class Coordinator:
                     logger.info(f"退避 {backoff_time:.2f} 秒后重试...")
                     time.sleep(backoff_time)
                 else:
-                    logger.error(
-                        f"已达到最大重试次数 ({max_retries})，放弃当前批次的重试。"
+                    logger.warning(
+                        f"批次处理达到最大重试次数 ({max_retries + 1})。"
                     )
 
             yield from self._process_and_save_batch_results(
-                batch, engine_results, target_lang
+                batch, batch_results, target_lang
             )
 
     def _process_and_save_batch_results(
