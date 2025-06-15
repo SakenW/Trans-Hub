@@ -22,7 +22,6 @@ from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-    from openai.error import APIError
 
 # 初始化模块变量
 _openai: Optional[ModuleType] = None
@@ -122,7 +121,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         # 添加 assert 明确告诉 mypy，如果代码能执行到这里，_openai 模块必然已被加载。
         # 这消除了 mypy 对 `_openai.APIError` 访问的疑虑。
         assert _openai, "OpenAI 模块应在初始化时加载"
-        
+
         prompt = prompt_template.format(
             text=text, source_lang=source_lang, target_lang=target_lang
         )
