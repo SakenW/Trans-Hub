@@ -7,24 +7,9 @@
 
 ---
 
-## **[1.1.1] - 2024-06-15**
+## **[1.1.1] - 2025-06-16**
 
 这是一个关键的架构修复版本，解决了同步 `Coordinator` 与纯异步引擎的兼容性问题，并修正了多处文档与代码不一致的地方。
-
-### 🐛 修复 (Fixed)
-
-- **修复了 `Coordinator` 无法驱动纯异步引擎的核心问题**：
-
-  - 在 `BaseTranslationEngine` 中引入了 `IS_ASYNC_ONLY` 标志。
-  - `Coordinator.process_pending_translations` 现在是“异步感知”的：当检测到活动引擎的 `IS_ASYNC_ONLY` 标志为 `True` 时，它会自动使用 `asyncio.run()` 来调用引擎的 `atranslate_batch` 方法。
-  - 这使得 `OpenAIEngine` 等纯异步引擎现在可以被 `Coordinator` 无缝驱动，解决了之前版本中该功能无法使用的问题。
-
-- **修复了上下文（Context）无法传递给引擎的问题**:
-
-  - `Coordinator` 现在可以正确地从持久化层获取上下文信息，并使用引擎定义的 `CONTEXT_MODEL` 进行验证和转换，然后将其传递给翻译引擎。
-
-- **修复了 `OpenAIEngine` 的性能问题**:
-  - `atranslate_batch` 方法已重构为使用 `asyncio.gather` 并发执行翻译请求，显著提高了处理批次任务的效率。
 
 ### 🚀 变更 (Changed)
 
@@ -33,7 +18,24 @@
   - **核心类型导入**: 在 `Cookbook` 和开发指南中，为核心数据传输对象（如 `TranslationResult`）明确添加了从 `trans_hub.types` 的导入路径。
   - **`EngineError` 用法澄清**: 在《第三方引擎开发指南》中，用醒目的提示框明确指出，引擎在遇到错误时应 `return` 一个 `EngineError` 对象，而不是 `raise` 它。
 
-## **[1.1.0] - 2024-06-14**
+### 🐛 修复 (Fixed)
+
+- **修复了 `Coordinator` 无法驱动纯异步引擎的核心问题**：
+  - 在 `BaseTranslationEngine` 中引入了 `IS_ASYNC_ONLY` 标志。
+  - `Coordinator.process_pending_translations` 现在是“异步感知”的：当检测到活动引擎的 `IS_ASYNC_ONLY` 标志为 `True` 时，它会自动使用 `asyncio.run()` 来调用引擎的 `atranslate_batch` 方法。
+- **修复了上下文（Context）无法传递给引擎的问题**:
+  - `Coordinator` 现在可以正确地从持久化层获取上下文信息，并使用引擎定义的 `CONTEXT_MODEL` 进行验证和转换，然后将其传递给翻译引擎。
+- **修复了上下文序列化和存储问题**：
+  - `Coordinator.request()` 方法现在将上下文字典序列化为 JSON 字符串后存入数据库。
+  - 在 `th_translations` 表的 INSERT 语句中添加了 `context` 列，确保上下文信息正确存储。
+- **修复了 `OpenAIEngine` 的性能问题**:
+  - `atranslate_batch` 方法已重构为使用 `asyncio.gather` 并发执行翻译请求，显著提高了处理批次任务的效率。
+- **修复了批次处理结果赋值错误**：
+  - 将结果正确赋给 `batch_results` 变量，替代了未使用的 `engine_results` 变量，解决了 F841 未使用变量警告。
+
+---
+
+## **[1.1.0] - 2025-06-14**
 
 这是一个重要的维护和健壮性更新版本，主要解决了在实际复杂场景中发现的数据一致性和数据流问题，使系统更加可靠和可预测。
 
@@ -46,32 +48,20 @@
 ### 🚀 变更 (Changed)
 
 - **重大变更 - 数据库 Schema**:
-
   - `th_translations` 表和 `th_sources` 表中的 `context_hash` 列现在是 `NOT NULL`，并有默认值 `__GLOBAL__`。这彻底解决了 SQLite `UNIQUE` 约束中 `NULL` 值的特殊行为导致的重复记录问题。
   - `th_translations` 表**已移除 `business_id` 字段**。`business_id` 的唯一权威来源现在是 `th_sources` 表，这使得数据模型更加规范化，职责更清晰。
-
 - **重大变更 - `business_id` 数据流**:
-
   - `Coordinator.process_pending_translations()` 在生成最终的 `TranslationResult` 时，会**动态地**调用 `PersistenceHandler.get_business_id_for_content()` 来获取 `business_id`。这确保了返回给用户的 `business_id` 始终与 `th_sources` 表中的最新状态保持一致。
-
 - **GC 逻辑优化**:
-
   - `PersistenceHandler.garbage_collect` 方法现在基于**日期** (`DATE()`) 而非精确时间戳进行比较。这使得 `retention_days=0` 时的行为（即清理所有今天之前的记录）更加可预测和健壮，并简化了测试。
-
 - **`Coordinator` API 优化**:
-
   - `Coordinator.run_garbage_collection` 的 `retention_days` 参数变为可选，如果未提供，则会从 `TransHubConfig` 中获取默认值。
   - `Coordinator.process_pending_translations` 的 `max_retries` 和 `initial_backoff` 参数也变为可选，会从 `TransHubConfig` 中的 `retry_policy` 获取默认值，增强了配置的集中管理。
-
 - **DTO (数据传输对象) 演进**:
-
   - `types.ContentItem` DTO **移除了 `business_id` 字段**，使其更专注于待翻译的内容本身，简化了内部数据流。
   - `types.TranslationResult` 和 `types.ContentItem` 中的 `context_hash` 字段类型从 `Optional[str]` 变更为 `str`，以匹配数据库的 `NOT NULL` 约束。
-
 - **核心依赖变更**:
-
   - `pydantic-settings` 和 `python-dotenv` 已从可选依赖提升为**核心依赖**。这确保了所有用户都能利用 `.env` 文件来配置任何引擎，而不仅仅是 `OpenAI`，增强了配置的灵活性和健壮性。
-
 - **`PersistenceHandler.stream_translatable_items()` 逻辑**:
   - 其内部事务已拆分：先在一个独立的事务中原子性地锁定任务（更新状态为 `TRANSLATING`），然后在此事务外部获取并 `yield` 任务详情。这彻底解决了在循环中调用 `save_translations()` 时可能发生的事务嵌套问题。
 
@@ -86,7 +76,7 @@
 
 ---
 
-## **[1.0.0] - 2024-06-12**
+## **[1.0.0] - 2025-06-12**
 
 这是 `Trans-Hub` 的第一个稳定版本，标志着核心功能的全面实现和稳定。
 

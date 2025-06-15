@@ -7,9 +7,6 @@
 
 import asyncio
 from types import ModuleType
-
-# Ruff 修复：将模块级导入移至文件顶部
-# Ruff 修复：将已弃用的 typing.Type 替换为 type
 from typing import TYPE_CHECKING, Optional, cast
 
 import structlog
@@ -25,6 +22,7 @@ from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
+    from openai.error import APIError
 
 # 初始化模块变量
 _openai: Optional[ModuleType] = None
@@ -54,15 +52,10 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     """OpenAI 引擎的特定配置。"""
 
     model_config = SettingsConfigDict(extra="ignore")
-
-    # 使用 SecretStr 保护 API 密钥，避免其在日志中意外泄露
     api_key: SecretStr = Field(validation_alias="TH_OPENAI_API_KEY")
-    # 使用 HttpUrl 验证 URL 格式
     endpoint: HttpUrl = Field(validation_alias="TH_OPENAI_ENDPOINT")
     model: str = Field(default="gpt-3.5-turbo", validation_alias="TH_OPENAI_MODEL")
     temperature: float = Field(default=0.1, validation_alias="TH_OPENAI_TEMPERATURE")
-
-    # 默认的 prompt 模板，可以在上下文中被覆盖
     default_prompt_template: str = (
         "你是一个专业的翻译引擎。"
         "请将以下文本从 {source_lang} 翻译成 {target_lang}。"
@@ -76,12 +69,9 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
     """一个使用 OpenAI (GPT) 进行翻译的纯异步引擎。"""
 
     CONFIG_MODEL = OpenAIEngineConfig
-    CONTEXT_MODEL = OpenAIContext  # 绑定上下文模型
-    VERSION = "1.1.0"  # 版本号更新
-
-    # 核心变更: 明确声明此引擎为纯异步
+    CONTEXT_MODEL = OpenAIContext
+    VERSION = "1.1.0"
     IS_ASYNC_ONLY: bool = True
-    # 核心变更: 明确要求提供源语言以保证翻译质量
     REQUIRES_SOURCE_LANG: bool = True
 
     def __init__(self, config: OpenAIEngineConfig):
@@ -93,16 +83,17 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 "要使用 OpenAIEngine, 请先安装 'openai' 库: pip install \"trans-hub[openai]\""
             )
 
-        # Pydantic 已经处理了 api_key 和 endpoint 的存在性校验
-        # 此处 _AsyncOpenAI 必然不为 None，cast 仅用于类型提示
-        self.client = cast(type[_AsyncOpenAI], _AsyncOpenAI)(
+        # MYPY 修复 (misc, valid-type):
+        # __init__ 中的检查已经保证 _AsyncOpenAI 不是 None。
+        # mypy 可以通过这个逻辑，因此不再需要复杂的 cast。
+        self.client = _AsyncOpenAI(
             api_key=self.config.api_key.get_secret_value(),
-            base_url=str(self.config.endpoint),  # 将 Pydantic URL 类型转换为字符串
+            base_url=str(self.config.endpoint),
         )
 
         logger.info(
-            "openai_engine.initialized",  # 事件名称
-            model=self.config.model,  # 结构化上下文
+            "openai_engine.initialized",
+            model=self.config.model,
             endpoint=str(self.config.endpoint),
             msg="OpenAI 引擎初始化成功",
         )
@@ -127,6 +118,11 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         prompt_template: str,
     ) -> EngineBatchItemResult:
         """异步翻译单个文本，并处理其特定错误。"""
+        # MYPY 修复 (union-attr):
+        # 添加 assert 明确告诉 mypy，如果代码能执行到这里，_openai 模块必然已被加载。
+        # 这消除了 mypy 对 `_openai.APIError` 访问的疑虑。
+        assert _openai, "OpenAI 模块应在初始化时加载"
+        
         prompt = prompt_template.format(
             text=text, source_lang=source_lang, target_lang=target_lang
         )
@@ -135,7 +131,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 model=self.config.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.config.temperature,
-                max_tokens=len(text.encode("utf-8")) * 2 + 100,  # 粗略估计所需 token
+                max_tokens=len(text.encode("utf-8")) * 2 + 100,
             )
 
             translated_text = response.choices[0].message.content or ""
@@ -150,34 +146,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
             return EngineSuccess(translated_text=translated_text.strip())
 
-        # Ruff 修复 (B030): 使用标准的 `except` 语句。
-        # 在 __init__ 中已检查，此处 _openai 必然存在。
         except _openai.APIError as e:
-            logger.error(
-                "openai_api_error",
-                text=text,
-                error=str(e),
-                exc_info=True,
-                msg="OpenAI API 调用出错",
-            )
-            # 根据异常类型判断是否可重试
-            openai_module = cast(ModuleType, _openai)
+            logger.error("openai_api_error", text=text, error=str(e), exc_info=True, msg="OpenAI API 调用出错")
             is_retryable = isinstance(
                 e,
                 (
-                    openai_module.RateLimitError,
-                    openai_module.InternalServerError,
-                    openai_module.APIConnectionError,
+                    _openai.RateLimitError,
+                    _openai.InternalServerError,
+                    _openai.APIConnectionError,
                 ),
             )
             return EngineError(error_message=str(e), is_retryable=is_retryable)
         except Exception as e:
             logger.error(
-                "openai_unexpected_error",
-                text=text,
-                error=str(e),
-                exc_info=True,
-                msg="发生未知错误",
+                "openai_unexpected_error", text=text, error=str(e), exc_info=True, msg="发生未知错误"
             )
             return EngineError(error_message=str(e), is_retryable=True)
 
@@ -189,7 +171,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
         """异步批量翻译，通过 asyncio.gather 并发执行。"""
-        # 验证上下文类型
         if context is not None and not isinstance(context, OpenAIContext):
             return [
                 EngineError(
@@ -199,7 +180,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             ] * len(texts)
 
         if not source_lang:
-            # 此检查是双重保险，因为 REQUIRES_SOURCE_LANG=True 时，Coordinator 不应传入 None
             return [
                 EngineError(
                     error_message="OpenAI 引擎需要提供源语言。",
@@ -207,8 +187,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 )
             ] * len(texts)
 
-        # 确定使用的 prompt 模板
-        # 类型转换：已通过上下文验证，确保 context 是 OpenAIContext 实例
         openai_context = cast(OpenAIContext, context)
         prompt_template = (
             openai_context.prompt_template
@@ -216,12 +194,10 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             else self.config.default_prompt_template
         )
 
-        # 创建所有并发任务
         tasks = [
             self._translate_single_text(text, target_lang, source_lang, prompt_template)
             for text in texts
         ]
 
-        # 并发执行并收集结果
         results = await asyncio.gather(*tasks)
         return results
