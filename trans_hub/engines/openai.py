@@ -73,11 +73,12 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     openai_temperature: float = 0.1
     # === 修改结束 ===
 
+    # Default prompt template, now in English.
     default_prompt_template: str = (
-        "你是一个专业的翻译引擎。"
-        "请将以下文本从 {source_lang} 翻译成 {target_lang}。"
-        "请只返回翻译后的文本，不要包含任何额外的解释或多余的引号。"
-        '\n\n待翻译文本："{text}"'
+        "You are a professional translation engine. "
+        "Please translate the following text from {source_lang} to {target_lang}. "
+        "Only return the translated text, without any additional explanations or "
+        'superfluous quotes.\n\nText to translate: "{text}"'
     )
 
 

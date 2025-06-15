@@ -1,10 +1,8 @@
-
---- START OF FILE docs/contributing/developing_engines.md ---
-# **指南：开发第三方引擎**
+# 指南：开发第三方引擎
 
 欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的动态发现架构，这个过程比你想象的要简单得多。
 
-## **目录**
+## 目录
 
 1.  [开发哲学：引擎的职责](#1-开发哲学引擎的职责)
 2.  [准备工作：环境设置](#2-准备工作环境设置)
@@ -54,7 +52,7 @@ cd trans-hub
 # 参考 https://python-poetry.org/docs/#installation
 
 # 3. 安装所有开发依赖
-# 这将确保你有 pytest, black, ruff, mypy 等所有必要的代码质量工具
+# 这将确保你有 pytest, ruff, mypy 等所有必要的代码质量工具
 poetry install --with dev
 ```
 
@@ -133,8 +131,10 @@ class EngineConfigs(BaseModel):
 2.  引擎能正确处理 API 错误，并返回相应的 `EngineError` 对象。
 3.  `Coordinator` 能够正确加载和驱动你的引擎。
 
-以下是一个使用 `pytest` 和 `pytest-mock` 的测试示例，你可以将其添加到项目的测试套
-件中。
+<!-- 修改点：添加了一段解释，说明为什么在测试中手动创建配置实例。 -->
+在单元测试中，我们推荐手动创建配置实例并传入明确的值（如 `"fake-key"`），而不是依赖于 `.env` 文件。这遵循了测试的“隔离性”原则，确保测试不依赖于外部环境，从而使测试结果更加稳定和可预测。
+
+以下是一个使用 `pytest` 和 `pytest-mock` 的测试示例，你可以将其添加到项目的测试套件中。
 
 ```python
 # tests/test_awesome_engine.py (测试示例)
@@ -151,15 +151,10 @@ from trans_hub.types import TranslationStatus, ContentItem
 def mock_persistence_handler():
     """创建一个模拟的持久化处理器。"""
     handler = MagicMock(spec=DefaultPersistenceHandler)
-    # 模拟 stream_translatable_items 以返回一个批次的任务
     mock_item = ContentItem(
-        content_id=1,
-        value="Hello, world!",
-        context_hash="__GLOBAL__",
-        context={}
+        content_id=1, value="Hello, world!", context_hash="__GLOBAL__", context={}
     )
     handler.stream_translatable_items.return_value = [[mock_item]]
-    # 模拟 get_business_id_for_content 以返回一个业务ID
     handler.get_business_id_for_content.return_value = "test.greeting"
     return handler
 
@@ -176,7 +171,7 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
     config = TransHubConfig(
         active_engine="awesome",
         engine_configs=EngineConfigs(
-            awesome=AwesomeEngineConfig(api_key="fake-key", region="test-region")
+            awesome=AwesomeEngineConfig(awesome_api_key="fake-key", awesome_region="test-region")
         )
     )
     coordinator = Coordinator(config=config, persistence_handler=mock_persistence_handler)
@@ -193,6 +188,7 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
     assert result.business_id == "test.greeting"
     
     # 5. 确认外部 SDK 被正确调用
+    # 这里的参数名 (api_key, region) 必须匹配外部 awesome_sdk.Client 的 API，而不是我们内部的字段名
     mock_sdk.Client.assert_called_once_with(api_key="fake-key", region="test-region")
     mock_client.translate.assert_called_once()
 ```
@@ -211,9 +207,9 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
 
     ```python
     # your_engine.py
-    from typing import Optional
+    from typing import Optional, List
     from trans_hub.types import EngineBatchItemResult
-    from .base import BaseContextModel # 假设 YourContext 定义在此
+    from .base import BaseContextModel, BaseTranslationEngine
 
     class YourContext(BaseContextModel):
         formality: str = "default"
@@ -237,12 +233,13 @@ def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
 
 ### **7. 一份完整的示例：`AwesomeEngine`**
 
-下面是一个完整的、可直接使用的 `awesome_engine.py` 文件示例，它包含了上下文模型、配置模型和引擎主类的完整实现。
+下面是一个完整的、可直接使用的 `awesome_engine.py` 文件示例，它包含了上下文模型、配置模型和引擎主类的完整实现。**此示例已更新，以遵循避免 `mypy` 错误的最佳实践。**
 
 ```python
 # trans_hub/engines/awesome_engine.py (完整示例)
 
 import logging
+# <!-- 修改点：添加了 List 的导入 -->
 from typing import List, Optional
 
 from pydantic import Field
@@ -267,9 +264,21 @@ class AwesomeContext(BaseContextModel):
 
 # 2. 配置模型
 class AwesomeEngineConfig(BaseSettings, BaseEngineConfig):
-    model_config = SettingsConfigDict(extra="ignore")
-    api_key: str = Field(validation_alias='TH_AWESOME_API_KEY')
-    region: str = Field(default='us-east-1', validation_alias='TH_AWESOME_REGION')
+    """
+    AwesomeEngine 的配置。
+    最佳实践：字段名直接对应环境变量（去除 'TH_' 前缀），以避免 mypy 静态分析问题。
+    """
+    model_config = SettingsConfigDict(
+        env_prefix="TH_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    # 字段名直接对应环境变量 TH_AWESOME_API_KEY
+    awesome_api_key: str
+    # 字段名直接对应环境变量 TH_AWESOME_REGION
+    awesome_region: str = 'us-east-1'
 
 
 # 3. 引擎主类
@@ -285,10 +294,19 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         super().__init__(config)
         if awesome_sdk is None:
             raise ImportError("要使用 AwesomeEngine，请先安装 'awesome-sdk' 库")
-        if not self.config.api_key:
-            raise ValueError("AwesomeEngine 需要 API 密钥。请设置 TH_AWESOME_API_KEY。")
-        self.client = awesome_sdk.Client(api_key=self.config.api_key, region=self.config.region)
-        logger.info(f"AwesomeEngine 初始化完成，使用区域: {self.config.region}")
+        
+        # Pydantic 已经保证了 awesome_api_key 的存在，所以无需额外检查
+        
+        # <!-- 修改点：添加了注释，解释内部字段名和外部 SDK 参数名的映射关系 -->
+        # 使用更新后的字段名访问配置。
+        # 注意：我们将内部配置字段 (self.config.awesome_api_key) 的值，
+        # 传递给外部 awesome_sdk.Client 所期望的参数 (api_key)。
+        # 这种映射是引擎开发者的核心职责之一。
+        self.client = awesome_sdk.Client(
+            api_key=self.config.awesome_api_key, 
+            region=self.config.awesome_region
+        )
+        logger.info(f"AwesomeEngine 初始化完成，使用区域: {self.config.awesome_region}")
 
     def translate_batch(
         self,
@@ -335,6 +353,3 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         """
         logger.warning("AwesomeEngine 的异步版本尚未实现，将回退到同步方法。")
         return self.translate_batch(texts, target_lang, source_lang, context)
-```
---- END OF FILE docs/contributing/developing_engines.md ---
-

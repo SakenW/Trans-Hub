@@ -12,7 +12,9 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 # --- 基本信息 ---
 name = "trans-hub"
-version = "1.1.0"
+# === 修改开始 ===
+version = "1.1.1" # 将版本号从 1.1.0 更新到 1.1.1
+# === 修改结束 ===
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"

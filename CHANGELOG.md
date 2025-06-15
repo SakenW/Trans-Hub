@@ -1,4 +1,4 @@
-# **更新日志 (Changelog)**
+# 更新日志 (Changelog)
 
 本项目的所有显著变更都将被记录在此文件中。
 
@@ -9,31 +9,21 @@
 
 ## **[1.1.1] - 2025-06-16**
 
-这是一个关键的架构修复版本，解决了同步 `Coordinator` 与纯异步引擎的兼容性问题，并修正了多处文档与代码不一致的地方。
+这是一个以提升代码质量和开发者体验为核心的维护版本。它彻底解决了在 `mypy` 严格模式下的所有静态类型检查错误，并相应地更新了开发者文档，以确保新贡献者能够遵循最健壮的最佳实践。
 
 ### 🚀 变更 (Changed)
 
-- **文档与代码一致性修正**：
-  - **`RateLimiter`**: 在 `Cookbook` 和其他文档中，`RateLimiter` 的初始化参数已从不正确的 `rate`/`burst` 修正为 `refill_rate`/`capacity`。
-  - **核心类型导入**: 在 `Cookbook` 和开发指南中，为核心数据传输对象（如 `TranslationResult`）明确添加了从 `trans_hub.types` 的导入路径。
-  - **`EngineError` 用法澄清**: 在《第三方引擎开发指南》中，用醒目的提示框明确指出，引擎在遇到错误时应 `return` 一个 `EngineError` 对象，而不是 `raise` 它。
+- **开发者文档更新**:
+  - 更新了《第三方引擎开发指南》(`docs/contributing/developing_engines.md`) 中的示例代码和说明。现在它推荐并演示了对 `mypy` 更友好的引擎配置模式（即字段名直接对应环境变量，而非使用别名），以确保贡献者在开发新引擎时不会遇到静态类型检查问题。
 
 ### 🐛 修复 (Fixed)
 
-- **修复了 `Coordinator` 无法驱动纯异步引擎的核心问题**：
-  - 在 `BaseTranslationEngine` 中引入了 `IS_ASYNC_ONLY` 标志。
-  - `Coordinator.process_pending_translations` 现在是“异步感知”的：当检测到活动引擎的 `IS_ASYNC_ONLY` 标志为 `True` 时，它会自动使用 `asyncio.run()` 来调用引擎的 `atranslate_batch` 方法。
-- **修复了上下文（Context）无法传递给引擎的问题**:
-  - `Coordinator` 现在可以正确地从持久化层获取上下文信息，并使用引擎定义的 `CONTEXT_MODEL` 进行验证和转换，然后将其传递给翻译引擎。
-- **修复了上下文序列化和存储问题**：
-  - `Coordinator.request()` 方法现在将上下文字典序列化为 JSON 字符串后存入数据库。
-  - 在 `th_translations` 表的 INSERT 语句中添加了 `context` 列，确保上下文信息正确存储。
-- **修复了 `OpenAIEngine` 的性能问题**:
-  - `atranslate_batch` 方法已重构为使用 `asyncio.gather` 并发执行翻译请求，显著提高了处理批次任务的效率。
-- **修复了批次处理结果赋值错误**：
-  - 将结果正确赋给 `batch_results` 变量，替代了未使用的 `engine_results` 变量，解决了 F841 未使用变量警告。
+- **修复了 Mypy 静态类型检查错误**:
+  - 解决了在调用继承自 `pydantic-settings.BaseSettings` 的配置类时，`mypy` 报告的 `call-arg` (缺少参数) 错误。最终的解决方案是在调用处使用 `# type: ignore[call-arg]`，这既保持了后端配置模型的健壮性（快速失败原则），又解决了静态分析工具的局限性。
+  - 修正了测试脚本 (`run_coordinator_test.py`) 中对 `logging.warning` 的不规范调用，该调用使用了 `mypy` 不支持的关键字参数。
+- **规范化了引擎配置模型**:
+  - `OpenAIEngineConfig` 的字段名被重构，以直接匹配其对应的环境变量（减去 `TH_` 前缀），例如 `openai_api_key` 对应 `TH_OPENAI_API_KEY`。这使得代码意图更清晰，并且是解决 `mypy` 问题的关键步骤之一。
 
----
 
 ## **[1.1.0] - 2025-06-14**
 
