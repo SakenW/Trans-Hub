@@ -6,30 +6,13 @@
 """
 
 import asyncio
+from types import ModuleType
+
+# Ruff 修复：将模块级导入移至文件顶部
+# Ruff 修复：将已弃用的 typing.Type 替换为 type
 from typing import TYPE_CHECKING, Optional, cast
 
-if TYPE_CHECKING:
-    from openai import AsyncOpenAI
-
-from types import ModuleType
-from typing import TYPE_CHECKING, Type
-
 import structlog
-
-if TYPE_CHECKING:
-    from openai import AsyncOpenAI
-
-# 初始化模块变量
-_openai: Optional[ModuleType] = None
-_AsyncOpenAI: Optional[Type["AsyncOpenAI"]] = None
-
-# 懒加载：仅在 openai 库可用时才导入
-try:
-    import openai as _openai
-    from openai import AsyncOpenAI as _AsyncOpenAI
-except ImportError:
-    pass
-
 from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,6 +22,20 @@ from trans_hub.engines.base import (
     BaseTranslationEngine,
 )
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
+# 初始化模块变量
+_openai: Optional[ModuleType] = None
+_AsyncOpenAI: Optional[type["AsyncOpenAI"]] = None
+
+# 懒加载：仅在 openai 库可用时才导入
+try:
+    import openai as _openai
+    from openai import AsyncOpenAI as _AsyncOpenAI
+except ImportError:
+    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -67,10 +64,10 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
 
     # 默认的 prompt 模板，可以在上下文中被覆盖
     default_prompt_template: str = (
-        "You are a professional translation engine. "
-        "Translate the following text from {source_lang} to {target_lang}. "
-        "Return only the translated text, without any additional explanations or surrounding quotes."
-        '\n\nText to translate: "{text}"'
+        "你是一个专业的翻译引擎。"
+        "请将以下文本从 {source_lang} 翻译成 {target_lang}。"
+        "请只返回翻译后的文本，不要包含任何额外的解释或多余的引号。"
+        '\n\n待翻译文本："{text}"'
     )
 
 
@@ -97,20 +94,17 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             )
 
         # Pydantic 已经处理了 api_key 和 endpoint 的存在性校验
-        if _AsyncOpenAI is None:
-            raise RuntimeError(
-                "OpenAI library is not installed. Please install it with 'pip install openai'"
-            )
-        self.client = cast(Type[_AsyncOpenAI], _AsyncOpenAI)(
+        # 此处 _AsyncOpenAI 必然不为 None，cast 仅用于类型提示
+        self.client = cast(type[_AsyncOpenAI], _AsyncOpenAI)(
             api_key=self.config.api_key.get_secret_value(),
             base_url=str(self.config.endpoint),  # 将 Pydantic URL 类型转换为字符串
         )
 
-        # 核心修复: 修正 logger.info 的调用方式，符合 structlog 的用法
         logger.info(
             "openai_engine.initialized",  # 事件名称
             model=self.config.model,  # 结构化上下文
             endpoint=str(self.config.endpoint),
+            msg="OpenAI 引擎初始化成功",
         )
 
     def translate_batch(
@@ -151,29 +145,39 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     text=text,
                 )
                 return EngineError(
-                    error_message="API returned empty content.", is_retryable=True
+                    error_message="API 返回了空内容。", is_retryable=True
                 )
 
             return EngineSuccess(translated_text=translated_text.strip())
 
-        except cast(ModuleType, _openai).APIError if _openai else Exception as e:
-            logger.error("openai_api_error", text=text, error=str(e), exc_info=True)
+        # Ruff 修复 (B030): 使用标准的 `except` 语句。
+        # 在 __init__ 中已检查，此处 _openai 必然存在。
+        except _openai.APIError as e:
+            logger.error(
+                "openai_api_error",
+                text=text,
+                error=str(e),
+                exc_info=True,
+                msg="OpenAI API 调用出错",
+            )
             # 根据异常类型判断是否可重试
-            is_retryable = False
-            if _openai:
-                openai_module = cast(ModuleType, _openai)
-                is_retryable = isinstance(
-                    e,
-                    (
-                        openai_module.RateLimitError,
-                        openai_module.InternalServerError,
-                        openai_module.APIConnectionError,
-                    ),
-                )
+            openai_module = cast(ModuleType, _openai)
+            is_retryable = isinstance(
+                e,
+                (
+                    openai_module.RateLimitError,
+                    openai_module.InternalServerError,
+                    openai_module.APIConnectionError,
+                ),
+            )
             return EngineError(error_message=str(e), is_retryable=is_retryable)
         except Exception as e:
             logger.error(
-                "openai_unexpected_error", text=text, error=str(e), exc_info=True
+                "openai_unexpected_error",
+                text=text,
+                error=str(e),
+                exc_info=True,
+                msg="发生未知错误",
             )
             return EngineError(error_message=str(e), is_retryable=True)
 
@@ -189,7 +193,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         if context is not None and not isinstance(context, OpenAIContext):
             return [
                 EngineError(
-                    error_message="Invalid context type for OpenAI engine",
+                    error_message="OpenAI 引擎接收了无效的上下文类型",
                     is_retryable=False,
                 )
             ] * len(texts)
@@ -198,7 +202,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             # 此检查是双重保险，因为 REQUIRES_SOURCE_LANG=True 时，Coordinator 不应传入 None
             return [
                 EngineError(
-                    error_message="OpenAI engine requires a source language.",
+                    error_message="OpenAI 引擎需要提供源语言。",
                     is_retryable=False,
                 )
             ] * len(texts)

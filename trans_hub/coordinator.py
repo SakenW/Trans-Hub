@@ -1,4 +1,5 @@
 # trans_hub/coordinator.py
+
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 
@@ -7,7 +8,7 @@
 """
 
 import asyncio
-import json  # 核心修复：导入 json 库
+import json
 import re
 import time
 from collections.abc import Generator
@@ -137,6 +138,9 @@ class Coordinator:
             logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
             texts_to_translate = [item.value for item in batch]
 
+            # 定义 batch_results，确保其在循环中始终可用
+            batch_results: list[EngineBatchItemResult] = []
+
             context_dict = batch[0].context
             validated_context = None
             if context_dict and self.active_engine.CONTEXT_MODEL:
@@ -151,13 +155,12 @@ class Coordinator:
                         error=str(e),
                         exc_info=True,
                     )
-                    batch_results: list[EngineBatchItemResult] = []
-                    for _ in range(len(batch)):
-                        batch_results.append(
-                            EngineError(
-                                error_message=f"无效的上下文: {e}", is_retryable=False
-                            )
+                    # 如果上下文验证失败，直接生成错误结果并跳过API调用
+                    batch_results = [
+                        EngineError(
+                            error_message=f"无效的上下文: {e}", is_retryable=False
                         )
+                    ] * len(batch)
                     yield from self._process_and_save_batch_results(
                         batch, batch_results, target_lang
                     )
@@ -210,7 +213,8 @@ class Coordinator:
                         f"引擎在处理批次时抛出异常 (尝试次数: {attempt + 1})",
                         exc_info=True,
                     )
-                    engine_results = [
+                    # FIX: 将结果赋给 batch_results，而不是未使用的 engine_results (F841)
+                    batch_results = [
                         EngineError(error_message=str(e), is_retryable=True)
                     ] * len(batch)
 
