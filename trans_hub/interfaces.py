@@ -9,11 +9,7 @@ trans_hub/interfaces.py
 
 from collections.abc import AsyncGenerator, Generator
 from contextlib import AbstractContextManager
-from typing import (
-    Any,
-    Optional,
-    Protocol,
-)
+from typing import Any, Optional, Protocol
 
 # 导入 AbstractContextManager 用于事务上下文
 from trans_hub.types import (

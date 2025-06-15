@@ -6,21 +6,22 @@
 """
 
 import asyncio
-from typing import Optional, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, cast
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
+
 from types import ModuleType
+from typing import TYPE_CHECKING, Type
 
 import structlog
-from typing import TYPE_CHECKING, Type
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 # 初始化模块变量
 _openai: Optional[ModuleType] = None
-_AsyncOpenAI: Optional[Type['AsyncOpenAI']] = None
+_AsyncOpenAI: Optional[Type["AsyncOpenAI"]] = None
 
 # 懒加载：仅在 openai 库可用时才导入
 try:
@@ -97,12 +98,13 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
         # Pydantic 已经处理了 api_key 和 endpoint 的存在性校验
         if _AsyncOpenAI is None:
-            raise RuntimeError("OpenAI library is not installed. Please install it with 'pip install openai'")
+            raise RuntimeError(
+                "OpenAI library is not installed. Please install it with 'pip install openai'"
+            )
         self.client = cast(Type[_AsyncOpenAI], _AsyncOpenAI)(
             api_key=self.config.api_key.get_secret_value(),
             base_url=str(self.config.endpoint),  # 将 Pydantic URL 类型转换为字符串
         )
-        
 
         # 核心修复: 修正 logger.info 的调用方式，符合 structlog 的用法
         logger.info(
@@ -154,7 +156,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
             return EngineSuccess(translated_text=translated_text.strip())
 
-        except (cast(ModuleType, _openai).APIError if _openai else Exception) as e:
+        except cast(ModuleType, _openai).APIError if _openai else Exception as e:
             logger.error("openai_api_error", text=text, error=str(e), exc_info=True)
             # 根据异常类型判断是否可重试
             is_retryable = False
@@ -185,10 +187,12 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         """异步批量翻译，通过 asyncio.gather 并发执行。"""
         # 验证上下文类型
         if context is not None and not isinstance(context, OpenAIContext):
-            return [EngineError(
-                error_message="Invalid context type for OpenAI engine",
-                is_retryable=False
-            )] * len(texts)
+            return [
+                EngineError(
+                    error_message="Invalid context type for OpenAI engine",
+                    is_retryable=False,
+                )
+            ] * len(texts)
 
         if not source_lang:
             # 此检查是双重保险，因为 REQUIRES_SOURCE_LANG=True 时，Coordinator 不应传入 None
