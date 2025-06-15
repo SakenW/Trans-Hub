@@ -135,3 +135,5 @@ desktop.ini
 *~
 *.bak
 *.tmp.env
+
+docs/merged_docs.md

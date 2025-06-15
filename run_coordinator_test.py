@@ -7,10 +7,12 @@ Trans-Hub 核心功能端到端测试脚本。
 """
 
 import datetime
+import logging
 import os
 import shutil
 from typing import Any, Optional
 
+import pytest
 import structlog
 from dotenv import load_dotenv
 
@@ -27,6 +29,8 @@ from trans_hub.types import TranslationStatus
 log = structlog.get_logger()
 
 TEST_DIR = "temp_test_data"
+
+root_log = logging.getLogger()
 
 
 def setup_test_environment(db_name: str) -> str:
@@ -50,6 +54,14 @@ def cleanup_test_environment():
     log.info("所有测试环境已清理完毕。")
 
 
+@pytest.fixture(scope="function")
+def db_path():
+    """Pytest fixture to set up and tear down a test database environment."""
+    path = setup_test_environment("test.db")
+    yield path
+    cleanup_test_environment()
+
+
 def run_engine_test(
     engine_name: str,
     engine_config_instance: Any,
@@ -62,7 +74,7 @@ def run_engine_test(
     """一个通用的引擎测试函数，执行完整的翻译和缓存验证流程。"""
     log.info(f"\n--- 开始测试引擎: {engine_name.upper()} ---")
 
-    # 核心修复: 在创建 TransHubConfig 时传入 source_lang
+    # 核心修复：在创建 TransHubConfig 时传入 source_lang
     config = TransHubConfig(
         active_engine=engine_name,
         engine_configs=EngineConfigs(**{engine_name: engine_config_instance}),
@@ -188,19 +200,29 @@ def test_gc_workflow(db_path: str):
             coordinator.close()
 
 
-def main():
-    """运行所有测试套件。"""
-    load_dotenv()
-    setup_logging(log_level="INFO")
-    root_log = structlog.get_logger("测试运行器")
+# main 函数不再需要，因为 pytest 会自动发现并运行测试函数
+# def main():
+#     """运行所有测试套件。"""
+#     load_dotenv()
+#     setup_logging(log_level="INFO")
+#     root_log = structlog.get_logger("测试运行器")
 
-    if os.path.exists(TEST_DIR):
-        shutil.rmtree(TEST_DIR)
-    os.makedirs(TEST_DIR)
+#     if os.path.exists(TEST_DIR):
+#         shutil.rmtree(TEST_DIR)
+#     os.makedirs(TEST_DIR)
+
+
+if __name__ == "__main__":
+    # 当直接运行脚本时，确保清理环境，但在 pytest 中由 fixture 处理
+    load_dotenv()
+    setup_logging(log_level="INFO", log_format="console")
+    cleanup_test_environment()
+    # pytest 不会调用 main 函数，所以这里不需要再调用测试函数
+    # 通常直接运行此文件是为了调试，而不是完整的测试运行
+
+    root_log.info("======== Trans-Hub v1.1.1 功能验证开始 ========")
 
     try:
-        root_log.info("======== Trans-Hub v1.1.1 功能验证开始 ========")
-
         # === 测试套件 1: Debug 引擎 ===
         db_path_debug = setup_test_environment("debug_test.db")
         run_engine_test(
@@ -256,7 +278,3 @@ def main():
         raise
     finally:
         cleanup_test_environment()
-
-
-if __name__ == "__main__":
-    main()
