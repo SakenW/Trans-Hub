@@ -19,11 +19,10 @@ from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngineConfig
 from trans_hub.engines.openai import OpenAIEngineConfig
+from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationStatus
-
-from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 
 log = structlog.get_logger()
 

@@ -98,7 +98,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         # Pydantic 已经处理了 api_key 和 endpoint 的存在性校验
         if _AsyncOpenAI is None:
             raise RuntimeError("OpenAI library is not installed. Please install it with 'pip install openai'")
-        self.client = cast(Type['AsyncOpenAI'], _AsyncOpenAI)(
+        self.client = cast(Type[_AsyncOpenAI], _AsyncOpenAI)(
             api_key=self.config.api_key.get_secret_value(),
             base_url=str(self.config.endpoint),  # 将 Pydantic URL 类型转换为字符串
         )
