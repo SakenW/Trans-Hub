@@ -146,7 +146,13 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             return EngineSuccess(translated_text=translated_text.strip())
 
         except _openai.APIError as e:
-            logger.error("openai_api_error", text=text, error=str(e), exc_info=True, msg="OpenAI API 调用出错")
+            logger.error(
+                "openai_api_error",
+                text=text,
+                error=str(e),
+                exc_info=True,
+                msg="OpenAI API 调用出错",
+            )
             is_retryable = isinstance(
                 e,
                 (
@@ -158,7 +164,11 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             return EngineError(error_message=str(e), is_retryable=is_retryable)
         except Exception as e:
             logger.error(
-                "openai_unexpected_error", text=text, error=str(e), exc_info=True, msg="发生未知错误"
+                "openai_unexpected_error",
+                text=text,
+                error=str(e),
+                exc_info=True,
+                msg="发生未知错误",
             )
             return EngineError(error_message=str(e), is_retryable=True)
 
