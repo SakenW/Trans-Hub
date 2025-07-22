@@ -10,13 +10,14 @@
 import asyncio
 import json
 import re
-import time
-from collections.abc import Generator
+from collections.abc import Generator, AsyncGenerator
 from typing import Any, Optional
 
 import structlog
+from trans_hub.cache import TranslationCache
 
 from trans_hub.config import TransHubConfig
+from trans_hub.types import TranslationRequest
 from trans_hub.engine_registry import ENGINE_REGISTRY
 from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.interfaces import PersistenceHandler
@@ -46,9 +47,10 @@ class Coordinator:
         config: TransHubConfig,
         persistence_handler: PersistenceHandler,
         rate_limiter: Optional[RateLimiter] = None,
-    ):
+    ) -> None:
         """初始化协调器。"""
         self.config = config
+        self.cache = TranslationCache(self.config.cache_config)
         self.handler = persistence_handler
         self.active_engine_name = config.active_engine
         self.rate_limiter = rate_limiter
@@ -91,24 +93,32 @@ class Coordinator:
                 f"但全局配置 'source_lang' 未设置。"
             )
 
+        # 初始化异步引擎的事件循环
+        self.loop = None
+        if self.active_engine.IS_ASYNC_ONLY:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+
         logger.info(
             f"Coordinator 初始化完成。活动引擎: '{self.active_engine_name}', "
             f"速率限制器: {'已启用' if self.rate_limiter else '未启用'}"
         )
 
-    def process_pending_translations(
+    async def process_pending_translations(
         self,
         target_lang: str,
         batch_size: Optional[int] = None,
         limit: Optional[int] = None,
         max_retries: Optional[int] = None,
         initial_backoff: Optional[float] = None,
-    ) -> Generator[TranslationResult, None, None]:
+    ) -> AsyncGenerator[TranslationResult, None]:
         """处理指定语言的待翻译任务，内置重试和速率限制逻辑。"""
         self._validate_lang_codes([target_lang])
 
         # 如果未提供参数，则从配置中获取默认值
-        batch_size = batch_size if batch_size is not None else self.config.batch_size
+        # 动态调整批次大小以适应引擎能力
+        engine_batch_size = getattr(self.active_engine, 'MAX_BATCH_SIZE', self.config.batch_size)
+        batch_size = batch_size if batch_size is not None else min(self.config.batch_size, engine_batch_size)
         max_retries = (
             max_retries
             if max_retries is not None
@@ -161,75 +171,142 @@ class Coordinator:
                             error_message=f"无效的上下文: {e}", is_retryable=False
                         )
                     ] * len(batch)
-                    yield from self._process_and_save_batch_results(
+                    async for result in self._process_and_save_batch_results(
                         batch, batch_results, target_lang
-                    )
+                    ):
+                        yield result
                     continue
 
             for attempt in range(max_retries + 1):
                 try:
+                    # 检查缓存
+                    batch_results = []
+                    uncached_texts = []
+                    uncached_indices = []
+                    for i, item in enumerate(batch):
+                        cached_result = await self.cache.get_cached_result(
+                            TranslationRequest(
+                                source_text=item.value,
+                                source_lang=self.config.source_lang,
+                                target_lang=target_lang,
+                                context_hash=item.context_hash
+                            )
+                        )
+                        if cached_result:
+                            batch_results.append(EngineSuccess(translated_text=cached_result, from_cache=True))
+                        else:
+                            uncached_texts.append(item.value)
+                            uncached_indices.append(i)
+                except Exception as e:
+                    logger.error(f"缓存处理异常: {str(e)}")
+                    # 回退到无缓存处理
+                    batch_results = await self._process_uncached_batch(batch, target_lang)
+
+                if uncached_texts:
                     if self.rate_limiter:
-                        self.rate_limiter.acquire(1)
+                        await self.rate_limiter.acquire(1)
 
                     if self.active_engine.IS_ASYNC_ONLY:
                         logger.debug(
                             "调用纯异步引擎...", engine=self.active_engine_name
                         )
-                        batch_results = asyncio.run(
-                            self.active_engine.atranslate_batch(
-                                texts=texts_to_translate,
-                                target_lang=target_lang,
-                                source_lang=self.config.source_lang,
-                                context=validated_context,
-                            )
+                        uncached_results = await self.active_engine.atranslate_batch(
+                            texts=uncached_texts,
+                            target_lang=target_lang,
+                            source_lang=self.config.source_lang,
+                            context=validated_context,
                         )
                     else:
                         logger.debug("调用同步引擎...", engine=self.active_engine_name)
-                        batch_results = self.active_engine.translate_batch(
-                            texts=texts_to_translate,
+                        uncached_results = self.active_engine.translate_batch(
+                            texts=uncached_texts,
                             target_lang=target_lang,
                             source_lang=self.config.source_lang,
                             context=validated_context,
                         )
 
-                    has_retryable_errors = any(
-                        isinstance(r, EngineError) and r.is_retryable
-                        for r in batch_results
-                    )
+                    # 合并未缓存结果到批次结果中
+                    try:
+                        for idx, result in zip(uncached_indices, uncached_results):
+                            batch_results.insert(idx, result)
+                    except Exception as e:
+                        logger.error(f"缓存批次处理失败: {str(e)}")
+                        raise
 
-                    if not has_retryable_errors:
-                        logger.info(
-                            f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。"
-                        )
-                        break
+                    # 缓存新翻译结果
+                    try:
+                        for item, result in zip([batch[i] for i in uncached_indices], uncached_results):
+                            if isinstance(result, EngineSuccess):
+                                await self.cache.cache_translation_result(
+                                    TranslationRequest(
+                                        source_text=item.value,
+                                        source_lang=self.config.source_lang,
+                                        target_lang=target_lang,
+                                        context_hash=item.context_hash
+                                    ),
+                                    result.translated_text
+                                )
+                    except Exception as e:
+                        logger.error(f"缓存处理过程中发生错误: {str(e)}")
+                        # 使用原始批次处理逻辑作为回退
+                        batch_results = await self._process_uncached_batch(batch, target_lang)
 
-                    logger.warning(
-                        f"批次中包含可重试的错误 (尝试次数: {attempt + 1}/{max_retries + 1})。",
-                        extra_info="将在退避后重试批次...",
-                    )
+                # --- 统一的重试判断逻辑 ---
+                # 在每次尝试后，检查整个批次是否存在可重试的错误
+                has_retryable_errors = any(
+                    isinstance(r, EngineError) and r.is_retryable for r in batch_results
+                )
 
-                except Exception as e:
-                    logger.error(
-                        f"引擎在处理批次时抛出异常 (尝试次数: {attempt + 1})",
-                        exc_info=True,
-                    )
-                    # FIX: 将结果赋给 batch_results，而不是未使用的 engine_results (F841)
-                    batch_results = [
-                        EngineError(error_message=str(e), is_retryable=True)
-                    ] * len(batch)
+                if not has_retryable_errors:
+                    logger.info(f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。")
+                    break  # 成功，或遇到不可重试的错误，直接跳出重试循环
 
+                # 如果运行到这里，说明需要重试
                 if attempt < max_retries:
                     backoff_time = initial_backoff * (2**attempt)
-                    logger.info(f"退避 {backoff_time:.2f} 秒后重试...")
-                    time.sleep(backoff_time)
+                    logger.warning(
+                        f"批次中包含可重试的错误，将在 {backoff_time:.2f} 秒后重试 (尝试次数: {attempt + 1}/{max_retries + 1})."
+                    )
+                    await asyncio.sleep(backoff_time)
                 else:
-                    logger.warning(f"批次处理达到最大重试次数 ({max_retries + 1})。")
+                    logger.error(
+                        f"批次处理达到最大重试次数 ({max_retries + 1})，将保留当前失败状态。"
+                    )
 
-            yield from self._process_and_save_batch_results(
+            async for result in self._process_and_save_batch_results(
                 batch, batch_results, target_lang
-            )
+            ):
+                yield result
 
-    def _process_and_save_batch_results(
+    async def _process_uncached_batch(self, batch: list[ContentItem], target_lang: str) -> list[EngineBatchItemResult]:
+        """处理未缓存的批次翻译请求"""
+        try:
+            if self.active_engine.IS_ASYNC_ONLY:
+                results = await self.active_engine.atranslate_batch(
+                    texts=[item.value for item in batch],
+                    target_lang=target_lang,
+                    source_lang=self.config.source_lang,
+                    context=self._get_batch_context(batch)
+                )
+            else:
+                results = self.active_engine.translate_batch(
+                    texts=[item.value for item in batch],
+                    target_lang=target_lang,
+                    source_lang=self.config.source_lang,
+                    context=self._get_batch_context(batch)
+                )
+            return results
+        except Exception as e:
+            logger.error(f"处理未缓存批次时发生错误: {str(e)}", exc_info=True)
+            return [EngineError(error_message=str(e), is_retryable=True)] * len(batch)
+
+    def _get_batch_context(self, batch: list[ContentItem]) -> Optional[dict]:
+        """获取批次的上下文信息"""
+        if batch and batch[0].context_hash:
+            return self.handler.get_context_by_hash(batch[0].context_hash)
+        return None
+
+    async def _process_and_save_batch_results(
         self,
         batch: list[ContentItem],
         engine_results: list[EngineBatchItemResult],
@@ -252,6 +329,7 @@ class Coordinator:
                 retrieved_business_id=retrieved_business_id,
             )
             final_results_to_save.append(result)
+
             yield result
 
         if final_results_to_save:
@@ -272,7 +350,7 @@ class Coordinator:
                 target_lang=target_lang,
                 status=TranslationStatus.TRANSLATED,
                 engine=self.active_engine_name,
-                from_cache=False,
+                from_cache=engine_result.from_cache,
                 context_hash=item.context_hash,
                 business_id=retrieved_business_id,
             )
@@ -410,3 +488,5 @@ class Coordinator:
         """关闭协调器及其持有的资源。"""
         logger.info("正在关闭 Coordinator...")
         self.handler.close()
+        if self.loop is not None:
+            self.loop.close()

@@ -3,8 +3,9 @@
 提供一个简单的、基于令牌桶算法的同步速率限制器。
 """
 
+import asyncio
 import time
-from threading import Lock
+from typing import Optional
 
 
 class RateLimiter:
@@ -36,7 +37,7 @@ class RateLimiter:
         self.capacity = capacity
         self.tokens = capacity  # 初始时，桶是满的
         self.last_refill_time = time.monotonic()
-        self._lock = Lock()  # 确保在多线程环境下的线程安全
+        self._lock = asyncio.Lock()  # 确保在多线程环境下的线程安全
 
     def _refill(self):
         """根据流逝的时间补充令牌。"""
@@ -50,7 +51,7 @@ class RateLimiter:
         self.tokens = min(self.capacity, self.tokens + tokens_to_add)
         self.last_refill_time = now
 
-    def acquire(self, tokens_needed: int = 1) -> None:
+    async def acquire(self, tokens_needed: int = 1) -> None:
         """获取指定数量的令牌，如果令牌不足则阻塞等待。
 
         Args:
@@ -61,7 +62,7 @@ class RateLimiter:
         if tokens_needed > self.capacity:
             raise ValueError("请求的令牌数不能超过桶的容量")
 
-        with self._lock:
+        async with self._lock:
             # 检查是否有足够的令牌，如果没有，则循环等待
             while tokens_needed > self.tokens:
                 # 在等待前，先尝试补充令牌
@@ -71,7 +72,7 @@ class RateLimiter:
                 if tokens_needed > self.tokens:
                     required = tokens_needed - self.tokens
                     wait_time = required / self.refill_rate
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
 
                 # 再次补充，因为我们刚刚等待了一段时间
                 self._refill()

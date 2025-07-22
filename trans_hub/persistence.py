@@ -131,68 +131,97 @@ class DefaultPersistenceHandler(PersistenceHandler):
     ) -> Generator[list[ContentItem], None, None]:
         """以流式方式获取待翻译的内容批次。"""
         status_values = tuple(s.value for s in statuses)
-        limit_clause = f"LIMIT {limit}" if limit is not None else ""
+        processed_count = 0
 
-        translation_ids = []
-        with self.transaction() as cursor:
-            find_ids_sql = f"""
-                SELECT id FROM th_translations
-                WHERE lang_code = ? AND status IN ({','.join('?' for _ in status_values)})
-                ORDER BY last_updated_at ASC
-                {limit_clause}
-            """
-            params = [lang_code] + list(status_values)
-            cursor.execute(find_ids_sql, params)
-            translation_ids = [row["id"] for row in cursor.fetchall()]
+        while True:
+            # Calculate remaining limit for this iteration
+            remaining_limit = limit - processed_count if limit is not None else None
+            current_batch_size = batch_size
+            
+            if remaining_limit is not None and current_batch_size > remaining_limit:
+                current_batch_size = remaining_limit
+                if current_batch_size <= 0:
+                    break
 
-            if not translation_ids:
-                return
-
-            update_sql = f"""
-                UPDATE th_translations SET status = ?, last_updated_at = ?
-                WHERE id IN ({','.join('?' for _ in translation_ids)})
-            """
-            now = datetime.datetime.now(datetime.timezone.utc)
-            update_params = [
-                TranslationStatus.TRANSLATING.value,
-                now.isoformat(),
-            ] + translation_ids
-            cursor.execute(update_sql, update_params)
-
-        for i in range(0, len(translation_ids), batch_size):
-            batch_ids = translation_ids[i : i + batch_size]
-
-            # 核心修复: 在 SELECT 语句中添加 tr.context
-            get_details_sql = f"""
+            with self.transaction() as cursor:
+                # Fetch next batch of translation IDs
+                find_ids_sql = """
+                    SELECT id FROM th_translations
+                    WHERE lang_code = ? AND status IN ({status_placeholders})
+                    ORDER BY last_updated_at ASC
+                    LIMIT ?
+                """.format(status_placeholders=','.join('?' for _ in status_values))
+                
+                params = [lang_code] + list(status_values) + [current_batch_size]
+                cursor.execute(find_ids_sql, params)
+                batch_ids = [row["id"] for row in cursor.fetchall()]
+                
+                if not batch_ids:
+                    break
+                
+                # Update status to TRANSLATING for this batch
+                update_sql = """
+                    UPDATE th_translations SET status = ?, last_updated_at = ?
+                    WHERE id IN ({id_placeholders})
+                """.format(id_placeholders=','.join('?' for _ in batch_ids))
+                
+                now = datetime.datetime.now(datetime.timezone.utc)
+                update_params = [
+                    TranslationStatus.TRANSLATING.value,
+                    now.isoformat(),
+                ] + batch_ids
+                cursor.execute(update_sql, update_params)
+            
+            # Fetch content details for the batch
+            get_details_sql = """
                 SELECT tr.content_id, c.value, tr.context_hash, tr.context
                 FROM th_translations tr
                 JOIN th_content c ON tr.content_id = c.id
-                WHERE tr.id IN ({','.join('?' for _ in batch_ids)})
-            """
-            # 在事务外进行只读操作
+                WHERE tr.id IN ({id_placeholders})
+            """.format(id_placeholders=','.join('?' for _ in batch_ids))
+            
             read_cursor = self.connection.cursor()
             read_cursor.execute(get_details_sql, batch_ids)
-
-            yield [
+            
+            batch_items = [
                 ContentItem(
                     content_id=row["content_id"],
                     value=row["value"],
                     context_hash=row["context_hash"],
-                    # 核心修复: 解析 context JSON 字符串并填充到 DTO 中
                     context=json.loads(row["context"]) if row["context"] else None,
                 )
                 for row in read_cursor.fetchall()
             ]
+            
             read_cursor.close()
+            yield batch_items
+            
+            processed_count += len(batch_items)
+            if remaining_limit is not None and processed_count >= limit:
+                break
 
     def save_translations(self, results: list[TranslationResult]) -> None:
         """将一批翻译结果保存到数据库中。"""
         if not results:
             return
 
+        # 收集所有唯一的原始内容值
+        unique_original_contents = {res.original_content for res in results}
+        if not unique_original_contents:
+            return
+
+        # 批量查询content_id，避免N+1查询问题
+        placeholders = ', '.join('?' for _ in unique_original_contents)
+        query = f"SELECT id, value FROM th_content WHERE value IN ({placeholders})"
+        
+        cursor = self.connection.cursor()
+        cursor.execute(query, tuple(unique_original_contents))
+        content_id_map = {row['value']: row['id'] for row in cursor.fetchall()}
+        cursor.close()
+
         update_params_list = []
         for res in results:
-            content_id = self._get_content_id_from_value(res.original_content)
+            content_id = content_id_map.get(res.original_content)
             if content_id is None:
                 logger.warning(
                     "找不到要保存的翻译结果对应的 content_id",

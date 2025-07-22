@@ -52,6 +52,7 @@ python-dotenv = "^1.0.1"
 
 
 # --- 可选依赖 (Extras) ---
+cachetools = "^6.1.0"
 [tool.poetry.extras]
 openai = ["openai"]
 

@@ -35,6 +35,7 @@ class EngineSuccess(BaseModel):
 
     # 移除了未使用的 detected_source_lang 字段，保持 DTO 简洁
     translated_text: str
+    from_cache: bool = False  # 新增：标识结果是否来自缓存
 
 
 class EngineError(BaseModel):
@@ -49,6 +50,14 @@ EngineBatchItemResult = Union[EngineSuccess, EngineError]
 # ==============================================================================
 #  协调器与持久化层 DTOs
 # ==============================================================================
+
+
+class TranslationRequest(BaseModel):
+    """表示一个翻译请求，包含源文本和语言参数"""
+    source_text: str
+    source_lang: Optional[str]
+    target_lang: str
+    context_hash: str
 
 
 class TranslationResult(BaseModel):

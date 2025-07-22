@@ -13,6 +13,7 @@ import shutil
 from typing import Any, Optional
 
 import pytest
+import asyncio
 import structlog
 from dotenv import load_dotenv
 
@@ -91,10 +92,13 @@ def run_engine_test(
             business_id=f"test.{engine_name}.greeting",
             context=context,
         )
+        async def collect_results():
+            results = []
+            async for result in coordinator.process_pending_translations(target_lang=target_lang):
+                results.append(result)
+            return results
 
-        results = list(
-            coordinator.process_pending_translations(target_lang=target_lang)
-        )
+        results = asyncio.run(collect_results())
 
         # 断言结果
         assert len(results) == 1, f"[{engine_name}] 应该返回一个结果"
@@ -126,9 +130,13 @@ def run_engine_test(
             context=context,
         )
 
-        cached_results = list(
-            coordinator.process_pending_translations(target_lang=target_lang)
-        )
+        async def collect_cached_results():
+            cached_results = []
+            async for result in coordinator.process_pending_translations(target_lang=target_lang):
+                cached_results.append(result)
+            return cached_results
+
+        cached_results = asyncio.run(collect_cached_results())
         assert (
             len(cached_results) == 0
         ), f"[{engine_name}] 第二次调用不应处理任何新任务，因为已缓存"
@@ -160,7 +168,12 @@ def test_gc_workflow(db_path: str):
         coordinator.request(
             target_langs=["ja"], text_content="legacy item", business_id="legacy.item"
         )
-        list(coordinator.process_pending_translations(target_lang="ja"))
+        async def collect_gc_results():
+            results = []
+            async for result in coordinator.process_pending_translations(target_lang="ja"):
+                results.append(result)
+            return results
+        asyncio.run(collect_gc_results())
         log.info("初始数据已创建并翻译。")
 
         past_datetime = datetime.datetime.now(

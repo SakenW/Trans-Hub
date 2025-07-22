@@ -85,46 +85,42 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         返回:
             List[EngineBatchItemResult]: 包含翻译结果或错误信息的结果列表。
         """
-        results: list[EngineBatchItemResult] = []
-        for text in texts:
-            try:
-                # 调用 translators 库
-                # 注意：某些语言代码可能需要映射，例如 'zh-CN' -> 'zh-CN'
-                translated_text = ts.translate_text(
-                    query_text=text,
-                    translator=self.provider,
-                    from_language=source_lang
-                    or "auto",  # 如果 source_lang 为 None，则使用 "auto"
-                    to_language=target_lang,
-                )
-                results.append(EngineSuccess(translated_text=translated_text))
-            except Exception as e:
-                logger.error(
-                    f"TranslatorsEngine encountered an error for text '{text}': {e}",
-                    exc_info=True,
-                )
-                # translators 库的错误通常是临时的，我们将其标记为可重试
-                results.append(
-                    EngineError(
-                        error_message=f"Translators lib error: {e}", is_retryable=True
-                    )
-                )
-        return results
+        return [self._translate_single(text, target_lang, source_lang) for text in texts]
+
+    def _translate_single(
+        self, text: str, target_lang: str, source_lang: Optional[str]
+    ) -> EngineBatchItemResult:
+        """翻译单个文本的辅助方法"""
+        try:
+            translated_text = ts.translate_text(
+                query_text=text,
+                translator=self.provider,
+                from_language=source_lang or "auto",
+                to_language=target_lang,
+            )
+            return EngineSuccess(translated_text=translated_text)
+        except Exception as e:
+            logger.error(
+                f"TranslatorsEngine encountered an error for text '{text}': {e}",
+                exc_info=True,
+            )
+            return EngineError(
+                error_message=f"Translators lib error: {e}", is_retryable=True
+            )
 
     async def atranslate_batch(
         self,
         texts: list[str],
         target_lang: str,
-        source_lang: Optional[
-            str
-        ] = None,  # 核心修复：与基类签名保持一致，改为 Optional[str]
+        source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """异步版本的 translate_batch，当前使用同步实现包装。
-
-        虽然 `translators` 库也支持异步，但在此 v1.0 版本中，
-        我们暂时通过调用同步 `translate_batch` 方法来满足异步接口要求。
-        未来版本可考虑实现真正的异步 I/O 调用。
-        """
-        # 直接调用同步版本进行处理
-        return self.translate_batch(texts, target_lang, source_lang, context)
+        """异步版本的批量翻译，使用线程池执行器并发处理文本"""
+        loop = asyncio.get_event_loop()
+        tasks = [
+            loop.run_in_executor(
+                None, self._translate_single, text, target_lang, source_lang
+            )
+            for text in texts
+        ]
+        return await asyncio.gather(*tasks)
