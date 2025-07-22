@@ -1688,6 +1688,18 @@ tqdm = ">=4.67.1"
 pypi = ["build (>=1.2.2)", "setuptools (>=75.3.0)", "twine (>=6.1.0)"]
 
 [[package]]
+name = "types-cachetools"
+version = "6.1.0.20250717"
+description = "Typing stubs for cachetools"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "types_cachetools-6.1.0.20250717-py3-none-any.whl", hash = "sha256:bba4b8d42262460d24e570097d2d9040e60311934603caa642efd971f3658ed0"},
+    {file = "types_cachetools-6.1.0.20250717.tar.gz", hash = "sha256:4acc8e25de9f5f84dd176ea81dcffa7cb24393869bb2e59e692dfd0139a1e66f"},
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.14.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
@@ -1865,4 +1877,4 @@ openai = []
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9"
-content-hash = "c8356dd97da7af31553ab71db17a1901f1c764905701d3998f8b312e5a2892a7"
+content-hash = "0a2b9fb9e191518e03e5b70e967eebf920d7c62b8ff9341cbf41fbf29e778479"

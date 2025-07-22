@@ -4,8 +4,13 @@
 此版本与泛型 `BaseTranslationEngine` 接口兼容，并修复了 `atranslate_batch` 签名。
 """
 
-import logging  # 导入 logging 模块
+import asyncio
+import logging
+
+# 导入 logging 模块
 from typing import Optional
+
+from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 # 使用 try-except 来处理可选依赖，如果未安装则不加载
 try:
@@ -23,8 +28,12 @@ from trans_hub.engines.base import (
     BaseTranslationEngine,
 )
 
-# 导入 EngineBatchItemResult
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
+
+class TranslatorsContextModel(BaseContextModel):
+    """包含翻译器引擎特定上下文参数的模型"""
+
+    provider: Optional[str] = None  # 动态选择翻译服务提供商
+
 
 # 初始化日志记录器
 logger = logging.getLogger(__name__)
@@ -44,6 +53,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
     """
 
     CONFIG_MODEL = TranslatorsEngineConfig  # 指定具体的配置模型
+    CONTEXT_MODEL = TranslatorsContextModel  # 上下文模型
     VERSION = "1.0.0"
 
     def __init__(self, config: TranslatorsEngineConfig):
@@ -80,21 +90,29 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             texts (List[str]): 需要翻译的文本列表。
             target_lang (str): 目标语言代码，例如 'en' 或 'zh-CN'。
             source_lang (Optional[str]): 源语言代码，默认为自动检测。
-            context (Optional[BaseContextModel]): 上下文信息，当前未使用。
+            context (Optional[TranslatorsContextModel]): 上下文信息，可指定provider
 
         返回:
             List[EngineBatchItemResult]: 包含翻译结果或错误信息的结果列表。
         """
-        return [self._translate_single(text, target_lang, source_lang) for text in texts]
+        # 从上下文获取provider，若未提供则使用配置的默认值
+        provider = self.provider
+        if isinstance(context, TranslatorsContextModel) and context.provider:
+            provider = context.provider
+
+        return [
+            self._translate_single(text, target_lang, source_lang, provider)
+            for text in texts
+        ]
 
     def _translate_single(
-        self, text: str, target_lang: str, source_lang: Optional[str]
+        self, text: str, target_lang: str, source_lang: Optional[str], provider: str
     ) -> EngineBatchItemResult:
         """翻译单个文本的辅助方法"""
         try:
             translated_text = ts.translate_text(
                 query_text=text,
-                translator=self.provider,
+                translator=provider,
                 from_language=source_lang or "auto",
                 to_language=target_lang,
             )
@@ -116,10 +134,15 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
         """异步版本的批量翻译，使用线程池执行器并发处理文本"""
+        # 从上下文获取provider，若未提供则使用配置的默认值
+        provider = self.provider
+        if isinstance(context, TranslatorsContextModel) and context.provider:
+            provider = context.provider
+
         loop = asyncio.get_event_loop()
         tasks = [
             loop.run_in_executor(
-                None, self._translate_single, text, target_lang, source_lang
+                None, self._translate_single, text, target_lang, source_lang, provider
             )
             for text in texts
         ]

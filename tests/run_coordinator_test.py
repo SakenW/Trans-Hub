@@ -6,6 +6,7 @@ Trans-Hub 核心功能端到端测试脚本。
 正确协同工作，并覆盖主要的业务流程，如请求、处理、缓存和垃圾回收。
 """
 
+import asyncio
 import datetime
 import logging
 import os
@@ -13,7 +14,6 @@ import shutil
 from typing import Any, Optional
 
 import pytest
-import asyncio
 import structlog
 from dotenv import load_dotenv
 
@@ -92,9 +92,12 @@ def run_engine_test(
             business_id=f"test.{engine_name}.greeting",
             context=context,
         )
+
         async def collect_results():
             results = []
-            async for result in coordinator.process_pending_translations(target_lang=target_lang):
+            async for result in coordinator.process_pending_translations(
+                target_lang=target_lang
+            ):
                 results.append(result)
             return results
 
@@ -132,7 +135,9 @@ def run_engine_test(
 
         async def collect_cached_results():
             cached_results = []
-            async for result in coordinator.process_pending_translations(target_lang=target_lang):
+            async for result in coordinator.process_pending_translations(
+                target_lang=target_lang
+            ):
                 cached_results.append(result)
             return cached_results
 
@@ -168,11 +173,15 @@ def test_gc_workflow(db_path: str):
         coordinator.request(
             target_langs=["ja"], text_content="legacy item", business_id="legacy.item"
         )
+
         async def collect_gc_results():
             results = []
-            async for result in coordinator.process_pending_translations(target_lang="ja"):
+            async for result in coordinator.process_pending_translations(
+                target_lang="ja"
+            ):
                 results.append(result)
             return results
+
         asyncio.run(collect_gc_results())
         log.info("初始数据已创建并翻译。")
 

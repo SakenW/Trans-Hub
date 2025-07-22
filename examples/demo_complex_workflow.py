@@ -1,4 +1,5 @@
 # demo_complex_workflow.py (最终最终修正版 - 再次修正 Ruff 警告)
+import asyncio
 import os
 from typing import Any
 
@@ -46,7 +47,7 @@ def initialize_trans_hub(db_file: str, gc_retention_days: int) -> Coordinator:
     return coordinator
 
 
-def request_and_process(
+async def request_and_process(
     coordinator: Coordinator, tasks: list[dict[str, Any]], target_lang: str
 ):
     """辅助函数：登记任务并处理它们。"""
@@ -71,7 +72,7 @@ def request_and_process(
         target_lang=target_lang
     )
 
-    results = list(results_generator)
+    results = [result async for result in results_generator]
 
     if results:
         log.info(f"成功处理 {len(results)} 个任务。")
@@ -94,7 +95,7 @@ def request_and_process(
     log.info("\n" + "=" * 60 + "\n")
 
 
-def main():
+async def main():
     """主程序入口：复杂任务测试。"""
     load_dotenv()
     coordinator = None
@@ -297,4 +298,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -7,6 +7,7 @@
 import datetime
 import json
 import sqlite3
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Optional
@@ -32,6 +33,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
         """初始化处理器并建立数据库连接。"""
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self.db_lock = threading.Lock()
         self._connect()
 
     def _connect(self):
@@ -58,18 +60,19 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Cursor, None, None]:
-        """一个提供原子事务的上下文管理器。"""
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("BEGIN;")
-            yield cursor
-            self.connection.commit()
-        except Exception:
-            logger.error("事务执行失败，正在回滚", exc_info=True)
-            self.connection.rollback()
-            raise
-        finally:
-            cursor.close()
+        """一个提供原子事务的上下文管理器，使用线程锁确保序列化访问。"""
+        with self.db_lock:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute("BEGIN;")
+                yield cursor
+                self.connection.commit()
+            except Exception:
+                logger.error("事务执行失败，正在回滚", exc_info=True)
+                self.connection.rollback()
+                raise
+            finally:
+                cursor.close()
 
     def touch_source(self, business_id: str) -> None:
         """更新指定 business_id 的 last_seen_at 时间戳到当前时间。"""
@@ -137,67 +140,59 @@ class DefaultPersistenceHandler(PersistenceHandler):
             # Calculate remaining limit for this iteration
             remaining_limit = limit - processed_count if limit is not None else None
             current_batch_size = batch_size
-            
+
             if remaining_limit is not None and current_batch_size > remaining_limit:
                 current_batch_size = remaining_limit
                 if current_batch_size <= 0:
                     break
 
             with self.transaction() as cursor:
-                # Fetch next batch of translation IDs
-                find_ids_sql = """
-                    SELECT id FROM th_translations
-                    WHERE lang_code = ? AND status IN ({status_placeholders})
-                    ORDER BY last_updated_at ASC
+                # 优化N+1查询：通过JOIN一次性获取翻译记录和内容详情
+                find_batch_sql = """
+                    SELECT tr.id, tr.content_id, c.value, tr.context_hash, tr.context
+                    FROM th_translations tr
+                    JOIN th_content c ON tr.content_id = c.id
+                    WHERE tr.lang_code = ? AND tr.status IN ({status_placeholders})
+                    ORDER BY tr.last_updated_at ASC
                     LIMIT ?
-                """.format(status_placeholders=','.join('?' for _ in status_values))
-                
+                """.format(status_placeholders=",".join("?" for _ in status_values))
+
                 params = [lang_code] + list(status_values) + [current_batch_size]
-                cursor.execute(find_ids_sql, params)
-                batch_ids = [row["id"] for row in cursor.fetchall()]
-                
-                if not batch_ids:
+                cursor.execute(find_batch_sql, params)
+                batch_rows = cursor.fetchall()
+
+                if not batch_rows:
                     break
-                
-                # Update status to TRANSLATING for this batch
+
+                batch_ids = [row["id"] for row in batch_rows]
+
+                # 更新批次状态为TRANSLATING
                 update_sql = """
                     UPDATE th_translations SET status = ?, last_updated_at = ?
                     WHERE id IN ({id_placeholders})
-                """.format(id_placeholders=','.join('?' for _ in batch_ids))
-                
+                """.format(id_placeholders=",".join("?" for _ in batch_ids))
+
                 now = datetime.datetime.now(datetime.timezone.utc)
                 update_params = [
                     TranslationStatus.TRANSLATING.value,
                     now.isoformat(),
                 ] + batch_ids
                 cursor.execute(update_sql, update_params)
-            
-            # Fetch content details for the batch
-            get_details_sql = """
-                SELECT tr.content_id, c.value, tr.context_hash, tr.context
-                FROM th_translations tr
-                JOIN th_content c ON tr.content_id = c.id
-                WHERE tr.id IN ({id_placeholders})
-            """.format(id_placeholders=','.join('?' for _ in batch_ids))
-            
-            read_cursor = self.connection.cursor()
-            read_cursor.execute(get_details_sql, batch_ids)
-            
-            batch_items = [
-                ContentItem(
-                    content_id=row["content_id"],
-                    value=row["value"],
-                    context_hash=row["context_hash"],
-                    context=json.loads(row["context"]) if row["context"] else None,
-                )
-                for row in read_cursor.fetchall()
-            ]
-            
-            read_cursor.close()
+
+                # 直接从JOIN结果构造ContentItem列表
+                batch_items = [
+                    ContentItem(
+                        content_id=row["content_id"],
+                        value=row["value"],
+                        context_hash=row["context_hash"],
+                        context=json.loads(row["context"]) if row["context"] else None,
+                    )
+                    for row in batch_rows
+                ]
+
             yield batch_items
-            
             processed_count += len(batch_items)
-            if remaining_limit is not None and processed_count >= limit:
+            if remaining_limit is not None and processed_count >= remaining_limit:
                 break
 
     def save_translations(self, results: list[TranslationResult]) -> None:
@@ -211,12 +206,12 @@ class DefaultPersistenceHandler(PersistenceHandler):
             return
 
         # 批量查询content_id，避免N+1查询问题
-        placeholders = ', '.join('?' for _ in unique_original_contents)
+        placeholders = ", ".join("?" for _ in unique_original_contents)
         query = f"SELECT id, value FROM th_content WHERE value IN ({placeholders})"
-        
+
         cursor = self.connection.cursor()
         cursor.execute(query, tuple(unique_original_contents))
-        content_id_map = {row['value']: row['id'] for row in cursor.fetchall()}
+        content_id_map = {row["value"]: row["id"] for row in cursor.fetchall()}
         cursor.close()
 
         update_params_list = []

@@ -6,9 +6,10 @@
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, validator, ValidationInfo
-from trans_hub.cache import CacheConfig
+from pydantic import BaseModel, Field, ValidationInfo
 from pydantic.functional_validators import field_validator
+
+from trans_hub.cache import CacheConfig
 
 # 导入所有已实现的引擎的配置模型
 from trans_hub.engines.debug import DebugEngineConfig
@@ -69,7 +70,9 @@ class TransHubConfig(BaseModel):
 
     # 新增: batch_size 字段，修复 AttributeError
     batch_size: int = Field(default=50, description="处理待办任务时的默认批处理大小")
-    cache_config: CacheConfig = Field(default_factory=CacheConfig, description="翻译缓存配置")
+    cache_config: CacheConfig = Field(
+        default_factory=CacheConfig, description="翻译缓存配置"
+    )
 
     # 新增: source_lang 字段，用于需要源语言的引擎
     source_lang: Optional[str] = Field(

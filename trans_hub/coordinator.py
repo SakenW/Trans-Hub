@@ -10,16 +10,15 @@
 import asyncio
 import json
 import re
-from collections.abc import Generator, AsyncGenerator
+from collections.abc import AsyncGenerator
 from typing import Any, Optional
 
 import structlog
-from trans_hub.cache import TranslationCache
 
+from trans_hub.cache import TranslationCache
 from trans_hub.config import TransHubConfig
-from trans_hub.types import TranslationRequest
 from trans_hub.engine_registry import ENGINE_REGISTRY
-from trans_hub.engines.base import BaseTranslationEngine
+from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.rate_limiter import RateLimiter
 from trans_hub.types import (
@@ -27,10 +26,14 @@ from trans_hub.types import (
     EngineBatchItemResult,
     EngineError,
     EngineSuccess,
+    TranslationRequest,
     TranslationResult,
     TranslationStatus,
 )
 from trans_hub.utils import get_context_hash
+
+# 初始化缓存实例
+translation_cache = TranslationCache()
 
 # 获取一个 logger
 logger = structlog.get_logger(__name__)
@@ -117,8 +120,14 @@ class Coordinator:
 
         # 如果未提供参数，则从配置中获取默认值
         # 动态调整批次大小以适应引擎能力
-        engine_batch_size = getattr(self.active_engine, 'MAX_BATCH_SIZE', self.config.batch_size)
-        batch_size = batch_size if batch_size is not None else min(self.config.batch_size, engine_batch_size)
+        engine_batch_size = getattr(
+            self.active_engine, "MAX_BATCH_SIZE", self.config.batch_size
+        )
+        batch_size = (
+            batch_size
+            if batch_size is not None
+            else min(self.config.batch_size, engine_batch_size)
+        )
         max_retries = (
             max_retries
             if max_retries is not None
@@ -146,10 +155,9 @@ class Coordinator:
                 continue
 
             logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
-            texts_to_translate = [item.value for item in batch]
 
             # 定义 batch_results，确保其在循环中始终可用
-            batch_results: list[EngineBatchItemResult] = []
+            batch_results: list[TranslationResult] = []
 
             context_dict = batch[0].context
             validated_context = None
@@ -159,6 +167,7 @@ class Coordinator:
                         context_dict
                     )
                 except Exception as e:
+                    error_msg: str = str(e)
                     logger.error(
                         "上下文验证失败，将作为错误处理整个批次",
                         context=context_dict,
@@ -167,10 +176,16 @@ class Coordinator:
                     )
                     # 如果上下文验证失败，直接生成错误结果并跳过API调用
                     batch_results = [
-                        EngineError(
-                            error_message=f"无效的上下文: {e}", is_retryable=False
+                        self._convert_to_translation_result(
+                            item=item,
+                            engine_result=EngineError(
+                                error_message=error_msg,
+                                is_retryable=False,
+                            ),
+                            target_lang=target_lang,
                         )
-                    ] * len(batch)
+                        for item in batch
+                    ]
                     async for result in self._process_and_save_batch_results(
                         batch, batch_results, target_lang
                     ):
@@ -189,18 +204,38 @@ class Coordinator:
                                 source_text=item.value,
                                 source_lang=self.config.source_lang,
                                 target_lang=target_lang,
-                                context_hash=item.context_hash
+                                context_hash=item.context_hash,
                             )
                         )
                         if cached_result:
-                            batch_results.append(EngineSuccess(translated_text=cached_result, from_cache=True))
+                            # 将缓存结果转换为TranslationResult
+                            result = TranslationResult(
+                                original_content=item.value,
+                                translated_content=cached_result,
+                                target_lang=target_lang,
+                                status=TranslationStatus.TRANSLATED,
+                                from_cache=True,
+                                context_hash=item.context_hash,
+                                engine=self.active_engine_name,
+                            )
+                            batch_results.append(result)
                         else:
                             uncached_texts.append(item.value)
                             uncached_indices.append(i)
                 except Exception as e:
-                    logger.error(f"缓存处理异常: {str(e)}")
+                    error_msg = str(e)
+                    logger.error(f"缓存处理异常: {error_msg}")
                     # 回退到无缓存处理
-                    batch_results = await self._process_uncached_batch(batch, target_lang)
+                    # 处理未缓存批次并转换结果类型
+                    engine_results = await self._process_uncached_batch(
+                        batch, target_lang
+                    )
+                    batch_results = [
+                        self._convert_to_translation_result(
+                            item=item, engine_result=result, target_lang=target_lang
+                        )
+                        for item, result in zip(batch, engine_results)
+                    ]
 
                 if uncached_texts:
                     if self.rate_limiter:
@@ -227,29 +262,66 @@ class Coordinator:
 
                     # 合并未缓存结果到批次结果中
                     try:
-                        for idx, result in zip(uncached_indices, uncached_results):
-                            batch_results.insert(idx, result)
+                        # 将引擎结果转换为TranslationResult后插入
+                        for idx, engine_result in enumerate(uncached_results):
+                            original_item = batch[uncached_indices[idx]]
+                            result = self._convert_to_translation_result(
+                                item=original_item,
+                                engine_result=engine_result,
+                                target_lang=target_lang,
+                            )
+                            batch_results.insert(uncached_indices[idx], result)
                     except Exception as e:
-                        logger.error(f"缓存批次处理失败: {str(e)}")
+                        error_msg = str(e)
+                        batch_results = [
+                            self._convert_to_translation_result(
+                                item=item,
+                                engine_result=EngineError(
+                                    error_message=error_msg, is_retryable=False
+                                ),
+                                target_lang=target_lang,
+                            )
+                            for item in batch
+                        ]
+                        logger.error(f"缓存批次处理失败: {error_msg}")
                         raise
 
                     # 缓存新翻译结果
                     try:
-                        for item, result in zip([batch[i] for i in uncached_indices], uncached_results):
-                            if isinstance(result, EngineSuccess):
-                                await self.cache.cache_translation_result(
-                                    TranslationRequest(
-                                        source_text=item.value,
-                                        source_lang=self.config.source_lang,
-                                        target_lang=target_lang,
-                                        context_hash=item.context_hash
-                                    ),
-                                    result.translated_text
-                                )
+                        for item, engine_result in zip(
+                            [batch[i] for i in uncached_indices], uncached_results
+                        ):
+                            # 将引擎结果转换为TranslationResult
+                            result = self._convert_to_translation_result(
+                                item=item,
+                                engine_result=engine_result,
+                                target_lang=target_lang,
+                            )
+                            # 更新缓存
+                            # 使用正确的缓存方法
+                            await self.cache.cache_translation_result(
+                                request=TranslationRequest(
+                                    source_text=item.value,
+                                    source_lang=self.config.source_lang,
+                                    target_lang=target_lang,
+                                    context_hash=item.context_hash,
+                                ),
+                                result=result.translated_content or "",
+                            )
                     except Exception as e:
-                        logger.error(f"缓存处理过程中发生错误: {str(e)}")
+                        error_msg = str(e)
+                        logger.error(f"缓存处理过程中发生错误: {error_msg}")
                         # 使用原始批次处理逻辑作为回退
-                        batch_results = await self._process_uncached_batch(batch, target_lang)
+                        # 处理未缓存批次并转换结果类型
+                        engine_results = await self._process_uncached_batch(
+                            batch, target_lang
+                        )
+                        batch_results = [
+                            self._convert_to_translation_result(
+                                item=item, engine_result=result, target_lang=target_lang
+                            )
+                            for item, result in zip(batch, engine_results)
+                        ]
 
                 # --- 统一的重试判断逻辑 ---
                 # 在每次尝试后，检查整个批次是否存在可重试的错误
@@ -258,7 +330,9 @@ class Coordinator:
                 )
 
                 if not has_retryable_errors:
-                    logger.info(f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。")
+                    logger.info(
+                        f"批次处理成功或仅包含不可重试错误 (尝试次数: {attempt + 1})。"
+                    )
                     break  # 成功，或遇到不可重试的错误，直接跳出重试循环
 
                 # 如果运行到这里，说明需要重试
@@ -278,7 +352,9 @@ class Coordinator:
             ):
                 yield result
 
-    async def _process_uncached_batch(self, batch: list[ContentItem], target_lang: str) -> list[EngineBatchItemResult]:
+    async def _process_uncached_batch(
+        self, batch: list[ContentItem], target_lang: str
+    ) -> list[EngineBatchItemResult]:
         """处理未缓存的批次翻译请求"""
         try:
             if self.active_engine.IS_ASYNC_ONLY:
@@ -286,35 +362,42 @@ class Coordinator:
                     texts=[item.value for item in batch],
                     target_lang=target_lang,
                     source_lang=self.config.source_lang,
-                    context=self._get_batch_context(batch)
+                    context=self._get_batch_context(batch),
                 )
             else:
                 results = self.active_engine.translate_batch(
                     texts=[item.value for item in batch],
                     target_lang=target_lang,
                     source_lang=self.config.source_lang,
-                    context=self._get_batch_context(batch)
+                    context=self._get_batch_context(batch),
                 )
             return results
         except Exception as e:
             logger.error(f"处理未缓存批次时发生错误: {str(e)}", exc_info=True)
             return [EngineError(error_message=str(e), is_retryable=True)] * len(batch)
 
-    def _get_batch_context(self, batch: list[ContentItem]) -> Optional[dict]:
+    def _get_batch_context(
+        self, batch: list[ContentItem]
+    ) -> Optional[BaseContextModel]:
         """获取批次的上下文信息"""
         if batch and batch[0].context_hash:
-            return self.handler.get_context_by_hash(batch[0].context_hash)
+            context_dict = batch[0].context  # 直接使用ContentItem的context属性
+            if context_dict and self.active_engine.CONTEXT_MODEL:
+                try:
+                    return self.active_engine.CONTEXT_MODEL.model_validate(context_dict)
+                except Exception as e:
+                    logger.error("上下文验证失败", context=context_dict, error=str(e))
         return None
 
     async def _process_and_save_batch_results(
         self,
         batch: list[ContentItem],
-        engine_results: list[EngineBatchItemResult],
+        batch_results: list[TranslationResult],
         target_lang: str,
-    ) -> Generator[TranslationResult, None, None]:
+    ) -> AsyncGenerator[TranslationResult, None]:
         """内部辅助方法，将引擎结果转换为 DTO，保存到数据库，并逐个返回。"""
         final_results_to_save: list[TranslationResult] = []
-        for item, engine_result in zip(batch, engine_results):
+        for item, result in zip(batch, batch_results):
             retrieved_business_id = self.handler.get_business_id_for_content(
                 content_id=item.content_id, context_hash=item.context_hash
             )
@@ -322,12 +405,7 @@ class Coordinator:
             if retrieved_business_id:
                 self.handler.touch_source(retrieved_business_id)
 
-            result = self._convert_to_translation_result(
-                item=item,
-                engine_result=engine_result,
-                target_lang=target_lang,
-                retrieved_business_id=retrieved_business_id,
-            )
+            # 直接使用已转换的result，无需再次转换
             final_results_to_save.append(result)
 
             yield result

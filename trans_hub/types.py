@@ -54,6 +54,7 @@ EngineBatchItemResult = Union[EngineSuccess, EngineError]
 
 class TranslationRequest(BaseModel):
     """表示一个翻译请求，包含源文本和语言参数"""
+
     source_text: str
     source_lang: Optional[str]
     target_lang: str
