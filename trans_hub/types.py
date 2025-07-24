@@ -1,14 +1,12 @@
-# trans_hub/types.py
-"""
-本模块定义了 Trans-Hub 引擎的核心数据传输对象 (DTOs)、枚举和数据结构。
-它是应用内部数据契约的“单一事实来源”，已根据最终版文档进行更新。
-所有与外部或模块间交互的数据结构都应在此定义。
+# trans_hub/types.py (最终优化版)
+"""本模块定义了 Trans-Hub 引擎的核心数据传输对象 (DTOs)、枚举和数据结构。
+它是应用内部数据契约的“单一事实来源”。.
 """
 
 from enum import Enum
-from typing import Any, Optional, Union  # 恢复导入 Dict 和 Any
+from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ==============================================================================
 #  枚举 (Enumerations)
@@ -16,7 +14,7 @@ from pydantic import BaseModel, Field
 
 
 class TranslationStatus(str, Enum):
-    """表示翻译记录在数据库中的生命周期状态。"""
+    """表示翻译记录在数据库中的生命周期状态。."""
 
     PENDING = "PENDING"
     TRANSLATING = "TRANSLATING"
@@ -31,15 +29,14 @@ class TranslationStatus(str, Enum):
 
 
 class EngineSuccess(BaseModel):
-    """代表从翻译引擎返回的单次 *成功* 的翻译结果。"""
+    """代表从翻译引擎返回的单次 *成功* 的翻译结果。."""
 
-    # 移除了未使用的 detected_source_lang 字段，保持 DTO 简洁
     translated_text: str
-    from_cache: bool = False  # 新增：标识结果是否来自缓存
+    from_cache: bool = False
 
 
 class EngineError(BaseModel):
-    """代表从翻译引擎返回的单次 *失败* 的翻译结果。"""
+    """代表从翻译引擎返回的单次 *失败* 的翻译结果。."""
 
     error_message: str
     is_retryable: bool
@@ -53,7 +50,7 @@ EngineBatchItemResult = Union[EngineSuccess, EngineError]
 
 
 class TranslationRequest(BaseModel):
-    """表示一个翻译请求，包含源文本和语言参数"""
+    """表示一个用于缓存查找或内部传递的翻译请求。."""
 
     source_text: str
     source_lang: Optional[str]
@@ -62,7 +59,7 @@ class TranslationRequest(BaseModel):
 
 
 class TranslationResult(BaseModel):
-    """由 `Coordinator` 返回给最终用户的综合结果对象，包含了完整的上下文信息。"""
+    """由 Coordinator 返回给最终用户的综合结果对象，包含了完整的上下文信息。."""
 
     # 核心内容
     original_content: str
@@ -72,34 +69,42 @@ class TranslationResult(BaseModel):
     # 状态与元数据
     status: TranslationStatus
     engine: Optional[str] = None
-    from_cache: bool  # 结果是否来自缓存。
+    from_cache: bool
     error: Optional[str] = None
 
     # 来源与上下文标识
     business_id: Optional[str] = Field(
         default=None, description="与此内容关联的业务ID。"
     )
-    context_hash: str = Field(
-        description="用于区分不同上下文翻译的哈希值。现在总是非NULL。"
-    )
+    context_hash: str = Field(description="用于区分不同上下文翻译的哈希值。")
+
+    # --- 核心修正：添加模型验证器以确保逻辑一致性 ---
+    @model_validator(mode="after")
+    def check_consistency(self) -> "TranslationResult":
+        """确保模型状态的逻辑一致性。."""
+        if (
+            self.status == TranslationStatus.TRANSLATED
+            and self.translated_content is None
+        ):
+            raise ValueError("TRANSLATED 状态的结果必须包含 translated_content。")
+        if self.status == TranslationStatus.FAILED and self.error is None:
+            raise ValueError("FAILED 状态的结果必须包含 error 信息。")
+        return self
 
 
 class SourceUpdateResult(BaseModel):
-    """`PersistenceHandler.update_or_create_source` 方法的返回结果。"""
+    """`PersistenceHandler.update_or_create_source` 方法的返回结果。."""
 
     content_id: int
     is_newly_created: bool
 
 
 class ContentItem(BaseModel):
-    """内部处理时，代表一个待翻译任务的结构化对象。"""
+    """内部处理时，代表一个从数据库取出的待翻译任务。."""
 
     content_id: int
     value: str
-    context_hash: str  # 现在是 NOT NULL
-
-    # 核心修复: 添加 context 字段以打通从持久化层到 Coordinator 的数据流。
-    # 这个字段将携带从数据库中读取的、原始的 JSON 上下文（已解析为 dict）。
+    context_hash: str
     context: Optional[dict[str, Any]] = None
 
 

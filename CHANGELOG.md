@@ -7,6 +7,48 @@
 
 ---
 
+## **[2.0.0] - 2024-07-25**
+
+这是一个**里程碑式**的版本，标志着 `Trans-Hub` 从混合模式框架全面演进为一个**纯异步 (Async-First)** 的高性能引擎。本次重构触及了项目的每一个核心角落，极大地提升了性能、健壮性和开发者体验。
+
+### 💥 **重大变更 (BREAKING CHANGES)**
+
+- **架构核心：全面转向纯异步**
+  - `Coordinator` 类现在是一个**纯异步**类。所有与其交互的方法（如 `request`, `process_pending_translations`）都必须使用 `async/await` 进行调用。
+  - 所有同步方法和代码路径已被**彻底移除**，以消除潜在的性能瓶颈和简化心智模型。
+- **引擎接口 (`BaseTranslationEngine`) 简化**
+  - 引擎的契约被简化为**唯一必须实现**的异步方法：`async def atranslate_batch(...)`。
+  - `translate_batch` 同步方法和 `IS_ASYNC_ONLY` 标志已被**彻底移除**。
+  - 贡献指南已更新，明确要求同步库必须通过 `asyncio.to_thread` 进行适配。
+- **持久化层 (`PersistenceHandler`) 纯异步化**
+  - `PersistenceHandler` 接口及其默认实现 `DefaultPersistenceHandler` 已被重构为**纯异步**，所有方法都使用 `async def`。
+  - 彻底修复了所有与 `aiosqlite` 相关的事务嵌套、连接管理和路径解析的底层 bug。
+
+### ✨ 新增 (Added)
+
+- **`Coordinator.switch_engine()`**: 新增了一个便捷的同步方法，允许在运行时动态地切换当前活动的翻译引擎实例，极大地增强了灵活性。
+- **智能配置加载**: `TransHubConfig` 现在更加智能。当用户通过 `active_engine="openai"` 激活一个引擎时，如果其配置尚未提供，系统会自动尝试创建并从 `.env` 文件加载，显著简化了用户的初始化代码。
+- **专业的开发者工具**: `tools/inspect_db.py` 被重写为一个功能强大的、异步的、接受命令行参数的专业诊断工具。
+
+### 🚀 变更与优化 (Changed)
+
+- **测试套件全面升级**:
+  - `tests/run_coordinator_test.py` 已被完全重构，使用 `pytest-asyncio` 和 `fixture` 来实现**完全隔离的、可靠的**异步测试。
+  - 修复了所有在严格测试中发现的 bug，包括引擎切换逻辑、默认配置和 N+1 查询性能问题。
+- **CI/CD 流程优化**:
+  - `.github/workflows/ci.yml` 已被重构，现在可以并行测试多个稳定 Python 版本，并包含一个“允许失败”的实验性任务来测试未来的 Python 3.13。
+  - CI 现在通过 **GitHub Secrets** 安全地获取 API 密钥，使得 OpenAI 等引擎的测试能够真正在自动化流程中运行。
+- **文档全面同步**:
+  - 所有文档（`README.md`、指南、架构文档、API 参考）都已更新，以 100%准确地反映 v2.0.0 的纯异步架构和最新的 API。
+
+### 🐛 修复 (Fixed)
+
+- **修复了数据库性能瓶颈**: 移除了 `DefaultPersistenceHandler` 中不必要的全局锁，充分利用了 SQLite WAL 模式的并发能力。
+- **修复了所有底层数据库错误**: 彻底解决了包括 `cannot start a transaction within a transaction`, `NameError`, `AttributeError` 在内的所有数据库相关问题。
+- **修复了示例代码**: `examples/demo_complex_workflow.py` 已被完全重写，现在是一个展示如何正确使用 `Trans-Hub` v2.0 的、功能完善的异步应用范例。
+
+---
+
 ## **[1.1.1] - 2025-06-16**
 
 这是一个以提升代码质量和开发者体验为核心的维护版本。它彻底解决了在 `mypy` 严格模式下的所有静态类型检查错误，并相应地更新了开发者文档，以确保新贡献者能够遵循最健壮的最佳实践。
@@ -23,7 +65,6 @@
   - 修正了测试脚本 (`run_coordinator_test.py`) 中对 `logging.warning` 的不规范调用，该调用使用了 `mypy` 不支持的关键字参数。
 - **规范化了引擎配置模型**:
   - `OpenAIEngineConfig` 的字段名被重构，以直接匹配其对应的环境变量（减去 `TH_` 前缀），例如 `openai_api_key` 对应 `TH_OPENAI_API_KEY`。这使得代码意图更清晰，并且是解决 `mypy` 问题的关键步骤之一。
-
 
 ## **[1.1.0] - 2025-06-14**
 

@@ -1,7 +1,6 @@
 # trans_hub/engines/debug.py (v1.1)
-"""
-提供一个用于开发和测试的调试翻译引擎。
-此版本修正了其配置读取逻辑和继承关系。
+"""提供一个用于开发和测试的调试翻译引擎。
+此版本修正了其配置读取逻辑和继承关系。.
 """
 
 from typing import Optional
@@ -22,7 +21,7 @@ from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 # 核心修正：继承自 BaseSettings 和 BaseEngineConfig
 class DebugEngineConfig(BaseSettings, BaseEngineConfig):
-    """调试引擎的特定配置模型。"""
+    """调试引擎的特定配置模型。."""
 
     # 添加 model_config 以便 pydantic-settings 正常工作
     model_config = SettingsConfigDict(extra="ignore")
@@ -38,24 +37,24 @@ class DebugEngineConfig(BaseSettings, BaseEngineConfig):
 
 
 class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
-    """一个简单的调试翻译引擎实现。"""
+    """一个简单的调试翻译引擎实现。."""
 
     CONFIG_MODEL = DebugEngineConfig
     CONTEXT_MODEL = BaseContextModel
     VERSION = "1.0.2"
 
     def __init__(self, config: DebugEngineConfig):
-        """初始化 DebugEngine 实例。"""
+        """初始化 DebugEngine 实例。."""
         super().__init__(config)
 
     def _debug_translate(self, text: str, target_lang: str) -> str:
-        """一个模拟翻译的内部辅助方法。"""
+        """一个模拟翻译的内部辅助方法。."""
         return self.config.translation_map.get(
             text, f"Translated({text}) to {target_lang}"
         )
 
     def _process_text(self, text: str, target_lang: str) -> EngineBatchItemResult:
-        """内部辅助方法，处理单个文本的翻译。"""
+        """内部辅助方法，处理单个文本的翻译。."""
         if self.config.mode == "FAIL":
             return EngineError(
                 error_message="DebugEngine is in FAIL mode.",
@@ -77,7 +76,7 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """同步批量翻译方法。"""
+        """同步批量翻译方法。."""
         return [self._process_text(text, target_lang) for text in texts]
 
     async def atranslate_batch(
@@ -87,5 +86,5 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """异步批量翻译方法。"""
+        """异步批量翻译方法。."""
         return self.translate_batch(texts, target_lang, source_lang, context)

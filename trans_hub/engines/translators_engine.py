@@ -1,129 +1,83 @@
-"""trans_hub/engines/translators_engine.py (v1.0)
+# trans_hub/engines/translators_engine.py
 
-提供一个使用 `translators` 库的免费翻译引擎。
-此版本与泛型 `BaseTranslationEngine` 接口兼容，并修复了 `atranslate_batch` 签名。
+"""提供一个使用 `translators` 库的免费翻译引擎。
+此版本为纯异步设计，并使用 asyncio.to_thread 包装同步调用。.
 """
 
 import asyncio
-import logging
-
-# 导入 logging 模块
 from typing import Optional
 
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
+import structlog
 
-# 使用 try-except 来处理可选依赖，如果未安装则不加载
-try:
-    import translators as ts
-except ImportError:
-    ts = None
-    # 可以在此处添加一个警告，但在实际使用时，如果没有安装，初始化时会直接抛出 ImportError
-    # logging.warning("Translators library not found. TranslatorsEngine will not be available.")
-
-
-# 导入基类和相关模型，确保 BaseEngineConfig 已导入
 from trans_hub.engines.base import (
     BaseContextModel,
     BaseEngineConfig,
     BaseTranslationEngine,
 )
+from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
+
+try:
+    import translators as ts
+except ImportError:
+    ts = None
+
+logger = structlog.get_logger(__name__)
 
 
 class TranslatorsContextModel(BaseContextModel):
-    """包含翻译器引擎特定上下文参数的模型"""
+    """Translators 引擎的上下文，允许动态选择服务商。."""
 
-    provider: Optional[str] = None  # 动态选择翻译服务提供商
-
-
-# 初始化日志记录器
-logger = logging.getLogger(__name__)
+    provider: Optional[str] = None
 
 
 class TranslatorsEngineConfig(BaseEngineConfig):
-    """translators 引擎的特定配置模型。"""
+    """Translators 引擎的配置。."""
 
-    # 允许用户指定优先使用的翻译服务，如 'google', 'bing'
     provider: str = "google"
 
 
-# 核心修复：将 TranslatorsEngine 声明为 BaseTranslationEngine 的泛型子类
 class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
-    """一个使用 `translators` 库提供免费翻译的引擎。
-    这是一个很好的默认或备用引擎，因为它无需 API Key 即可工作。
-    """
+    """一个使用 `translators` 库的纯异步引擎。."""
 
-    CONFIG_MODEL = TranslatorsEngineConfig  # 指定具体的配置模型
-    CONTEXT_MODEL = TranslatorsContextModel  # 上下文模型
-    VERSION = "1.0.0"
+    CONFIG_MODEL = TranslatorsEngineConfig
+    CONTEXT_MODEL = TranslatorsContextModel
+    VERSION = "1.1.0"
 
     def __init__(self, config: TranslatorsEngineConfig):
-        """
-        初始化 TranslatorsEngine 实例。
-        设置翻译服务提供商，并检查 `translators` 库是否已安装。
-        Args:
-            config: TranslatorsEngineConfig 配置对象。
-        """
-        # Mypy 现在能够正确识别 self.config 的类型为 TranslatorsEngineConfig
         super().__init__(config)
         if ts is None:
-            # 如果 `translators` 库未安装，则在初始化时抛出错误
             raise ImportError(
-                "要使用 TranslatorsEngine，请先安装 'translators' 库: pip install translators"
+                "要使用 TranslatorsEngine, 请先安装 'translators' 库: pip install \"trans-hub[translators]\""
             )
-        # 现在 Mypy 知道 self.config 有 provider 属性
         self.provider = self.config.provider
+        logger.info("Translators 引擎初始化成功", default_provider=self.provider)
 
-    def translate_batch(
-        self,
-        texts: list[str],
-        target_lang: str,
-        source_lang: Optional[str] = None,
-        context: Optional[BaseContextModel] = None,
-    ) -> list[EngineBatchItemResult]:
-        """
-        批量翻译文本内容。
-
-        使用指定的翻译服务将输入文本列表翻译为目标语言。
-        若未提供源语言，默认自动检测。
-
-        参数:
-            texts (List[str]): 需要翻译的文本列表。
-            target_lang (str): 目标语言代码，例如 'en' 或 'zh-CN'。
-            source_lang (Optional[str]): 源语言代码，默认为自动检测。
-            context (Optional[TranslatorsContextModel]): 上下文信息，可指定provider
-
-        返回:
-            List[EngineBatchItemResult]: 包含翻译结果或错误信息的结果列表。
-        """
-        # 从上下文获取provider，若未提供则使用配置的默认值
-        provider = self.provider
-        if isinstance(context, TranslatorsContextModel) and context.provider:
-            provider = context.provider
-
-        return [
-            self._translate_single(text, target_lang, source_lang, provider)
-            for text in texts
-        ]
-
-    def _translate_single(
+    def _translate_single_sync(
         self, text: str, target_lang: str, source_lang: Optional[str], provider: str
     ) -> EngineBatchItemResult:
-        """翻译单个文本的辅助方法"""
+        """[私有] 同步翻译单个文本的辅助方法。
+        这个方法将在一个单独的线程中被调用。.
+        """
         try:
-            translated_text = ts.translate_text(
-                query_text=text,
-                translator=provider,
-                from_language=source_lang or "auto",
-                to_language=target_lang,
+            # 确保 ts.translate_text 的结果是字符串
+            translated_text = str(
+                ts.translate_text(
+                    query_text=text,
+                    translator=provider,
+                    from_language=source_lang or "auto",
+                    to_language=target_lang,
+                )
             )
             return EngineSuccess(translated_text=translated_text)
         except Exception as e:
             logger.error(
-                f"TranslatorsEngine encountered an error for text '{text}': {e}",
+                "Translators 引擎翻译出错",
+                text_preview=text[:30],
+                error=str(e),
                 exc_info=True,
             )
             return EngineError(
-                error_message=f"Translators lib error: {e}", is_retryable=True
+                error_message=f"Translators 库错误: {e}", is_retryable=True
             )
 
     async def atranslate_batch(
@@ -133,17 +87,16 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """异步版本的批量翻译，使用线程池执行器并发处理文本"""
-        # 从上下文获取provider，若未提供则使用配置的默认值
+        """[异步] 批量翻译。通过 asyncio.to_thread 并发执行同步的翻译调用。."""
         provider = self.provider
         if isinstance(context, TranslatorsContextModel) and context.provider:
             provider = context.provider
 
-        loop = asyncio.get_event_loop()
         tasks = [
-            loop.run_in_executor(
-                None, self._translate_single, text, target_lang, source_lang, provider
+            asyncio.to_thread(
+                self._translate_single_sync, text, target_lang, source_lang, provider
             )
             for text in texts
         ]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        return list(results)

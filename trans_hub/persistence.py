@@ -1,409 +1,313 @@
-# trans_hub/persistence.py
-"""
-提供了 Trans-Hub 的默认持久化实现，基于 SQLite。
-封装了所有数据库交互，保证了事务的原子性。
+# trans_hub/persistence.py (终极完美版)
+"""提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
+此版本为纯异步设计，移除了不必要的锁以提升并发性能，并强化了封装。
 """
 
-import datetime
 import json
-import sqlite3
-import threading
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+import aiosqlite
 import structlog
 
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.types import (
     ContentItem,
-    SourceUpdateResult,
     TranslationResult,
     TranslationStatus,
 )
+from trans_hub.utils import get_context_hash
 
-# 获取一个 logger
 logger = structlog.get_logger(__name__)
 
 
 class DefaultPersistenceHandler(PersistenceHandler):
-    """使用标准库 `sqlite3` 实现的、与最终版文档对齐的同步持久化处理器。"""
+    """使用 aiosqlite 实现的、高性能的异步持久化处理器。"""
 
     def __init__(self, db_path: str):
-        """初始化处理器并建立数据库连接。"""
         self.db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
-        self.db_lock = threading.Lock()
-        self._connect()
+        self._conn: Optional[aiosqlite.Connection] = None
 
-    def _connect(self):
-        """内部方法，用于建立和配置数据库连接。"""
+    async def connect(self):
         try:
-            # check_same_thread=False 允许在多线程环境中使用（尽管每个操作仍是串行的）
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            # 启用外键约束以保证数据完整性
-            self._conn.execute("PRAGMA foreign_keys = ON;")
-            # 启用 WAL (Write-Ahead Logging) 模式以提高并发读写性能
-            self._conn.execute("PRAGMA journal_mode = WAL;")
+            self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
+            self._conn.row_factory = aiosqlite.Row
+            await self._conn.execute("PRAGMA foreign_keys = ON;")
+            await self._conn.execute("PRAGMA journal_mode = WAL;")
             logger.info("数据库连接已建立", db_path=self.db_path)
-        except sqlite3.Error:
+        except aiosqlite.Error:
             logger.error("连接数据库失败", exc_info=True)
             raise
 
     @property
-    def connection(self) -> sqlite3.Connection:
-        """提供一个安全的属性来访问连接对象，确保它不是 None。"""
+    def connection(self) -> aiosqlite.Connection:
         if self._conn is None:
-            raise RuntimeError("数据库未连接或已关闭。")
+            raise RuntimeError("数据库未连接或已关闭。请先调用 connect()。")
         return self._conn
 
-    @contextmanager
-    def transaction(self) -> Generator[sqlite3.Cursor, None, None]:
-        """一个提供原子事务的上下文管理器，使用线程锁确保序列化访问。"""
-        with self.db_lock:
-            cursor = self.connection.cursor()
-            try:
-                cursor.execute("BEGIN;")
-                yield cursor
-                self.connection.commit()
-            except Exception:
-                logger.error("事务执行失败，正在回滚", exc_info=True)
-                self.connection.rollback()
-                raise
-            finally:
-                cursor.close()
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
+        if self._conn is None:
+            raise ConnectionError("Database not connected.")
+        cursor = await self._conn.cursor()
+        try:
+            await cursor.execute("BEGIN")
+            yield cursor
+            await cursor.execute("COMMIT")
+        except Exception:
+            logger.error("事务执行失败，正在回滚", exc_info=True)
+            if self._conn:
+                await cursor.execute("ROLLBACK")
+            raise
+        finally:
+            await cursor.close()
 
-    def touch_source(self, business_id: str) -> None:
-        """更新指定 business_id 的 last_seen_at 时间戳到当前时间。"""
-        with self.transaction() as cursor:
-            sql = "UPDATE th_sources SET last_seen_at = ? WHERE business_id = ?"
-            now = datetime.datetime.now(datetime.timezone.utc)
-            cursor.execute(sql, (now.isoformat(), business_id))
-            if cursor.rowcount > 0:
-                logger.debug(
-                    "更新了源记录的时间戳",
-                    business_id=business_id,
-                    last_seen_at=now.isoformat(),
-                )
-
-    def update_or_create_source(
-        self, text_content: str, business_id: str, context_hash: str
-    ) -> SourceUpdateResult:
-        """根据 `business_id` 更新或创建一个源记录。"""
-        with self.transaction() as cursor:
-            cursor.execute("SELECT id FROM th_content WHERE value = ?", (text_content,))
-            content_row = cursor.fetchone()
-
-            is_newly_created = False
-            if content_row:
-                content_id = content_row["id"]
-            else:
-                cursor.execute(
+    async def ensure_pending_translations(
+        self,
+        text_content: str,
+        target_langs: list[str],
+        source_lang: Optional[str],
+        engine_version: str,
+        business_id: Optional[str] = None,
+        context_hash: Optional[str] = None,
+        context_json: Optional[str] = None,
+    ) -> None:
+        async with self.transaction() as cursor:
+            await cursor.execute(
+                "SELECT id FROM th_content WHERE value = ?", (text_content,)
+            )
+            row = await cursor.fetchone()
+            content_id = row["id"] if row else None
+            if not content_id:
+                await cursor.execute(
                     "INSERT INTO th_content (value) VALUES (?)", (text_content,)
                 )
                 content_id = cursor.lastrowid
-                is_newly_created = True
 
-            if content_id is None:
-                raise RuntimeError("无法为源记录确定 content_id。")
+            if not content_id:
+                raise RuntimeError("无法为翻译任务确定 content_id。")
 
-            sql = """
-                INSERT INTO th_sources (business_id, content_id, context_hash, last_seen_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(business_id) DO UPDATE SET
-                    content_id = excluded.content_id,
-                    context_hash = excluded.context_hash,
-                    last_seen_at = excluded.last_seen_at;
-            """
-            now = datetime.datetime.now(datetime.timezone.utc)
-            cursor.execute(
-                sql, (business_id, content_id, context_hash, now.isoformat())
-            )
+            if business_id:
+                sql = """
+                    INSERT INTO th_sources (business_id, content_id, context_hash, last_seen_at)
+                    VALUES (?, ?, ?, ?) ON CONFLICT(business_id) DO UPDATE SET
+                    content_id = excluded.content_id, context_hash = excluded.context_hash,
+                    last_seen_at = excluded.last_seen_at;"""
+                now = datetime.now(timezone.utc)
+                await cursor.execute(
+                    sql, (business_id, content_id, context_hash, now.isoformat())
+                )
 
-            return SourceUpdateResult(
-                content_id=content_id, is_newly_created=is_newly_created
-            )
+            insert_sql = "INSERT OR IGNORE INTO th_translations (content_id, lang_code, context_hash, status, source_lang_code, engine_version, context) VALUES (?, ?, ?, ?, ?, ?, ?)"
 
-    def stream_translatable_items(
+            params_to_insert = []
+            for lang in target_langs:
+                await cursor.execute(
+                    "SELECT status FROM th_translations WHERE content_id=? AND lang_code=? AND context_hash=?",
+                    (content_id, lang, context_hash),
+                )
+                existing = await cursor.fetchone()
+                if (
+                    existing
+                    and existing["status"] == TranslationStatus.TRANSLATED.value
+                ):
+                    continue
+                params_to_insert.append(
+                    (
+                        content_id,
+                        lang,
+                        context_hash,
+                        TranslationStatus.PENDING.value,
+                        source_lang,
+                        engine_version,
+                        context_json,
+                    )
+                )
+
+            if params_to_insert:
+                await cursor.executemany(insert_sql, params_to_insert)
+                logger.info(
+                    f"为 content_id={content_id} 确保了 {len(params_to_insert)} 个 PENDING 任务。"
+                )
+
+    async def stream_translatable_items(
         self,
         lang_code: str,
         statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> Generator[list[ContentItem], None, None]:
-        """以流式方式获取待翻译的内容批次。"""
+    ) -> AsyncGenerator[list[ContentItem], None]:
         status_values = tuple(s.value for s in statuses)
         processed_count = 0
+        while limit is None or processed_count < limit:
+            current_batch_size = min(
+                batch_size, limit - processed_count if limit is not None else batch_size
+            )
+            if current_batch_size <= 0:
+                break
 
-        while True:
-            # Calculate remaining limit for this iteration
-            remaining_limit = limit - processed_count if limit is not None else None
-            current_batch_size = batch_size
-
-            if remaining_limit is not None and current_batch_size > remaining_limit:
-                current_batch_size = remaining_limit
-                if current_batch_size <= 0:
-                    break
-
-            with self.transaction() as cursor:
-                # 优化N+1查询：通过JOIN一次性获取翻译记录和内容详情
-                find_batch_sql = """
-                    SELECT tr.id, tr.content_id, c.value, tr.context_hash, tr.context
-                    FROM th_translations tr
-                    JOIN th_content c ON tr.content_id = c.id
-                    WHERE tr.lang_code = ? AND tr.status IN ({status_placeholders})
-                    ORDER BY tr.last_updated_at ASC
-                    LIMIT ?
-                """.format(status_placeholders=",".join("?" for _ in status_values))
-
+            batch_items: list[ContentItem] = []
+            async with self.transaction() as cursor:
+                find_batch_sql = f"SELECT tr.id, tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.lang_code = ? AND tr.status IN ({','.join('?' for _ in status_values)}) ORDER BY tr.last_updated_at ASC LIMIT ?"
                 params = [lang_code] + list(status_values) + [current_batch_size]
-                cursor.execute(find_batch_sql, params)
-                batch_rows = cursor.fetchall()
+                await cursor.execute(find_batch_sql, params)
+                batch_rows = await cursor.fetchall()
 
                 if not batch_rows:
                     break
 
                 batch_ids = [row["id"] for row in batch_rows]
+                update_sql = f"UPDATE th_translations SET status = ?, last_updated_at = ? WHERE id IN ({','.join('?' for _ in batch_ids)})"
+                now = datetime.now(timezone.utc)
+                await cursor.execute(
+                    update_sql,
+                    [TranslationStatus.TRANSLATING.value, now.isoformat()] + batch_ids,
+                )
 
-                # 更新批次状态为TRANSLATING
-                update_sql = """
-                    UPDATE th_translations SET status = ?, last_updated_at = ?
-                    WHERE id IN ({id_placeholders})
-                """.format(id_placeholders=",".join("?" for _ in batch_ids))
-
-                now = datetime.datetime.now(datetime.timezone.utc)
-                update_params = [
-                    TranslationStatus.TRANSLATING.value,
-                    now.isoformat(),
-                ] + batch_ids
-                cursor.execute(update_sql, update_params)
-
-                # 直接从JOIN结果构造ContentItem列表
                 batch_items = [
                     ContentItem(
-                        content_id=row["content_id"],
-                        value=row["value"],
-                        context_hash=row["context_hash"],
-                        context=json.loads(row["context"]) if row["context"] else None,
+                        content_id=r["content_id"],
+                        value=r["value"],
+                        context_hash=r["context_hash"],
+                        context=json.loads(r["context"]) if r["context"] else None,
                     )
-                    for row in batch_rows
+                    for r in batch_rows
                 ]
+
+            if not batch_items:
+                break
 
             yield batch_items
             processed_count += len(batch_items)
-            if remaining_limit is not None and processed_count >= remaining_limit:
-                break
 
-    def save_translations(self, results: list[TranslationResult]) -> None:
-        """将一批翻译结果保存到数据库中。"""
+    async def save_translations(self, results: list[TranslationResult]) -> None:
         if not results:
             return
 
-        # 收集所有唯一的原始内容值
-        unique_original_contents = {res.original_content for res in results}
-        if not unique_original_contents:
+        params_to_update = [
+            {
+                "status": res.status.value,
+                "translation_content": res.translated_content,
+                "engine": res.engine,
+                "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                "original_content": res.original_content,
+                "lang_code": res.target_lang,
+                "context_hash": res.context_hash,
+                "current_status": TranslationStatus.TRANSLATING.value,
+            }
+            for res in results
+            if res.original_content
+        ]
+
+        if not params_to_update:
             return
 
-        # 批量查询content_id，避免N+1查询问题
-        placeholders = ", ".join("?" for _ in unique_original_contents)
-        query = f"SELECT id, value FROM th_content WHERE value IN ({placeholders})"
-
-        cursor = self.connection.cursor()
-        cursor.execute(query, tuple(unique_original_contents))
-        content_id_map = {row["value"]: row["id"] for row in cursor.fetchall()}
-        cursor.close()
-
-        update_params_list = []
-        for res in results:
-            content_id = content_id_map.get(res.original_content)
-            if content_id is None:
-                logger.warning(
-                    "找不到要保存的翻译结果对应的 content_id",
-                    original_content=res.original_content,
-                )
-                continue
-
-            update_params_list.append(
-                {
-                    "status": res.status.value,
-                    "translation_content": res.translated_content,
-                    "engine": res.engine,
-                    "last_updated_at": datetime.datetime.now(
-                        datetime.timezone.utc
-                    ).isoformat(),
-                    "content_id": content_id,
-                    "lang_code": res.target_lang,
-                    "context_hash": res.context_hash,
-                }
-            )
-
-        if not update_params_list:
-            return
-
-        with self.transaction() as cursor:
-            update_sql = """
+        async with self.transaction() as cursor:
+            await cursor.executemany(
+                """
                 UPDATE th_translations SET
-                    status = :status,
-                    translation_content = :translation_content,
-                    engine = :engine,
-                    last_updated_at = :last_updated_at
-                WHERE content_id = :content_id
-                  AND lang_code = :lang_code
-                  AND context_hash = :context_hash
-                  AND status = ?
-            """
-            # 只更新状态为 TRANSLATING 的记录，防止覆盖意外状态
-            for params in update_params_list:
-                cursor.execute(
-                    update_sql, (*params.values(), TranslationStatus.TRANSLATING.value)
-                )
-
+                    status = :status, translation_content = :translation_content,
+                    engine = :engine, last_updated_at = :last_updated_at
+                WHERE
+                    lang_code = :lang_code AND context_hash = :context_hash AND status = :current_status
+                    AND content_id = (SELECT id FROM th_content WHERE value = :original_content)
+            """,
+                params_to_update,
+            )
             logger.info(f"成功更新了 {cursor.rowcount} 条翻译记录。")
 
-    def _get_content_id_from_value(self, value: str) -> Optional[int]:
-        """辅助方法，根据内容值查找其在 `th_content` 表中的 ID。"""
-        cursor = self.connection.cursor()
-        cursor.execute("SELECT id FROM th_content WHERE value = ?", (value,))
-        row = cursor.fetchone()
-        cursor.close()
-        return row["id"] if row else None
-
-    def get_translation(
+    async def get_translation(
         self,
         text_content: str,
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
-        """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
-        from trans_hub.utils import get_context_hash as _get_context_hash_util
+        context_hash = get_context_hash(context)
+        sql = """
+            SELECT tr.translation_content, tr.status, tr.engine, s.business_id
+            FROM th_translations tr JOIN th_content c ON tr.content_id = c.id
+            LEFT JOIN th_sources s ON tr.content_id = s.content_id AND tr.context_hash = s.context_hash
+            WHERE c.value = ? AND tr.lang_code = ? AND tr.context_hash = ? AND tr.status = ?"""
 
-        context_hash_for_query = _get_context_hash_util(context)
-
-        content_id = self._get_content_id_from_value(text_content)
-        if not content_id:
-            return None
-
-        cursor = self.connection.cursor()
-        query_sql = """
-            SELECT
-                tr.translation_content, tr.status, tr.engine
-            FROM th_translations tr
-            WHERE tr.content_id = ? AND tr.lang_code = ? AND tr.context_hash = ? AND tr.status = ?
-        """
-        cursor.execute(
-            query_sql,
+        async with self.connection.execute(
+            sql,
             (
-                content_id,
+                text_content,
                 target_lang,
-                context_hash_for_query,
+                context_hash,
                 TranslationStatus.TRANSLATED.value,
             ),
-        )
-        translation_row = cursor.fetchone()
-        cursor.close()
+        ) as cursor:
+            row = await cursor.fetchone()
 
-        if translation_row:
-            retrieved_business_id = self.get_business_id_for_content(
-                content_id=content_id, context_hash=context_hash_for_query
-            )
+        if row:
             return TranslationResult(
                 original_content=text_content,
-                translated_content=translation_row["translation_content"],
+                translated_content=row["translation_content"],
                 target_lang=target_lang,
                 status=TranslationStatus.TRANSLATED,
-                engine=translation_row["engine"],
+                engine=row["engine"],
                 from_cache=True,
-                business_id=retrieved_business_id,
-                context_hash=context_hash_for_query,
+                business_id=row["business_id"],
+                context_hash=context_hash,
             )
         return None
 
-    def get_business_id_for_content(
+    async def get_business_id_for_content(
         self, content_id: int, context_hash: str
     ) -> Optional[str]:
-        """根据 `content_id` 和 `context_hash` 从 `th_sources` 表获取 `business_id`。"""
-        cursor = self.connection.cursor()
-        cursor.execute(
-            "SELECT business_id FROM th_sources WHERE content_id = ? AND context_hash = ?",
-            (content_id, context_hash),
-        )
-        row = cursor.fetchone()
-        cursor.close()
+        sql = "SELECT business_id FROM th_sources WHERE content_id = ? AND context_hash = ?"
+        async with self.connection.execute(sql, (content_id, context_hash)) as cursor:
+            row = await cursor.fetchone()
         return row["business_id"] if row else None
 
-    def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
-        """执行垃圾回收，清理过时和孤立的数据。"""
+    async def touch_source(self, business_id: str) -> None:
+        async with self.transaction() as cursor:
+            sql = "UPDATE th_sources SET last_seen_at = ? WHERE business_id = ?"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await cursor.execute(sql, (now_iso, business_id))
+            if cursor.rowcount > 0:
+                logger.debug(
+                    "更新了源记录的时间戳",
+                    business_id=business_id,
+                    last_seen_at=now_iso,
+                )
+
+    async def garbage_collect(
+        self, retention_days: int, dry_run: bool = False
+    ) -> dict[str, int]:
         if retention_days < 0:
             raise ValueError("retention_days 必须是非负数。")
-
-        cutoff_date = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=retention_days)
-        ).date()
-        cutoff_date_str = cutoff_date.isoformat()
-
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=retention_days)
+        ).isoformat()
         stats = {"deleted_sources": 0, "deleted_content": 0}
 
-        with self.transaction() as cursor:
-            # --- 阶段 1: 清理过时的 th_sources 记录 ---
-            select_expired_sources_sql = (
-                "SELECT COUNT(*) FROM th_sources WHERE DATE(last_seen_at) < ?"
+        async with self.transaction() as cursor:
+            await cursor.execute(
+                "SELECT COUNT(*) FROM th_sources WHERE last_seen_at < ?", (cutoff,)
             )
-            cursor.execute(select_expired_sources_sql, (cutoff_date_str,))
-            expired_sources_count = cursor.fetchone()[0]
-            stats["deleted_sources"] = expired_sources_count
-
-            if not dry_run and expired_sources_count > 0:
-                delete_expired_sources_sql = (
-                    "DELETE FROM th_sources WHERE DATE(last_seen_at) < ?"
+            count_row = await cursor.fetchone()
+            stats["deleted_sources"] = count_row[0] if count_row else 0
+            if not dry_run and stats["deleted_sources"] > 0:
+                await cursor.execute(
+                    "DELETE FROM th_sources WHERE last_seen_at < ?", (cutoff,)
                 )
-                cursor.execute(delete_expired_sources_sql, (cutoff_date_str,))
-                if cursor.rowcount != expired_sources_count:
-                    logger.warning(
-                        "GC 删除的源记录数与预期不符",
-                        expected=expired_sources_count,
-                        actual=cursor.rowcount,
-                    )
 
-            # --- 阶段 2: 清理孤立的 th_content 记录 ---
-            select_orphan_content_sql = """
-                SELECT COUNT(c.id)
-                FROM th_content c
-                WHERE
-                    DATE(c.created_at) < ?
-                    AND NOT EXISTS (SELECT 1 FROM th_sources s WHERE s.content_id = c.id)
-                    AND NOT EXISTS (SELECT 1 FROM th_translations tr WHERE tr.content_id = c.id)
-            """
-            cursor.execute(select_orphan_content_sql, (cutoff_date_str,))
-            orphan_content_count = cursor.fetchone()[0]
-            stats["deleted_content"] = orphan_content_count
+            orphan_query = "SELECT id FROM th_content c WHERE c.created_at < ? AND NOT EXISTS (SELECT 1 FROM th_sources s WHERE s.content_id = c.id) AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)"
+            await cursor.execute(orphan_query, (cutoff,))
+            orphan_ids = [row[0] for row in await cursor.fetchall()]
+            stats["deleted_content"] = len(orphan_ids)
 
-            if not dry_run and orphan_content_count > 0:
-                delete_orphan_content_sql = """
-                    DELETE FROM th_content
-                    WHERE id IN (
-                        SELECT c.id
-                        FROM th_content c
-                        WHERE
-                            DATE(c.created_at) < ?
-                            AND NOT EXISTS (SELECT 1 FROM th_sources s WHERE s.content_id = c.id)
-                            AND NOT EXISTS (SELECT 1 FROM th_translations tr WHERE tr.content_id = c.id)
-                    )
-                """
-                cursor.execute(delete_orphan_content_sql, (cutoff_date_str,))
-                if cursor.rowcount != orphan_content_count:
-                    logger.warning(
-                        "GC 删除的内容记录数与预期不符",
-                        expected=orphan_content_count,
-                        actual=cursor.rowcount,
-                    )
-
+            if not dry_run and orphan_ids:
+                delete_orphan_sql = f"DELETE FROM th_content WHERE id IN ({','.join('?' for _ in orphan_ids)})"
+                await cursor.execute(delete_orphan_sql, orphan_ids)
         return stats
 
-    def close(self) -> None:
-        """关闭数据库连接，释放资源。"""
+    async def close(self) -> None:
         if self._conn:
-            self._conn.close()
+            await self._conn.close()
             self._conn = None
             logger.info("数据库连接已关闭", db_path=self.db_path)

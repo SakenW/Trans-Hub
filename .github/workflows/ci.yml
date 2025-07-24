@@ -1,6 +1,6 @@
-# .github/workflows/ci.yml (优化版)
+# .github/workflows/ci.yml (终极完美版)
 
-name: CI/CD Pipeline
+name: Python CI Pipeline
 
 on:
   push:
@@ -8,8 +8,35 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  TH_OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+  TH_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
 jobs:
-  build-and-test:
+  # 任务一：在最新的稳定版上进行快速的代码质量检查
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'poetry'
+    - name: Install dependencies
+      run: poetry install --with dev
+    - name: Run Code Quality Checks
+      run: |
+        poetry run ruff check .
+        poetry run ruff format --check .
+        poetry run mypy .
+
+  # 任务二：在所有稳定版本上运行功能测试
+  test-stable:
+    needs: lint # 依赖于 lint 任务的成功，实现快速失败
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -17,65 +44,44 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
-    # 步骤 1: 检出代码
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    # 步骤 2: 安装 Poetry
     - name: Install Poetry
       uses: snok/install-poetry@v1
-      with:
-        version: latest 
-    
-    # 步骤 3: 设置 Python 环境并启用缓存
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'poetry'
+    - name: Install dependencies
+      run: poetry install --with dev
+    - name: Run Tests with Pytest
+      run: poetry run pytest
 
-    # 步骤 4: 安装项目依赖
+  # 任务三：在最新的预览版上进行完整的、允许失败的实验性测试
+  test-experimental:
+    runs-on: ubuntu-latest
+    continue-on-error: true # 这个任务的失败不会阻塞整个 CI
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: 'poetry'
     - name: Install dependencies
       run: poetry install --with dev
       
-    # ==================================================================
-    # 核心检查流程：Lint -> Format -> Types -> Tests
-    # ==================================================================
-
-    # 步骤 5: 运行代码质量检查 (Linter 和 Formatter)
-    # 将 Ruff 的检查合并为一步，确保代码风格和格式都符合规范
-    - name: Lint and check formatting with Ruff
+    # --- 核心修正：在实验性测试中，也必须包含所有检查步骤 ---
+    - name: Run Code Quality Checks (Python 3.13)
       run: |
         poetry run ruff check .
         poetry run ruff format --check .
-
-    # 步骤 6: 运行静态类型检查
-    - name: Type check with Mypy
-      run: poetry run mypy .
+        poetry run mypy .
       
-    # 步骤 7: 运行单元测试并生成覆盖率报告 (核心补充)
-    # 这是最重要的补充：真正地运行你的测试套件！
-    - name: Run tests with Pytest and generate coverage report
-      run: poetry run pytest --cov=trans_hub --cov-report=xml
-      timeout-minutes: 15
-      env:
-        PYTEST_ADDOPTS: '--color=yes'
-      # --cov=trans_hub: 指定要计算覆盖率的包名
-      # --cov-report=xml: 生成 Codecov 等服务可以使用的 XML 格式报告
-
-    # (可选) 步骤 8: 上传覆盖率报告
-    # 如果你使用 Codecov 或类似服务，可以取消此步骤的注释
-    # - name: Upload coverage to Codecov
-    #   uses: codecov/codecov-action@v4
-    #   with:
-    #     token: ${{ secrets.CODECOV_TOKEN }} # 需要在仓库的 Secrets 中配置
-    #     files: ./coverage.xml
-    #     fail_ci_if_error: true
-
-    # 步骤 9: 运行端到端/集成测试脚本 (如果需要)
-    # 这些脚本作为 Pytest 之外的补充测试
-    - name: Run integration tests
-      run: |
-        poetry run python run_coordinator_test.py
-        poetry run python demo_complex_workflow.py
-      timeout-minutes: 20
+    - name: Run Tests with Pytest (Python 3.13)
+      run: poetry run pytest

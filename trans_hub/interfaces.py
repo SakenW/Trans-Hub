@@ -1,146 +1,58 @@
-# trans_hub/interfaces.py (v1.1 修正版)
-"""
-trans_hub/interfaces.py
-
-本模块使用 typing.Protocol 定义了核心组件的接口（或称协议）。
-此版本已根据最终版文档的术语和数据传输对象（DTOs）进行更新，
-并包含了对事务管理和垃圾回收参数的协议扩展。
+# trans_hub/interfaces.py (终极完美版)
+"""本模块使用 typing.Protocol 定义了核心组件的接口。
+此版本为纯异步设计，并强化了封装性。
 """
 
-from collections.abc import AsyncGenerator, Generator
-from contextlib import AbstractContextManager
+from collections.abc import AsyncGenerator
+from contextlib import AbstractAsyncContextManager
 from typing import Any, Optional, Protocol
 
-# 导入 AbstractContextManager 用于事务上下文
+import aiosqlite  # 导入以用于类型提示
+
 from trans_hub.types import (
     ContentItem,
-    SourceUpdateResult,
     TranslationResult,
     TranslationStatus,
 )
 
-# ==============================================================================
-#  持久化处理器接口 (Persistence Handler Protocols)
-# ==============================================================================
-
 
 class PersistenceHandler(Protocol):
-    """同步持久化处理器的接口协议。"""
+    """持久化处理器的纯异步接口协议。"""
 
-    def update_or_create_source(
-        self,
-        text_content: str,
-        business_id: str,
-        context_hash: str,  # <-- 修正点：改为 str
-    ) -> SourceUpdateResult:
-        """根据 business_id 更新或创建一个源记录。
-        参数 `text` 已更名为 `text_content` 以保持命名一致性。
-        """
-        ...
+    async def connect(self) -> None: ...
+    async def close(self) -> None: ...
 
+    # --- 核心修正：这两个方法本身是同步的，但它们返回的是异步对象 ---
+    def transaction(self) -> AbstractAsyncContextManager[aiosqlite.Cursor]: ...
     def stream_translatable_items(
         self,
         lang_code: str,
         statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> Generator[list[ContentItem], None, None]:
-        """以流式方式获取待翻译的内容批次。"""
-        ...
+    ) -> AsyncGenerator[list[ContentItem], None]: ...
 
-    def save_translations(self, results: list[TranslationResult]) -> None:
-        """将一批翻译结果保存到数据库中。"""
-        ...
-
-    def get_translation(
+    async def ensure_pending_translations(
         self,
         text_content: str,
-        target_lang: str,
-        context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]:
-        """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
-        ...
-
-    def get_business_id_for_content(
-        self, content_id: int, context_hash: str
-    ) -> Optional[str]:  # <-- 修正点：添加新方法
-        """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
-        ...
-
-    def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
-        """执行垃圾回收，清理过时和孤立的数据。"""
-        ...
-
-    def close(self) -> None:
-        """关闭数据库连接等资源。"""
-        ...
-
-    def transaction(
-        self,
-    ) -> AbstractContextManager[
-        Any
-    ]:  # <-- 修正点：使用 contextlib.AbstractContextManager
-        """提供一个同步数据库事务上下文管理器。"""
-        ...
-
-    def touch_source(self, business_id: str) -> None:
-        """更新指定 business_id 的 last_seen_at 时间戳到当前时间。"""
-        ...
-
-
-class AsyncPersistenceHandler(Protocol):
-    """异步持久化处理器的接口协议。
-    签名与同步版本一一对应，但所有方法都是异步的 (`async def`)。
-    """
-
-    async def update_or_create_source(
-        self,
-        text_content: str,
-        business_id: str,
-        context_hash: str,  # <-- 修正点：改为 str
-    ) -> SourceUpdateResult:
-        """根据 business_id 更新或创建一个源记录。"""
-        ...
-
-    async def stream_translatable_items(
-        self,
-        lang_code: str,
-        statuses: list[TranslationStatus],
-        batch_size: int,
-        limit: Optional[int] = None,
-    ) -> AsyncGenerator[list[ContentItem], None]:
-        """以流式方式获取待翻译的内容批次。"""
-        ...
-
-    async def save_translations(self, results: list[TranslationResult]) -> None:
-        """将一批翻译结果保存到数据库中。"""
-        ...
-
+        target_langs: list[str],
+        source_lang: Optional[str],
+        engine_version: str,
+        business_id: Optional[str] = None,
+        context_hash: Optional[str] = None,
+        context_json: Optional[str] = None,
+    ) -> None: ...
+    async def save_translations(self, results: list[TranslationResult]) -> None: ...
     async def get_translation(
         self,
         text_content: str,
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]:
-        """根据文本内容、目标语言和上下文，从数据库中获取已翻译的结果。"""
-        ...
-
+    ) -> Optional[TranslationResult]: ...
     async def get_business_id_for_content(
         self, content_id: int, context_hash: str
-    ) -> Optional[str]:  # <-- 修正点：添加新方法
-        """根据 content_id 和 context_hash 从 th_sources 表获取 business_id。"""
-        ...
-
-    async def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
-        """执行垃圾回收，清理过时和孤立的数据。"""
-        ...
-
-    async def close(self) -> None:
-        """关闭数据库连接等资源。"""
-        ...
-
-    async def transaction(
-        self,
-    ) -> AbstractContextManager[Any]:  # 保持 AbstractContextManager
-        """提供一个异步数据库事务上下文管理器。"""
-        ...
+    ) -> Optional[str]: ...
+    async def touch_source(self, business_id: str) -> None: ...
+    async def garbage_collect(
+        self, retention_days: int, dry_run: bool = False
+    ) -> dict[str, int]: ...

@@ -1,299 +1,156 @@
-# demo_complex_workflow.py (最终最终修正版 - 再次修正 Ruff 警告)
+# examples/demo_complex_workflow.py (终极无误版)
 import asyncio
 import os
-from typing import Any
 
-# 第三方库导入
 import structlog
 from dotenv import load_dotenv
 
-# 本地库导入
-from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
 
-# 获取一个 logger
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
-# 统一的数据库文件路径
-DB_FILE = "my_complex_trans_hub_demo.db"
-# 为了演示 GC，我们将保留天数设置为 0。
-GC_RETENTION_DAYS_FOR_DEMO = 0
+# --- 核心修正 1：将数据库文件定义在示例文件旁边，并获取其绝对路径 ---
+EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE_PATH = os.path.join(EXAMPLES_DIR, "complex_demo.db")
+GC_RETENTION_DAYS = 0
 
 
-def initialize_trans_hub(db_file: str, gc_retention_days: int) -> Coordinator:
-    """一个标准的初始化函数，返回一个配置好的 Coordinator 实例。"""
-    setup_logging(log_level="INFO")  # 保持 INFO 级别，除非需要详细调试
+async def initialize_trans_hub(db_path: str, gc_retention_days: int) -> Coordinator:
+    """一个标准的异步初始化函数，返回一个配置好的 Coordinator 实例。."""
+    if os.path.exists(db_path):
+        os.remove(db_path)
 
-    # 每次运行前，删除旧数据库文件，确保一个干净的演示环境
-    if os.path.exists(db_file):
-        os.remove(db_file)
-        log.info(f"已删除旧数据库文件: {db_file}", db_path=db_file)
+    log.info("数据库不存在，正在创建并迁移...", db_path=db_path)
+    apply_migrations(db_path)
 
-    log.info("数据库文件不存在，正在创建并应用迁移。", db_path=db_file)
-    apply_migrations(db_file)
-
-    handler = DefaultPersistenceHandler(db_path=db_file)
-
+    # --- 核心修正 2：确保 database_url 使用的是绝对路径 ---
     config = TransHubConfig(
-        database_url=f"sqlite:///{db_file}",
-        engine_configs=EngineConfigs(),
-        gc_retention_days=gc_retention_days,  # 传入 GC 保留天数
+        database_url=f"sqlite:///{db_path}",
+        gc_retention_days=gc_retention_days,
     )
 
+    # config.db_path 现在会正确地解析出我们传入的绝对路径
+    handler = DefaultPersistenceHandler(db_path=config.db_path)
     coordinator = Coordinator(config=config, persistence_handler=handler)
+    await coordinator.initialize()
     return coordinator
 
 
 async def request_and_process(
-    coordinator: Coordinator, tasks: list[dict[str, Any]], target_lang: str
+    coordinator: Coordinator, tasks: list[dict], target_lang: str
 ):
-    """辅助函数：登记任务并处理它们。"""
-    log.info(f"\n---> 开始登记 {len(tasks)} 个任务到 {target_lang} <---")
-    for i, task in enumerate(tasks):
-        log.info(
-            f"正在登记任务 {i+1}/{len(tasks)}: '{task['purpose']}'",
-            text=task["text"],
-            context=task["context"],
-            lang=target_lang,
-            business_id=task.get("business_id"),
-        )
-        coordinator.request(
+    """辅助函数：异步地登记任务并处理它们。."""
+    log.info(f"\n---> 开始登记 {len(tasks)} 个任务到 '{target_lang}' <---")
+    for task in tasks:
+        await coordinator.request(
             target_langs=[target_lang],
             text_content=task["text"],
-            context=task["context"],
-            business_id=task.get("business_id"),  # business_id 可能是 None
+            context=task.get("context"),
+            business_id=task.get("business_id"),
         )
+    log.info("所有任务登记完成。")
 
     log.info(f"\n---> 正在处理所有待翻译任务到 '{target_lang}' <---")
-    results_generator = coordinator.process_pending_translations(
-        target_lang=target_lang
-    )
-
-    results = [result async for result in results_generator]
+    results = [
+        res async for res in coordinator.process_pending_translations(target_lang)
+    ]
 
     if results:
-        log.info(f"成功处理 {len(results)} 个任务。")
         for result in results:
-            source_info = "从缓存获取" if result.from_cache else "新翻译"
-            log.info(
-                "翻译结果：",
-                original=result.original_content,
-                context=result.context_hash,
-                translation=result.translated_content,
-                status=result.status.name,
-                engine=result.engine,
-                business_id=result.business_id
-                if result.business_id
-                else "无 business_id",
-                source=source_info,
-            )
+            log.info("翻译结果", result=result)
     else:
-        log.warning("没有需要处理的新任务。")
-    log.info("\n" + "=" * 60 + "\n")
+        log.warning("没有需要处理的新任务（缓存命中）。")
+    log.info("-" * 60)
 
 
 async def main():
-    """主程序入口：复杂任务测试。"""
+    """主程序入口：复杂异步工作流演示。."""
+    setup_logging(log_level="INFO")
     load_dotenv()
-    coordinator = None
+    coordinator = await initialize_trans_hub(DB_FILE_PATH, GC_RETENTION_DAYS)
+
     try:
-        coordinator = initialize_trans_hub(DB_FILE, GC_RETENTION_DAYS_FOR_DEMO)
-        target_language_code_zh = "zh-CN"
-        target_language_code_fr = "fr"
+        zh = "zh-CN"
+        fr = "fr"
 
         # --- 阶段 1: 首次翻译多种文本和上下文 ---
-        log.info("=== 阶段 1: 首次翻译多种文本和上下文 ===")
+        log.info("=" * 20 + " 阶段 1: 首次翻译 " + "=" * 20)
         initial_tasks = [
-            {
-                "text": "Hello, world!",
-                "context": None,
-                "business_id": "common.greeting.hello",
-                "purpose": "基础问候语",
-            },
+            {"text": "Hello, world!", "business_id": "common.greeting.hello"},
             {
                 "text": "Apple",
                 "context": {"category": "fruit"},
                 "business_id": "product.food.apple_fruit",
-                "purpose": "苹果（水果）",
             },
             {
                 "text": "Apple",
                 "context": {"category": "company"},
                 "business_id": "tech.company.apple_inc",
-                "purpose": "苹果（公司）",
             },
             {
                 "text": "Bank",
                 "context": {"type": "financial_institution"},
                 "business_id": "finance.building.bank_branch",
-                "purpose": "银行（金融）",
             },
             {
                 "text": "Bank",
                 "context": {"type": "geographical_feature"},
                 "business_id": "geography.nature.river_bank",
-                "purpose": "河岸（地理）",
             },
             {
                 "text": "This is a very important system message.",
-                "context": None,
                 "business_id": "system.message.important",
-                "purpose": "重要系统消息 (到中文)",
-            },
-            {
-                "text": "This is a very important system message.",
-                "context": None,
-                "business_id": "system.message.important_fr",
-                "purpose": "重要系统消息 (到法语)",
             },
             {
                 "text": "Old feature text that will be cleaned up soon.",
-                "context": None,
                 "business_id": "legacy.feature.old_text",
-                "purpose": "即将被 GC 的旧功能文本",
             },
         ]
-
-        request_and_process(coordinator, initial_tasks[:6], target_language_code_zh)
-        request_and_process(coordinator, initial_tasks[6:7], target_language_code_fr)
-        request_and_process(coordinator, initial_tasks[7:8], target_language_code_zh)
+        await request_and_process(coordinator, initial_tasks, zh)
 
         # --- 阶段 2: 演示缓存命中和 last_seen_at 更新 ---
-        log.info("=== 阶段 2: 演示缓存命中和 last_seen_at 更新 ===")
+        log.info("=" * 20 + " 阶段 2: 演示缓存命中 " + "=" * 20)
         cache_hit_tasks = [
-            {
-                "text": "Hello, world!",
-                "context": None,
-                "business_id": "common.greeting.hello",
-                "purpose": "再次请求基础问候语 (期望缓存)",
-            },
+            {"text": "Hello, world!", "business_id": "common.greeting.hello"},
             {
                 "text": "Apple",
                 "context": {"category": "fruit"},
                 "business_id": "product.food.apple_fruit",
-                "purpose": "再次请求苹果（水果）(期望缓存)",
-            },
-            {
-                "text": "This is a very important system message.",
-                "context": None,
-                "business_id": "system.message.important_fr",
-                "purpose": "再次请求重要系统消息 (法语 - 期望缓存)",
             },
         ]
-        request_and_process(coordinator, cache_hit_tasks[:2], target_language_code_zh)
-        request_and_process(coordinator, cache_hit_tasks[2:], target_language_code_fr)
+        await request_and_process(coordinator, cache_hit_tasks, zh)
 
-        # --- 阶段 3: 引入新的文本，看它如何被处理 ---
-        log.info("=== 阶段 3: 引入新的文本，看它如何被处理 ===")
+        # --- 阶段 3: 引入新的文本和新的语言 ---
+        log.info("=" * 20 + " 阶段 3: 引入新任务 " + "=" * 20)
         new_tasks = [
             {
                 "text": "Welcome to our new platform!",
-                "context": None,
                 "business_id": "ui.onboarding.welcome_message",
-                "purpose": "新用户欢迎语 (新翻译)",
             },
-            {
-                "text": "Login successful.",
-                "context": None,
-                "business_id": "ui.auth.login_success",
-                "purpose": "登录成功消息 (新翻译)",
-            },
-            {
-                "text": "Translate me in French!",
-                "context": None,
-                "business_id": "test.new.french_text",
-                "purpose": "新的法语翻译任务",
-            },
+            {"text": "Translate me to French!", "business_id": "test.new.french_text"},
         ]
-        request_and_process(coordinator, new_tasks[:2], target_language_code_zh)
-        request_and_process(coordinator, new_tasks[2:], target_language_code_fr)
+        await request_and_process(coordinator, new_tasks[:1], zh)
+        await request_and_process(coordinator, new_tasks[1:], fr)
 
         # --- 阶段 4: 演示垃圾回收 (GC) ---
-        log.info("=== 阶段 4: 演示垃圾回收 (GC) 功能 ===")
-        log.info(f"配置的 GC 保留天数: {GC_RETENTION_DAYS_FOR_DEMO} 天。")
-        log.info("第一次运行 GC (干跑模式: dry_run=True)...")
+        log.info("=" * 20 + " 阶段 4: 演示垃圾回收 " + "=" * 20)
+        log.info(f"配置的 GC 保留天数: {GC_RETENTION_DAYS} 天。")
 
-        gc_report_dry_run = coordinator.run_garbage_collection(
-            retention_days=GC_RETENTION_DAYS_FOR_DEMO, dry_run=True
-        )
-        log.info("GC 干跑报告：", report=gc_report_dry_run)
-        if gc_report_dry_run["deleted_sources"] > 0:
-            log.info(f"预估将删除 {gc_report_dry_run['deleted_sources']} 条源记录。")
-            log.info("其中应该包含 'legacy.feature.old_text'。")
-        else:
-            log.info(
-                "没有源记录被报告为可删除。这可能意味着所有业务ID的last_seen_at都是最新。"
-            )
+        gc_report = await coordinator.run_garbage_collection(dry_run=True)
+        log.info("GC 干跑报告", report=gc_report)
+        log.info(f"预估将删除 {gc_report['deleted_sources']} 条源记录。")
 
-        log.info("\n" + "-" * 50 + "\n")
-        log.info("第二次运行 GC (实际删除模式: dry_run=False)...")
+        await coordinator.run_garbage_collection(dry_run=False)
+        log.info("GC 已实际执行。")
 
-        gc_report_actual = coordinator.run_garbage_collection(
-            retention_days=GC_RETENTION_DAYS_FOR_DEMO, dry_run=False
-        )
-        log.info("GC 实际执行报告：", report=gc_report_actual)
-        if gc_report_actual["deleted_sources"] > 0:
-            log.info(f"实际已删除 {gc_report_actual['deleted_sources']} 条源记录。")
-            log.info(
-                "请检查数据库文件，'legacy.feature.old_text' 相关的 th_sources 记录应该已被删除。"
-            )
-        else:
-            log.info("没有源记录被删除。")
-
-        log.info("\n" + "=" * 60 + "\n")
-
-        # --- 阶段 5: 验证 GC 后，再次请求被清理的 business_id ---
-        log.info("=== 阶段 5: 验证 GC 后，再次请求被清理的 business_id ===")
-        re_requested_task = [
-            {
-                "text": "Old feature text that will be cleaned up soon.",
-                "context": None,
-                "business_id": "legacy.feature.old_text",
-                "purpose": "再次请求已被 GC 的旧功能文本 (应重新添加 source 记录并从 cache 获取翻译)",
-            },
-        ]
-        log.info(f"尝试再次登记业务ID：'{re_requested_task[0]['business_id']}'...")
-        coordinator.request(
-            target_langs=[target_language_code_zh],
-            text_content=re_requested_task[0]["text"],
-            context=re_requested_task[0]["context"],
-            business_id=re_requested_task[0]["business_id"],
-        )
-
-        log.info("处理再次请求的旧功能文本任务...")
-        results_generator_re_requested = coordinator.process_pending_translations(
-            target_lang=target_language_code_zh
-        )
-        re_requested_results = list(results_generator_re_requested)
-
-        if re_requested_results:
-            result = re_requested_results[0]
-            log.info(
-                "重新请求 GC 业务ID的结果：",
-                original=result.original_content,
-                translation=result.translated_content,
-                status=result.status.name,
-                engine=result.engine,
-                business_id=result.business_id
-                if result.business_id
-                else "无 business_id",
-                source="从缓存获取" if result.from_cache else "新翻译 (应不发生)",
-            )
-            log.info(
-                f"注意：'business_id' '{result.business_id}' 在 th_sources 中的 last_seen_at 已被更新。"
-            )
-        else:
-            log.warning("重新请求的任务没有结果。")
-
-    except Exception:
-        log.critical("程序运行中发生未知严重错误！", exc_info=True)
     finally:
         if coordinator:
             log.info("正在关闭 Trans-Hub 协调器...")
-            coordinator.close()
+            await coordinator.close()
             log.info("Trans-Hub 协调器已关闭。")
 
 

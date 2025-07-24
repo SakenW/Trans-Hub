@@ -1,57 +1,47 @@
-# trans_hub/config.py
-"""
-定义了 Trans-Hub 项目的主配置模型和相关的子模型。
-这是所有配置的“单一事实来源”，上层应用应该创建并传递 TransHubConfig 对象。
+# trans_hub/config.py (最终优化版)
+"""定义了 Trans-Hub 项目的主配置模型和相关的子模型。
+这是所有配置的“单一事实来源”，上层应用应该创建并传递 TransHubConfig 对象。.
 """
 
 from typing import Literal, Optional
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, ValidationInfo
-from pydantic.functional_validators import field_validator
+from pydantic import BaseModel, Field, model_validator
+from pydantic_settings import BaseSettings
 
 from trans_hub.cache import CacheConfig
-
-# 导入所有已实现的引擎的配置模型
 from trans_hub.engines.debug import DebugEngineConfig
 from trans_hub.engines.openai import OpenAIEngineConfig
 from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 
 # ==============================================================================
-#  策略配置模型 (未来可扩展)
+#  子配置模型
 # ==============================================================================
 
 
 class LoggingConfig(BaseModel):
-    """日志系统的配置。"""
+    """日志系统的配置。."""
 
     level: str = "INFO"
     format: Literal["json", "console"] = "console"
 
 
 class RetryPolicyConfig(BaseModel):
-    """重试策略的配置。"""
+    """重试策略的配置。."""
 
-    max_attempts: int = 2  # 默认重试2次 (总共尝试3次)
+    max_attempts: int = 2
     initial_backoff: float = 1.0
     max_backoff: float = 60.0
-    jitter: bool = True
-
-
-# ==============================================================================
-#  引擎配置聚合模型
-# ==============================================================================
 
 
 class EngineConfigs(BaseModel):
-    """一个用于聚合所有已知引擎特定配置的模型。
-    Coordinator 会根据 active_engine 的名称，在这里查找对应的配置。
-    """
+    """一个用于聚合所有已知引擎特定配置的模型。."""
 
-    # 字段名必须与引擎在注册表中的小写名称完全匹配。
     debug: Optional[DebugEngineConfig] = Field(default_factory=DebugEngineConfig)
     translators: Optional[TranslatorsEngineConfig] = Field(
         default_factory=TranslatorsEngineConfig
     )
+    # openai 默认为 None，将由 TransHubConfig 的智能验证器按需创建
     openai: Optional[OpenAIEngineConfig] = None
 
 
@@ -62,38 +52,64 @@ class EngineConfigs(BaseModel):
 
 class TransHubConfig(BaseModel):
     """Trans-Hub 的主配置对象。
-    这是初始化 Coordinator 时需要传入的核心配置。
+    这是初始化 Coordinator 时需要传入的核心配置。.
     """
 
     database_url: str = "sqlite:///transhub.db"
     active_engine: str = "translators"
-
-    # 新增: batch_size 字段，修复 AttributeError
     batch_size: int = Field(default=50, description="处理待办任务时的默认批处理大小")
-    cache_config: CacheConfig = Field(
-        default_factory=CacheConfig, description="翻译缓存配置"
-    )
+    source_lang: Optional[str] = Field(default=None, description="全局默认的源语言代码")
+    gc_retention_days: int = Field(default=90, description="垃圾回收的保留天数")
 
-    # 新增: source_lang 字段，用于需要源语言的引擎
-    source_lang: Optional[str] = Field(
-        default=None,
-        description="全局默认的源语言代码，如果提供，将传递给引擎",
-    )
-
+    cache_config: CacheConfig = Field(default_factory=CacheConfig)
     engine_configs: EngineConfigs = Field(default_factory=EngineConfigs)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    gc_retention_days: int = Field(default=90, description="垃圾回收的保留天数")
 
-    @field_validator("active_engine")
-    @classmethod
-    def validate_active_engine(cls, v: str, info: ValidationInfo) -> str:
-        """验证活动的引擎是否在配置中定义。"""
-        # Pydantic v2 中，上下文通过 info.context 访问，但这里我们用 info.data
-        if "engine_configs" in info.data:
-            engine_configs = info.data["engine_configs"]
-            if not getattr(engine_configs, v, None):
+    # --- 核心修正 1：添加一个便捷属性来获取数据库文件路径 ---
+    @property
+    def db_path(self) -> str:
+        """从 database_url 中安全地解析出文件路径。."""
+        parsed_url = urlparse(self.database_url)
+        if parsed_url.scheme != "sqlite":
+            raise ValueError("目前只支持 'sqlite' 数据库 URL。")
+        # urlparse('sqlite:///path') -> netloc='', path='/path'
+        # urlparse('sqlite://path') -> netloc='path', path=''
+        # 因此，优先使用 netloc，然后是 path
+        path = parsed_url.netloc or parsed_url.path
+        # 移除 Windows 驱动器号前的斜杠，例如 /C:/... -> C:/...
+        if path.startswith("/") and ":" in path:
+            return path[1:]
+        return path
+
+    # --- 核心修正 2：使用更强大的 model_validator 来智能处理引擎配置 ---
+    @model_validator(mode="after")
+    def validate_and_autocreate_engine_config(self) -> "TransHubConfig":
+        """验证活动的引擎是否在配置中定义，如果未定义，则尝试自动创建。
+        这极大地改善了用户体验。.
+        """
+        active_config = getattr(self.engine_configs, self.active_engine, None)
+
+        if active_config is None:
+            # 尝试找到对应的配置类
+            engine_name_to_config_class = {
+                "debug": DebugEngineConfig,
+                "translators": TranslatorsEngineConfig,
+                "openai": OpenAIEngineConfig,
+            }
+
+            config_class = engine_name_to_config_class.get(self.active_engine)
+
+            if config_class:
+                # 如果是 BaseSettings 的子类，它会自动从 .env 加载
+                if issubclass(config_class, BaseSettings):
+                    # 自动创建实例
+                    setattr(self.engine_configs, self.active_engine, config_class())
+                else:
+                    # 对于非 BaseSettings 的配置，也创建一个默认实例
+                    setattr(self.engine_configs, self.active_engine, config_class())
+            else:
                 raise ValueError(
-                    f"活动引擎 '{v}' 已指定, 但在 'engine_configs' 中未找到其配置对象。"
+                    f"活动引擎 '{self.active_engine}' 已指定, 但无法找到其对应的配置模型类。"
                 )
-        return v
+        return self

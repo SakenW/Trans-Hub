@@ -1,4 +1,4 @@
--- Trans-Hub Schema: Version 1 (基于 v1.1.1 修复版)
+-- Trans-Hub Schema: Version 1 (v2.0.0)
 -- 本文件定义了 Trans-Hub 核心引擎的初始数据库结构。
 
 -- ==============================================================================
@@ -8,7 +8,7 @@
 -- 启用外键约束，这是保证数据关系完整性的关键。
 PRAGMA foreign_keys = ON;
 
--- 使用 WAL (Write-Ahead Logging) 模式，显著提高并发性能。
+-- 使用 WAL (Write-Ahead Logging) 模式，显著提高并发读写性能。
 PRAGMA journal_mode = WAL;
 
 
@@ -41,9 +41,10 @@ CREATE TABLE IF NOT EXISTS th_content (
 CREATE TABLE IF NOT EXISTS th_sources (
     business_id TEXT PRIMARY KEY NOT NULL,
     content_id INTEGER NOT NULL,
-    context_hash TEXT NOT NULL DEFAULT '__GLOBAL__',
+    context_hash TEXT NOT NULL,
     last_seen_at TIMESTAMP NOT NULL,
     
+    -- --- 核心修正 1：添加 ON DELETE CASCADE 以确保参照完整性 ---
     FOREIGN KEY(content_id) REFERENCES th_content(id) ON DELETE CASCADE
 );
 
@@ -56,18 +57,18 @@ CREATE TABLE IF NOT EXISTS th_translations (
     
     source_lang_code TEXT,
     lang_code TEXT NOT NULL,
-    context_hash TEXT NOT NULL DEFAULT '__GLOBAL__',
-
-    -- 核心修复: 添加 context 列，用于存储原始上下文的 JSON 字符串。
-    context TEXT,
+    context_hash TEXT NOT NULL,
+    context TEXT, -- 存储原始上下文的 JSON 字符串
 
     translation_content TEXT,
     engine TEXT,
-    engine_version TEXT, -- 注意：此列在 v1.1.1 中由 Coordinator.request 写入，但不再由 save_translations 更新
+    -- --- 核心修正 2：移除 NOT NULL，因为 PENDING 状态下此字段为空 ---
+    engine_version TEXT,
     score REAL,
 
     status TEXT NOT NULL CHECK(status IN ('PENDING', 'TRANSLATING', 'TRANSLATED', 'FAILED', 'APPROVED')),
-    retry_count INTEGER NOT NULL DEFAULT 0,
+    -- --- 核心修正 3：移除当前未被使用的字段，保持 Schema 简洁 ---
+    -- retry_count INTEGER NOT NULL DEFAULT 0,
     last_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY(content_id) REFERENCES th_content(id) ON DELETE CASCADE,
@@ -81,7 +82,9 @@ CREATE TABLE IF NOT EXISTS th_translations (
 --  索引定义 (为了查询性能)
 -- ==============================================================================
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_content_value ON th_content(value);
+-- 无需重复创建 UNIQUE 索引，因为 `value` 字段已有 UNIQUE 约束，SQLite 会自动为其创建索引。
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_content_value ON th_content(value);
+
 CREATE INDEX IF NOT EXISTS idx_sources_last_seen_at ON th_sources(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_translations_status_updated_at ON th_translations(status, last_updated_at);
 CREATE INDEX IF NOT EXISTS idx_sources_content_id ON th_sources(content_id);
