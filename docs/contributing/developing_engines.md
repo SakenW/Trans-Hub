@@ -1,15 +1,18 @@
 # 指南：开发一个新引擎
 
-欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的**纯异步**、**动态发现**和**基类驱动**的架构，这个过程比你想象的要简单得多。
+欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的**纯异步**、**动态发现**和**自我注册**的架构，这个过程比你想象的要简单得多。
+
+在开始之前，我们假设你已经对 `Trans-Hub` 的[核心架构](../architecture/01_overview.md)有了基本的了解。
 
 ## 目录
 
 1. [开发哲学：引擎的职责](#1-开发哲学引擎的职责)
 2. [核心模式：只实现 `_atranslate_one`](#2-核心模式只实现-_atranslate_one)
-3. [开发流程：两步完成](#3-开发流程两步完成)
+3. [开发流程：三步完成](#3-开发流程三步完成)
 4. [异步适配：处理同步库](#4-异步适配处理同步库)
-5. [一份完整的示例：`AwesomeEngine`](#5-一份完整的示例awesomeengine)
-6. [编写测试：验证你的引擎](#6-编写测试验证你的引擎)
+5. [进阶技巧：支持自定义上下文](#5-进阶技巧支持自定义上下文)
+6. [一份完整的示例：`AwesomeEngine`](#6-一份完整的示例awesomeengine)
+7. [编写测试：验证你的引擎](#7-编写测试验证你的引擎)
 
 ---
 
@@ -24,45 +27,15 @@
 
 引擎**不需要**关心：
 
-- **批处理和并发**：`BaseTranslationEngine` 会自动处理 `asyncio.gather` 的逻辑。
-- **上下文解析**：基类会处理 `context` 并将结果作为 `context_config` 字典传入你的方法。
+- **批处理和并发**：`BaseTranslationEngine` 会自动处理。
+- **配置加载与发现**：`TransHubConfig` 和注册表会自动处理。
 - **数据库、缓存、重试、速率限制**：这些都由 `Coordinator` 处理。
-
-> ⚠️ **重要提示：`EngineError` 的正确使用**
-> 当你的引擎遇到 API 错误时，你**不应该** `raise EngineError(...)`。正确做法是，将 `EngineError` 对象作为结果 **`return`** 回去。
 
 ### **2. 核心模式：只实现 `_atranslate_one`**
 
-这是为 `Trans-Hub` v2.0+ 开发引擎的**唯一核心要求**。你的引擎主类必须继承 `BaseTranslationEngine`，但你**唯一**需要重写的方法就是 `_atranslate_one`。
+这是为 `Trans-Hub` v2.1+ 开发引擎的**唯一核心要求**。你的引擎主类必须继承 `BaseTranslationEngine`，但你**唯一**需要重写的方法就是 `_atranslate_one`。基类已经为你处理了所有外围的批处理逻辑。
 
-```python
-# your_engine.py
-
-# ... imports ...
-from trans_hub.engines.base import BaseTranslationEngine
-from trans_hub.types import EngineBatchItemResult
-
-class YourEngine(BaseTranslationEngine[...]):
-    # ...
-
-    async def _atranslate_one(
-        self,
-        text: str,
-        target_lang: str,
-        source_lang: Optional[str],
-        context_config: dict[str, Any], # 基类已为你解析好的上下文
-    ) -> EngineBatchItemResult:
-        #
-        # 在这里实现你与外部 API 的通信逻辑
-        # 只需处理单个 `text` 的翻译
-        #
-        # ...
-        # return EngineSuccess(...) or EngineError(...)
-```
-
-你**不应该**重写 `atranslate_batch` 方法，所有批处理逻辑都已在基类中为你准备好了。
-
-### **3. 开发流程：两步完成**
+### **3. 开发流程：三步完成**
 
 假设我们要创建一个对接 “Awesome Translate” 服务的引擎。
 
@@ -72,21 +45,33 @@ class YourEngine(BaseTranslationEngine[...]):
 
 #### **第二步：实现引擎代码**
 
-打开 `awesome_engine.py` 文件，编写引擎的核心逻辑。这通常包含三个部分：
+打开 `awesome_engine.py` 文件，并遵循以下结构编写代码。这是构建一个新引擎的“黄金模板”。
 
-1.  **配置模型**: 定义一个继承自 `BaseEngineConfig` 的 Pydantic 模型，用于存放 API Key 等配置。如果配置需要从 `.env` 文件加载，请同时继承 `pydantic_settings.BaseSettings`。
-2.  **引擎主类**: 实现一个继承自 `BaseTranslationEngine` 的主类。
-3.  **核心逻辑**: 在 `_atranslate_one` 方法中实现与外部 API 的通信。
+1.  **导入**: 在文件顶部，导入所有必要的模块，包括 `BaseTranslationEngine` 和 `register_engine_config` 函数。
+2.  **定义配置模型 (`...Config`)**: 创建一个继承自 `BaseEngineConfig` 的 Pydantic 模型。如果需要从 `.env` 加载配置，请同时继承 `pydantic_settings.BaseSettings`。
+3.  **定义引擎主类 (`...Engine`)**: 创建一个继承自 `BaseTranslationEngine` 的主类，并实现 `_atranslate_one` 方法。
+4.  **自我注册**: 在**文件末尾**，调用 `register_engine_config` 函数，将你的引擎名和配置类关联起来。
 
-**完成了！** `Trans-Hub` 的动态发现和智能配置系统会处理剩下的一切。你**不需要**手动去 `trans_hub/config.py` 中注册任何东西。当用户在 `TransHubConfig` 中设置 `active_engine="awesome"` 时，系统会自动发现你的引擎并为其创建默认配置实例。
+#### **第三步：坐享其成**
+
+**完成了！** 你**不需要**再修改任何其他文件。
+
+- `engine_registry.py` 会在你下次运行程序时**自动发现**你的 `AwesomeEngine` 类。
+- `config.py` 会通过元数据注册表**自动发现**你的 `AwesomeEngineConfig` 类。
+
+当用户在 `TransHubConfig` 中设置 `active_engine="awesome"` 时，整个系统会自动协同工作。
 
 ### **4. 异步适配：处理同步库**
 
-这是适配同步库的“黄金范例”，它展示了如何在 `_atranslate_one` 中使用 `asyncio.to_thread`。
+- **如果你的目标 API 提供了 `asyncio` 客户端** (例如 `openai` 库)，请直接在 `_atranslate_one` 中使用 `await` 调用它。
+- **如果你的目标 API 只有一个同步的、阻塞的库** (例如 `translators` 库)，你**必须**使用 `asyncio.to_thread` 来包装这个阻塞调用，以避免阻塞主事件循环。
+
+**这是适配同步库的“黄金范例”**:
 
 ```python
 # awesome_engine.py (假设 awesome_sdk 是同步的)
 import asyncio
+from trans_hub.engines.base import BaseTranslationEngine
 # ...
 
 class AwesomeEngine(BaseTranslationEngine[...]):
@@ -134,11 +119,9 @@ class AwesomeEngine(BaseTranslationEngine[...]):
             # ...
     ```
 
-通过这种方式，你可以为你的引擎创建出非常强大和灵活的自定义功能。
-
 ### **6. 一份完整的示例：`AwesomeEngine`**
 
-下面是一个完整的、遵循所有最新最佳实践的 `awesome_engine.py` 文件示例。
+下面是一个完整的、遵循所有最佳实践的 `awesome_engine.py` 文件示例。你可以直接以此为模板开始你的开发。
 
 ```python
 # trans_hub/engines/awesome_engine.py (完整示例)
@@ -146,25 +129,26 @@ class AwesomeEngine(BaseTranslationEngine[...]):
 import asyncio
 from typing import Any, Optional
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from trans_hub.engines.base import BaseEngineConfig, BaseTranslationEngine
+from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
-# 假设 awesome_sdk 是一个同步的第三方库
+# 假设有一个名为 'awesome_sdk' 的同步第三方库
 try:
     import awesome_sdk
 except ImportError:
     awesome_sdk = None
 
 
-# 1. 配置模型
+# --- 1. 定义配置模型 ---
 class AwesomeEngineConfig(BaseSettings, BaseEngineConfig):
-    model_config = SettingsConfigDict(env_prefix="TH_")
+    # BaseSettings 会自动从 .env 和环境变量加载 (前缀: TH_)
     awesome_api_key: str
 
 
-# 2. 引擎主类
+# --- 2. 定义引擎主类 ---
 class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
     CONFIG_MODEL = AwesomeEngineConfig
     VERSION = "1.0.0"
@@ -173,7 +157,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         super().__init__(config)
         if awesome_sdk is None:
             raise ImportError("要使用 AwesomeEngine，请先安装 'awesome-sdk' 库")
-        self.client = awesome_sdk.Client(api_key=self.config.awesome_api_key)
+        self.client = awesome_sdk.Client(api_key=config.awesome_api_key)
 
     def _translate_single_sync(self, text: str, target_lang: str) -> EngineBatchItemResult:
         """[私有] 这是一个执行阻塞 I/O 的同步方法。"""
@@ -192,10 +176,13 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """[公有] 纯异步接口实现。"""
-        return await asyncio.to_thread(
-            self._translate_single_sync, text, target_lang
-        )
+        """[实现] 通过 asyncio.to_thread 包装同步调用。"""
+        return await asyncio.to_thread(self._translate_single_sync, text, target_lang)
+
+
+# --- 3. 自我注册 ---
+# 将引擎名 "awesome" 与其配置模型 AwesomeEngineConfig 关联起来
+register_engine_config("awesome", AwesomeEngineConfig)
 ```
 
 ### **7. 编写测试：验证你的引擎**
@@ -205,33 +192,19 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
 ```python
 # tests/engines/test_awesome_engine.py
 import pytest
-from unittest.mock import MagicMock, patch
-
 from trans_hub.config import TransHubConfig
-from trans_hub.coordinator import Coordinator
 # ...
 
 @pytest.mark.asyncio
-# 使用 patch 来模拟外部 awesome_sdk 库
-@patch('trans_hub.engines.awesome_engine.awesome_sdk')
-async def test_coordinator_with_awesome_engine(mock_sdk, mock_persistence_handler):
-    """测试 Coordinator 是否能成功驱动 AwesomeEngine。"""
-    # 1. 模拟 SDK 的行为
-    mock_sdk.Client.return_value.translate.return_value = "你好，世界！"
-
-    # 2. 配置 Trans-Hub 来使用你的引擎
-    # 注意：我们不需要手动创建 AwesomeEngineConfig。
-    # 我们只需设置 .env 环境变量 (通过 monkeypatch) 或依赖默认值。
-    # 这里为了简单，我们直接在测试中断言它被正确调用。
-    config = TransHubConfig(active_engine="awesome")
-
-    # 假设你的 AwesomeEngineConfig 配置了 awesome_api_key
-    # 在测试中，你可能需要用 monkeypatch 来设置环境变量
-    # monkeypatch.setenv("TH_AWESOME_API_KEY", "fake-key")
-
-    coordinator = Coordinator(config=config, persistence_handler=mock_persistence_handler)
-    await coordinator.initialize()
-
-    # 3. 异步执行翻译流程
+async def test_coordinator_with_awesome_engine(monkeypatch, ...):
+    # 1. 模拟外部依赖
     # ...
+    
+    # 2. 通过 monkeypatch 设置环境变量
+    monkeypatch.setenv("TH_AWESOME_API_KEY", "fake-key")
+
+    # 3. 只需激活引擎，配置会自动被创建和加载
+    config = TransHubConfig(active_engine="awesome")
+    
+    # ... (后续的 Coordinator 初始化和测试逻辑) ...
 ```

@@ -23,17 +23,22 @@
 
 - **[指南 1：快速入门](./guides/01_quickstart.md)**
 
-  - **内容**: 最精简的上手教程。指导您在 5 分钟内完成从安装到运行第一个**异步**翻译任务的全过程，并体验智能缓存。
+  - **内容**: 最精简的上手教程。指导您在 5 分钟内完成从安装到运行第一个**异步**翻译任务的全过程。
   - **目标读者**: 所有人，特别是初次接触 `Trans-Hub` 的用户。
 
 - **[指南 2：高级用法](./guides/02_advanced_usage.md)**
-  - **内容**: 一系列高级功能的“代码食谱”，包括：
-    - **(核心)** 如何通过 `business_id` 和 `context` 实现精确的来源追踪和情境翻译。
-    - 如何**轻松激活** OpenAI 等高级翻译引擎。
-    - 如何使用垃圾回收（GC）管理数据生命周期。
-    - 如何配置速率限制器（Rate Limiter）。
-    - 如何在 **FastAPI** 等现代 Web 框架中高效地集成 `Trans-Hub`。
+
+  - **内容**: 一系列高级功能的“代码食谱”，包括如何激活高级引擎、使用上下文进行精确翻译、管理数据生命周期以及与 Web 框架集成。
   - **目标读者**: 希望在实际项目中充分利用 `Trans-Hub` 功能的开发者。
+
+- **[指南 3：配置深度解析](./guides/03_configuration.md)**
+
+  - **内容**: `TransHubConfig` 及其所有子模型的权威参考，详细解释了每个配置项的作用以及如何通过环境变量进行设置。
+  - **目标读者**: 所有用户。
+
+- **[指南 4：部署与运维](./guides/04_deployment.md)**
+  - **内容**: 在生产环境中部署和维护 `Trans-Hub` 的最佳实践，包括数据库迁移、后台工作进程 (Worker) 的部署模式和垃圾回收的调度。
+  - **目标读者**: 需要将 `Trans-Hub` 用于生产环境的开发者和运维工程师。
 
 ---
 
@@ -43,16 +48,16 @@
 
 - **[核心类型 (Core Types)](./api/core_types.md)**
 
-  - **内容**: 对 `trans_hub.types` 模块中所有核心数据传输对象（DTOs）的详细说明，如 `TranslationResult`, `EngineSuccess` 等。
+  - **内容**: 对 `trans_hub.types` 模块中所有核心 DTOs 的详细说明。
   - **目标读者**: 所有开发者。
 
 - **[`Coordinator` API](./api/coordinator.md)**
 
-  - **内容**: `Coordinator` 类的每个公共方法（如 `request`, `process_pending_translations`）的详细描述、参数和用法。
+  - **内容**: `Coordinator` 类的每个公共方法的详细描述。
   - **目标读者**: 所有用户和开发者。
 
 - **[`PersistenceHandler` 接口](./api/persistence_handler.md)**
-  - **内容**: `PersistenceHandler` 协议中定义的所有异步方法的契约，为实现自定义存储后端提供指导。
+  - **内容**: `PersistenceHandler` 协议中定义的所有异步方法的契约。
   - **目标读者**: 希望实现自定义存储后端的开发者。
 
 ---
@@ -63,11 +68,11 @@
 
 - **[架构概述](./architecture/01_overview.md)**
 
-  - **内容**: 对系统设计理念、组件（Coordinator, Engine, Persistence）交互和核心工作流的高层描述。
+  - **内容**: 对系统设计理念、组件交互和核心工作流的高层描述。
   - **目标读者**: 核心维护者和高级用户。
 
 - **[数据模型与数据库设计](./architecture/02_data_model.md)**
-  - **内容**: 对数据库 Schema（`th_content`, `th_translations`, `th_sources` 等表）的权威、详尽的说明，包括**字段定义、关系和性能优化规范（如索引要求）**。
+  - **内容**: 对数据库 Schema 的权威、详尽的说明，包括性能优化规范。
   - **目标读者**: 核心维护者、数据库管理员和高级贡献者。
 
 ---

@@ -454,6 +454,66 @@ class Coordinator:
             "翻译任务已成功入队。", business_id=business_id, num_langs=len(target_langs)
         )
 
+    async def get_translation(
+        self,
+        text_content: str,
+        target_lang: str,
+        context: Optional[dict[str, Any]] = None,
+    ) -> Optional[TranslationResult]:
+        """
+        直接获取一个已完成的翻译结果。
+
+        此方法会依次检查内存缓存和持久化存储，是获取已翻译内容最高效的方式。
+
+        Args:
+        ----
+            text_content (str): 要查询的原始文本。
+            target_lang (str): 目标语言代码。
+            context (Optional[dict[str, Any]]): 翻译上下文，用于区分不同情境下的翻译。
+
+        Returns:
+        -------
+            Optional[TranslationResult]: 如果找到已完成的翻译，则返回结果对象；否则返回 None。
+
+        """
+        validate_lang_codes([target_lang])
+        context_hash = get_context_hash(context)
+
+        # 1. 检查内存缓存 (L1 Cache)
+        request = TranslationRequest(
+            source_text=text_content,
+            source_lang=self.config.source_lang,  # 使用全局源语言进行缓存键生成
+            target_lang=target_lang,
+            context_hash=context_hash,
+        )
+        cached_text = await self.cache.get_cached_result(request)
+        if cached_text:
+            # 注意：从内存缓存返回时，business_id 和 engine 可能是近似值
+            # 因为我们无法直接从内存缓存中得知是哪个 business_id 触发了它
+            return TranslationResult(
+                original_content=text_content,
+                translated_content=cached_text,
+                target_lang=target_lang,
+                status=TranslationStatus.TRANSLATED,
+                from_cache=True,
+                engine=f"{self.active_engine_name} (mem-cached)",
+                context_hash=context_hash,
+                business_id=None,  # 无法从内存缓存中确定
+            )
+
+        # 2. 检查持久化存储 (L2 Cache)
+        db_result = await self.handler.get_translation(
+            text_content, target_lang, context
+        )
+
+        # 3. (可选) 如果在数据库中找到，回填到内存缓存
+        if db_result and db_result.translated_content:
+            await self.cache.cache_translation_result(
+                request, db_result.translated_content
+            )
+
+        return db_result
+
     async def run_garbage_collection(
         self, expiration_days: Optional[int] = None, dry_run: bool = False
     ) -> dict[str, int]:

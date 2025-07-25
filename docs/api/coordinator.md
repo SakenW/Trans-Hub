@@ -171,6 +171,38 @@ async def process_all_chinese_tasks(coordinator: Coordinator):
     print(f"处理完成，共处理了 {processed_count} 个任务。")
 ```
 
+### `get_translation()`
+
+```python
+async def get_translation(
+    self,
+    text_content: str,
+    target_lang: str,
+    context: Optional[dict[str, Any]] = None,
+) -> Optional[TranslationResult]:
+```
+
+**描述**:
+一个高效的只读方法，用于直接获取一个**已完成**的翻译结果。
+
+此方法是获取已翻译内容的最佳方式，因为它实现了一个**两级缓存查询策略**：
+
+1.  首先检查高速的**内存缓存 (L1 Cache)**。
+2.  如果内存缓存未命中，则查询**持久化存储 (L2 Cache / 数据库)**。
+3.  如果从数据库中找到结果，它会自动将其**回填**到内存缓存中，以加速后续的查询。
+
+这对于需要频繁查询相同翻译的场景（例如在 Web 请求中）非常有用。
+
+**参数**:
+
+- **`text_content`** (`str`): 要查询的原始文本。
+- **`target_lang`** (`str`): 目标语言代码。
+- **`context`** (`Optional[dict[str, Any]]`): (可选) 翻译上下文，用于区分不同情境下的翻译。
+
+**返回**:
+
+- `Optional[TranslationResult]`: 如果在任何一层缓存中找到已完成的翻译，则返回 `TranslationResult` 对象；否则返回 `None`。
+
 ### `run_garbage_collection()`
 
 ```python

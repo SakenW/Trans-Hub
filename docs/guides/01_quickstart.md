@@ -48,7 +48,7 @@ async def get_or_create_coordinator(db_name: str = "my_translations.db"):
     # 使用 pathlib 确保数据库路径的健壮性
     db_path = Path(__file__).parent / db_name
     log = structlog.get_logger("initializer")
-    
+
     # 首次运行时，创建数据库并应用迁移
     if not db_path.exists():
         log.info("数据库不存在，正在创建并迁移...", db_path=str(db_path))
@@ -68,7 +68,7 @@ async def main():
     setup_logging(log_level="INFO")
     log = structlog.get_logger("main")
     coordinator = None
-    
+
     try:
         coordinator = await get_or_create_coordinator()
 
@@ -78,7 +78,7 @@ async def main():
 
         # --- 第一次运行 ---
         log.info("▶️ 第一次尝试翻译...")
-        
+
         # 1. 登记任务
         log.info("登记翻译任务", text=text_to_translate, business_id=text_id)
         await coordinator.request(
@@ -114,11 +114,11 @@ async def main():
         processed_again = [
             res async for res in coordinator.process_pending_translations(target_lang=target_lang)
         ]
-        
+
         if not processed_again:
             log.info("✅ 成功！没有需要处理的新任务，表明持久化缓存生效。")
             # 我们可以直接从数据库获取已有的翻译
-            existing_translation = await coordinator.handler.get_translation(
+            existing_translation = await coordinator.get_translation(
                 text_content=text_to_translate, target_lang=target_lang
             )
             if existing_translation:

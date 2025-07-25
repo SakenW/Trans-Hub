@@ -1,8 +1,10 @@
-# **架构概述：Trans-Hub v2.0**
+# **架构概述：Trans-Hub v2.1**
 
 **本文档的目标读者**: 核心维护者、社区贡献者，以及希望深入理解 `Trans-Hub` 内部工作原理的用户。
 
 **文档目的**: 本文档旨在提供一个关于 `Trans-Hub` 系统架构、设计原则和核心工作流程的高层概览。它是理解“系统如何工作”的起点。
+
+[返回文档索引](../INDEX.md)
 
 ---
 
@@ -15,77 +17,77 @@
 ### **1.2 核心工程原则**
 
 - **异步优先 (Async-First)**: 整个核心库被设计为纯异步，以实现最大的 I/O 并发性能，并与现代异步 Web 框架（如 FastAPI）无缝集成。
+- **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚。`PersistenceHandler` 只管理数据库，`Engine` 只处理翻译逻辑，`Coordinator` 只负责编排工作流。
+- **依赖注入 (Dependency Injection)**: 核心组件在其构造函数中接收其依赖，使得组件之间松耦合，易于测试和替换。
 - **契约优先 (Contract First)**: 所有模块交互都通过严格的 DTOs (使用 Pydantic) 和接口 (`typing.Protocol`) 进行约束。
 - **结构化配置 (Structured Configuration)**: 系统的所有配置项均通过 Pydantic 模型进行定义和验证，并能自动从环境变量或 `.env` 文件加载。
-- **依赖注入 (Dependency Injection)**: 核心组件在其构造函数中接收其依赖，使得组件之间松耦合，易于测试和替换。
-- **生命周期感知 (Lifecycle-Aware)**: 系统设计包含了数据的演进（通过独立的迁移脚本）和清理（通过垃圾回收功能）。
-- **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚。`PersistenceHandler` 只管理数据库，`Engine` 只处理翻译逻辑，`Coordinator` 只负责编排工作流。
 
 ---
 
 ## **2. 系统架构**
 
-`Trans-Hub` 采用模块化的分层架构，确保各组件职责单一、易于测试和替换。
+`Trans-Hub` 采用模块化的分层架构和**依赖倒置**的注册模式，确保各组件职责单一、高度解耦。
 
 ```mermaid
 graph TD
     subgraph "上层应用 (User Application)"
-        A["异步应用逻辑 (e.g., FastAPI, CLI)"]
-        G[".env 文件\nTH_OPENAI_API_KEY=..."]
+        A["异步应用逻辑 (e.g., FastAPI)"]
+        G[".env 文件"]
     end
 
-    subgraph "核心库: Trans-Hub (Async-First)"
-        B["<b>主协调器 (Coordinator)</b>\n- 纯异步设计\n- 编排核心工作流\n- 应用重试与速率限制策略"]
-        D["<b>持久化处理器 (PersistenceHandler)</b>\n- 纯异步接口\n- 保证事务原子性"]
-        E["<b>翻译引擎 (BaseTranslationEngine)</b>\n- 纯异步接口\n- 只实现 _atranslate_one\n- e.g., OpenAIEngine"]
-        F["统一数据库 (SQLite)\n(含Schema版本管理)"]
+    subgraph "核心库: Trans-Hub"
+        B["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
+        U1["<b>配置模型 (TransHubConfig)</b><br/>单一事实来源"]
+        D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象"]
+        F["统一数据库 (SQLite)"]
 
-        subgraph "核心组件与机制"
-            C1["内存缓存 (TranslationCache)"]
-            C2["重试与退避逻辑"]
-            C3["速率限制器 (RateLimiter)"]
-            C4["引擎注册表 (EngineRegistry)"]
+        subgraph "插件化引擎子系统"
+            E_meta["<b>引擎元数据注册表 (meta.py)</b><br/>解耦中心"]
+            C3["<b>引擎加载器 (engine_registry.py)</b><br/>动态发现"]
+            E_impl["<b>引擎实现</b><br/>(e.g., OpenAIEngine)"]
         end
 
-        subgraph "配置与工具集"
-            U1["<b>配置模型 (config.py)</b>"]
-            U2["日志系统 (Structlog)"]
-            U3["垃圾回收 (GC)"]
+        subgraph "核心机制"
+            C1["内存缓存 (Cache)"]
+            C2["重试/速率限制"]
         end
     end
 
-    G -- "加载为环境变量" --> U1
-    U1 -- "由 Pydantic-Settings 解析" --> B
-    C4 -- "被 Coordinator 使用" --> B
-    A -- "await 调用" --> B
-    B -- "持有并使用" --> C1 & C2 & C3
+    G -- "加载环境变量" --> U1
+    A -- "创建" --> U1
+    A -- "实例化并调用" --> B
+
+    B -- "使用" --> C1 & C2
     B -- "依赖于" --> D
-    B -- "委派任务给" --> E
-    D -- "异步操作" --> F
+
+    subgraph "初始化/发现流程"
+        style C3 fill:#e6f3ff,stroke:#36c
+        style E_impl fill:#e6f3ff,stroke:#36c
+        style E_meta fill:#e6f3ff,stroke:#36c
+
+        U1 -- "1. 查询配置类型" --> E_meta
+        B -- "2. 使用引擎名查询" --> C3
+        C3 -- "3. 导入模块, 触发" --> E_impl
+        E_impl -- "4. 自我注册 Config" --> E_meta
+    end
+
+    D -- "操作" --> F
 ```
 
----
+### **组件职责**
 
-## **3. 插件化翻译引擎设计**
-
-### **3.1 插件发现机制**
-
-`Trans-Hub` 采用一种轻量级的“懒加载”自动发现机制。`engine_registry.py` 模块在首次被导入时，会自动扫描 `trans_hub.engines` 包。如果某个引擎模块因缺少可选依赖（如 `openai` 库）而导入失败，它会捕获 `ModuleNotFoundError` 并优雅地跳过，而不会使整个应用崩溃。
-
-### **3.2 `BaseTranslationEngine` 核心模式**
-
-所有翻译引擎必须继承的**纯异步**抽象基类，它定义了引擎的核心契约，并内置了批处理逻辑。
-
-- **泛型设计**: `BaseTranslationEngine` 是一个泛型类 (`BaseTranslationEngine[ConfigType]`)，允许 Mypy 在编译时进行精确的类型检查。
-- **核心抽象方法**: **`async def _atranslate_one(...)`**。这是所有引擎**唯一必须实现**的翻译方法。它只负责处理**单个文本**的翻译逻辑。
-- **内置批处理**: 引擎开发者**无需**关心批处理和并发。`BaseTranslationEngine` 的 `atranslate_batch` 公共方法会自动接收文本列表，并使用 `asyncio.gather` 来并发调用开发者实现的 `_atranslate_one` 方法。
-- **适配同步库**: 如果一个引擎底层依赖的是一个同步库（例如 `translators`），它应该在其 `_atranslate_one` 方法内部使用 **`asyncio.to_thread`** 来包装阻塞调用，以确保不阻塞事件循环。
-
-> _关于如何开发一个新引擎的详细指南，请参见 [贡献文档](../contributing/developing_engines.md)_
+- **`Coordinator` (主协调器)**: **业务流程的大脑**。它是上层应用与之交互的唯一入口。它负责编排所有操作：接收请求、应用重试/速率限制策略、调用引擎、处理缓存和将结果存入数据库。
+- **`PersistenceHandler` (持久化处理器)**: **数据库的守门人**。它是一个定义了所有数据库读写操作（如 `save_translations`）的抽象接口 (`Protocol`)。`DefaultPersistenceHandler` 是其基于 `aiosqlite` 的默认实现。
+- **`BaseTranslationEngine` (引擎基类)**: **翻译能力的插件插槽**。它定义了所有翻译引擎必须遵守的契约，其核心是实现 `_atranslate_one` 异步方法。
+- **`TransHubConfig` (配置模型)**: **系统的控制面板**。它是一个 Pydantic 模型，集中了所有的配置项，并能从 `.env` 文件智能加载。
+- **引擎发现与注册机制**:
+  - `engine_registry.py` 负责**发现和加载**引擎的**实现代码** (`...Engine` 类)。
+  - `engines/meta.py` 负责维护一个引擎名到其**配置模型** (`...Config` 类) 的映射。
+  - 这个双注册表系统彻底解耦了配置系统和引擎实现，避免了循环依赖。
 
 ---
 
-## **4. 核心工作流详解**
+## **3. 核心工作流详解**
 
 以下是 `Coordinator.process_pending_translations` 的核心工作流，它整合了内存缓存、数据库交互和引擎调用。
 
@@ -102,11 +104,11 @@ sequenceDiagram
     Note over Handler: 事务1: 锁定一批待办任务<br>(状态->TRANSLATING)
     Handler-->>-Coord: yield batch_of_items
 
-    loop 针对每个翻译批次
-        Coord->>+Cache: _separate_cached_items(batch)
+    loop 针对每个翻译批次 (按 context 分组)
+        Coord->>+Cache: 检查内存缓存
         Cache-->>-Coord: cached_results, uncached_items
 
-        opt 如果有未缓存的项目 (uncached_items)
+        opt 如果有未缓存的项目
             loop 批次内部的重试尝试
                 Note over Coord: (应用速率限制)
                 Coord->>+Engine: atranslate_batch(uncached_items)
@@ -119,7 +121,7 @@ sequenceDiagram
                     break
                 end
             end
-            Coord->>+Cache: _cache_new_results(new_success_results)
+            Coord->>+Cache: 缓存新翻译结果
             Cache-->>-Coord: (新结果已缓存)
         end
 
@@ -136,16 +138,12 @@ sequenceDiagram
 
 ---
 
-## **5. 错误处理、重试与速率限制**
+## **4. 扩展性**
 
-- **错误分类**: `EngineError` 的 **`is_retryable`** 属性是错误分类的核心。API 返回的 `5xx` (服务器错误) 或 `429` (请求过多) 通常被视为可重试，而 `4xx` (客户端错误) 则不可重试。
-- **重试策略**: `Coordinator` 内建了一个带**指数退避 (Exponential Backoff)** 的重试循环。
-- **速率限制**: 在**每次**尝试调用引擎 API 之前（包括重试），`Coordinator` 都会调用 `rate_limiter.acquire()`。
+`Trans-Hub` 的设计使其在两个关键维度上具有高度的可扩展性：
 
----
+1.  **翻译能力**: 通过在 `trans_hub/engines/` 目录下添加新文件，可以轻松地集成任何第三方翻译服务。
+    > _详见 [指南：开发一个新引擎](../contributing/developing_engines.md)_
+2.  **存储后端**: 通过实现 `PersistenceHandler` 协议，可以将默认的 SQLite 存储替换为任何支持异步的数据库，如 PostgreSQL (使用 `asyncpg`) 或 MySQL。
 
-## **6. 日志记录与可观测性**
-
-- **库**: 使用 `structlog` 实现结构化日志。
-- **格式**: 开发环境使用彩色的控制台格式，生产环境推荐切换为 `json` 格式，便于日志聚合系统（如 ELK, Splunk）的采集和分析。
-- **调用链 ID (Correlation ID)**: 支持使用 `structlog.contextvars` 绑定 `correlation_id`，使得可以轻松地从海量日志中筛选出与单次请求相关的所有日志记录。
+这使得 `Trans-Hub` 能够灵活地适应从小型项目到大规模、高并发生产环境的各种需求。
