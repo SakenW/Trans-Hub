@@ -14,6 +14,7 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
+from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
@@ -64,3 +65,7 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
             text, f"Translated({text}) to {target_lang}"
         )
         return EngineSuccess(translated_text=translated_text)
+
+
+# 注册引擎配置
+register_engine_config("debug", DebugEngineConfig)

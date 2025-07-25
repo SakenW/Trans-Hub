@@ -1,5 +1,8 @@
 # tests/test_main.py
-"""Trans-Hub 核心功能端到端测试。"""
+"""
+Trans-Hub 核心功能端到端测试。
+此版本适配了 v2.1+ 的动态注册配置模式。
+"""
 
 import os
 import shutil
@@ -53,15 +56,8 @@ def test_config() -> TransHubConfig:
     openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
 
     # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    # 手动为 model_rebuild 提供一个包含所有前向引用类型的命名空间
-    types_namespace = {
-        "DebugEngineConfig": DebugEngineConfig,
-        "OpenAIEngineConfig": OpenAIEngineConfig,
-        "TranslatorsEngineConfig": TranslatorsEngineConfig,
-    }
-    EngineConfigs.model_rebuild(_types_namespace=types_namespace)
-    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
+    # 我们必须手动为所有将在测试中使用的引擎提供配置，
+    # 因为 TransHubConfig 的验证器只会自动创建 active_engine 的配置。
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
         active_engine=ENGINE_DEBUG,
@@ -75,6 +71,7 @@ def test_config() -> TransHubConfig:
             ),
         ),
     )
+    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 
 @pytest_asyncio.fixture

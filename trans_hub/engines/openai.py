@@ -15,6 +15,7 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
+from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 # 使用不同的变量名来避免 mypy 的 'no-redef' 错误
@@ -134,3 +135,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         except Exception as e:
             logger.error("OpenAI 引擎发生未知错误", error=str(e), exc_info=True)
             return EngineError(error_message=str(e), is_retryable=True)
+
+
+# 注册引擎配置
+register_engine_config("openai", OpenAIEngineConfig)

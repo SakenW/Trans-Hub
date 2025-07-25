@@ -1,22 +1,18 @@
 # trans_hub/config.py
 """
 定义了 Trans-Hub 项目的主配置模型和相关的子模型。
-这是所有配置的“单一事实来源”，上层应用应该创建并传递 TransHubConfig 对象。
+此版本采用“注册”模式，通过元数据注册表动态发现引擎配置，
+从而彻底解除了与引擎模块的循环依赖。
 """
 
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator
 
 from trans_hub.cache import CacheConfig
 
-# 使用 TYPE_CHECKING 块来导入引擎配置类型，
-# 这只在静态类型检查期间有效，避免了运行时的循环导入问题。
-if TYPE_CHECKING:
-    from trans_hub.engines.debug import DebugEngineConfig
-    from trans_hub.engines.openai import OpenAIEngineConfig
-    from trans_hub.engines.translators_engine import TranslatorsEngineConfig
+# 注意：所有引擎配置的导入都已移除。
 
 
 # ==============================================================================
@@ -42,11 +38,11 @@ class RetryPolicyConfig(BaseModel):
 class EngineConfigs(BaseModel):
     """一个用于聚合所有已知引擎特定配置的模型。."""
 
-    # 使用字符串前向引用 ("...") 来声明类型。
-    # 这推迟了类型的实际解析，是解决循环依赖的关键。
-    debug: Optional["DebugEngineConfig"] = None
-    translators: Optional["TranslatorsEngineConfig"] = None
-    openai: Optional["OpenAIEngineConfig"] = None
+    # 这些字段的类型将在 TransHubConfig 的验证器中被动态填充和验证。
+    # 定义为 Any 以避免静态类型问题，实际运行时会是具体的 EngineConfig 模型实例。
+    debug: Optional[Any] = None
+    translators: Optional[Any] = None
+    openai: Optional[Any] = None
 
 
 # ==============================================================================
@@ -55,10 +51,7 @@ class EngineConfigs(BaseModel):
 
 
 class TransHubConfig(BaseModel):
-    """
-    Trans-Hub 的主配置对象。
-    这是初始化 Coordinator 时需要传入的核心配置。
-    """
+    """Trans-Hub 的主配置对象。"""
 
     database_url: str = "sqlite:///transhub.db"
     active_engine: str = "translators"
@@ -84,33 +77,36 @@ class TransHubConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_autocreate_engine_config(self) -> "TransHubConfig":
-        """只为 active_engine 创建配置（如果尚未提供），以避免不必要的依赖问题。"""
-        # 在运行时动态导入，以避免模块顶部的循环依赖
-        from trans_hub.engine_registry import ENGINE_REGISTRY
+        """动态地从元数据注册表中查找并创建引擎配置。"""
+        # 动态导入元数据注册表
+        # 这是一个关键步骤：通过导入一个高层模块（如 Coordinator），
+        # 我们确保 Python 已经加载并执行了 `trans_hub.engines` 包下的所有模块，
+        # 从而触发了所有引擎的自我注册逻辑。
+        # noqa: F401 (unused-import) is used to signal that this import is intentional
+        # for its side effects (triggering module discovery and registration).
+        from trans_hub.engine_registry import discover_engines
+        from trans_hub.engines.meta import ENGINE_CONFIG_REGISTRY
 
-        # 确保 Pydantic 模型已解析好前向引用
-        self.engine_configs.model_rebuild(force=True)
+        discover_engines()
 
-        # 只检查并按需创建 *活动引擎* 的配置
+        # 为所有已知的引擎创建默认配置（如果用户没有提供）
+        if self.engine_configs.debug is None and "debug" in ENGINE_CONFIG_REGISTRY:
+            self.engine_configs.debug = ENGINE_CONFIG_REGISTRY["debug"]()
+        if (
+            self.engine_configs.translators is None
+            and "translators" in ENGINE_CONFIG_REGISTRY
+        ):
+            self.engine_configs.translators = ENGINE_CONFIG_REGISTRY["translators"]()
+
+        # 检查并按需创建活动引擎的配置
         if getattr(self.engine_configs, self.active_engine, None) is None:
-            engine_class = ENGINE_REGISTRY.get(self.active_engine)
-            if not engine_class:
+            config_class = ENGINE_CONFIG_REGISTRY.get(self.active_engine)
+            if not config_class:
                 raise ValueError(
-                    f"活动引擎 '{self.active_engine}' 已指定, 但在引擎注册表中找不到对应的引擎类。"
+                    f"活动引擎 '{self.active_engine}' 已指定, 但其配置模型未在元数据中注册。"
                 )
-            # 自动创建配置实例 (BaseSettings 会从 .env 加载)
-            setattr(
-                self.engine_configs, self.active_engine, engine_class.CONFIG_MODEL()
-            )
+
+            # BaseSettings 会自动从 .env 文件加载
+            setattr(self.engine_configs, self.active_engine, config_class())
 
         return self
-
-
-# 在文件末尾，为所有使用了前向引用的模型更新引用。
-# 这对 mypy 和 Pydantic v2 都很重要，以确保类型提示被正确解析。
-if TYPE_CHECKING:
-    from trans_hub.engines.debug import DebugEngineConfig
-    from trans_hub.engines.openai import OpenAIEngineConfig
-    from trans_hub.engines.translators_engine import TranslatorsEngineConfig
-
-    EngineConfigs.model_rebuild()

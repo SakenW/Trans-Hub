@@ -14,6 +14,7 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
+from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 try:
@@ -91,3 +92,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         return await asyncio.to_thread(
             self._translate_single_sync, text, target_lang, source_lang, provider
         )
+
+
+# 注册引擎配置
+register_engine_config("translators", TranslatorsEngineConfig)
