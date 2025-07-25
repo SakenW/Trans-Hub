@@ -1,4 +1,4 @@
-# .github/workflows/ci.yml (最终修复版)
+# .github/workflows/ci.yml
 
 name: Python CI/CD Pipeline
 
@@ -14,7 +14,6 @@ concurrency:
 
 env:
   POETRY_NO_INTERACTION: 1
-  # 让 Poetry 在项目根目录的 .venv 中创建虚拟环境
   POETRY_VIRTUALENVS_IN_PROJECT: "true"
 
 jobs:
@@ -23,24 +22,20 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
     - name: Set up Python 3.12
       id: setup-python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-
     - name: Install Poetry
       uses: snok/install-poetry@v1
-    
     - name: Set up cache for dependencies
       uses: actions/cache@v4
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
     - name: Install all dependencies for linting
-      # [核心修复] 安装所有核心和开发依赖，以便 mypy 能找到它们
+      # 为了 mypy，需要安装所有依赖
       run: poetry install --with dev --extras "translators openai"
 
     - name: Run Code Quality Checks
@@ -64,27 +59,23 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
     - name: Set up Python ${{ matrix.python-version }}
       id: setup-python
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-
     - name: Install Poetry
       uses: snok/install-poetry@v1
-
-    - name: Configure Poetry to create venv in project root
-      run: poetry config virtualenvs.in-project true
-
     - name: Set up cache
       uses: actions/cache@v4
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
     - name: Install dependencies
+      # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+      # 同时安装 translators 和 openai 两个 extras
       run: poetry install --with dev --extras "translators openai"
+      # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
       
     - name: Run Tests with Coverage
       run: poetry run pytest --cov=trans_hub --cov-report=xml
@@ -97,7 +88,6 @@ jobs:
         fail_ci_if_error: true
         verbose: true
 
-  # ... test-experimental job 保持不变，因为它也安装了完整依赖 ...
   test-experimental:
     needs: lint
     runs-on: ubuntu-latest
@@ -113,19 +103,22 @@ jobs:
         python-version: '3.13'
     - name: Install Poetry
       uses: snok/install-poetry@v1
-    - name: Configure Poetry to create venv in project root
-      run: poetry config virtualenvs.in-project true
     - name: Set up cache
       uses: actions/cache@v4
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
     - name: Install dependencies
+      # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+      # 同样，在这里也安装所有 extras
       run: poetry install --with dev --extras "translators openai" || true
+      # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+      
     - name: Run Code Quality Checks (Python 3.13)
       run: |
         poetry run ruff check .
         poetry run ruff format --check .
         poetry run mypy .
+      
     - name: Run Tests with Pytest (Python 3.13)
       run: poetry run pytest
