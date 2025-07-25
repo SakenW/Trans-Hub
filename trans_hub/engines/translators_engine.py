@@ -1,11 +1,10 @@
-# trans_hub/engines/translators_engine.py
-
+# trans_hub/engines/translators_engine.py (重构后)
 """提供一个使用 `translators` 库的免费翻译引擎。
-此版本为纯异步设计，并使用 asyncio.to_thread 包装同步调用。.
+此版本实现已高度简化，仅需实现 _atranslate_one 方法。
 """
 
 import asyncio
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -26,22 +25,20 @@ logger = structlog.get_logger(__name__)
 
 class TranslatorsContextModel(BaseContextModel):
     """Translators 引擎的上下文，允许动态选择服务商。."""
-
     provider: Optional[str] = None
 
 
 class TranslatorsEngineConfig(BaseEngineConfig):
     """Translators 引擎的配置。."""
-
     provider: str = "google"
 
 
 class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
-    """一个使用 `translators` 库的纯异步引擎。."""
+    """一个使用 `translators` 库的纯异步引擎。"""
 
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
-    VERSION = "1.1.0"
+    VERSION = "2.0.0" # 版本号提升
 
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
@@ -49,17 +46,13 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             raise ImportError(
                 "要使用 TranslatorsEngine, 请先安装 'translators' 库: pip install \"trans-hub[translators]\""
             )
-        self.provider = self.config.provider
-        logger.info("Translators 引擎初始化成功", default_provider=self.provider)
+        logger.info("Translators 引擎初始化成功", default_provider=self.config.provider)
 
     def _translate_single_sync(
         self, text: str, target_lang: str, source_lang: Optional[str], provider: str
     ) -> EngineBatchItemResult:
-        """[私有] 同步翻译单个文本的辅助方法。
-        这个方法将在一个单独的线程中被调用。.
-        """
+        """[私有] 同步翻译单个文本的辅助方法。将在一个单独的线程中被调用。"""
         try:
-            # 确保 ts.translate_text 的结果是字符串
             translated_text = str(
                 ts.translate_text(
                     query_text=text,
@@ -72,31 +65,24 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         except Exception as e:
             logger.error(
                 "Translators 引擎翻译出错",
-                text_preview=text[:30],
+                provider=provider,
                 error=str(e),
                 exc_info=True,
             )
-            return EngineError(
-                error_message=f"Translators 库错误: {e}", is_retryable=True
-            )
+            return EngineError(error_message=f"Translators({provider}) Error: {e}", is_retryable=True)
 
-    async def atranslate_batch(
+    async def _atranslate_one(
         self,
-        texts: list[str],
+        text: str,
         target_lang: str,
-        source_lang: Optional[str] = None,
-        context: Optional[BaseContextModel] = None,
-    ) -> list[EngineBatchItemResult]:
-        """[异步] 批量翻译。通过 asyncio.to_thread 并发执行同步的翻译调用。."""
-        provider = self.provider
-        if isinstance(context, TranslatorsContextModel) and context.provider:
-            provider = context.provider
+        source_lang: Optional[str],
+        context_config: dict[str, Any],
+    ) -> EngineBatchItemResult:
+        """[实现] 异步翻译单个文本。"""
+        # 从全局配置和上下文配置中决定最终的 provider
+        provider = context_config.get("provider", self.config.provider)
 
-        tasks = [
-            asyncio.to_thread(
-                self._translate_single_sync, text, target_lang, source_lang, provider
-            )
-            for text in texts
-        ]
-        results = await asyncio.gather(*tasks)
-        return list(results)
+        # 将同步的阻塞调用放到单独的线程中执行
+        return await asyncio.to_thread(
+            self._translate_single_sync, text, target_lang, source_lang, provider
+        )
