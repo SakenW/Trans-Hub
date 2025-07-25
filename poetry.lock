@@ -35,7 +35,7 @@ files = [
 name = "anyio"
 version = "4.9.0"
 description = "High level compatibility layer for multiple asynchronous event loop implementations"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
@@ -70,7 +70,7 @@ files = [
 name = "certifi"
 version = "2025.4.26"
 description = "Python package for providing Mozilla's CA Bundle."
-optional = true
+optional = false
 python-versions = ">=3.6"
 groups = ["dev"]
 files = [
@@ -82,7 +82,7 @@ files = [
 name = "cffi"
 version = "1.17.1"
 description = "Foreign Function Interface for Python calling C code."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 markers = "platform_python_implementation != \"PyPy\""
@@ -163,7 +163,7 @@ pycparser = "*"
 name = "charset-normalizer"
 version = "3.4.2"
 description = "The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet."
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -265,7 +265,7 @@ files = [
 name = "cloudscraper"
 version = "1.2.71"
 description = "A Python module to bypass Cloudflare's anti-bot page."
-optional = true
+optional = false
 python-versions = "*"
 groups = ["dev"]
 files = [
@@ -378,7 +378,7 @@ toml = ["tomli ; python_full_version <= \"3.11.0a6\""]
 name = "cryptography"
 version = "43.0.3"
 description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -428,7 +428,7 @@ test-randomorder = ["pytest-randomly"]
 name = "dill"
 version = "0.4.0"
 description = "serialize all of Python"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -444,7 +444,7 @@ profile = ["gprof2dot (>=2022.7.29)"]
 name = "distro"
 version = "1.9.0"
 description = "Distro - an OS platform information API"
-optional = true
+optional = false
 python-versions = ">=3.6"
 groups = ["dev"]
 files = [
@@ -475,7 +475,7 @@ test = ["pytest (>=6)"]
 name = "exejs"
 version = "0.0.4"
 description = "Run JavaScript code from Python."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -490,7 +490,7 @@ pypi = ["build (>=1.2.2)", "setuptools (>=75.3.0)", "twine (>=6.1.0)"]
 name = "h11"
 version = "0.16.0"
 description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -502,7 +502,7 @@ files = [
 name = "httpcore"
 version = "1.0.9"
 description = "A minimal low-level HTTP client."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -524,7 +524,7 @@ trio = ["trio (>=0.22.0,<1.0)"]
 name = "httpx"
 version = "0.28.1"
 description = "The next generation HTTP client."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -549,7 +549,7 @@ zstd = ["zstandard (>=0.18.0)"]
 name = "idna"
 version = "3.10"
 description = "Internationalized Domain Names in Applications (IDNA)"
-optional = true
+optional = false
 python-versions = ">=3.6"
 groups = ["dev"]
 files = [
@@ -576,7 +576,7 @@ files = [
 name = "jh2"
 version = "5.0.9"
 description = "HTTP/2 State-Machine based protocol implementation"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -683,7 +683,7 @@ files = [
 name = "jiter"
 version = "0.10.0"
 description = "Fast iterable JSON parser."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
@@ -770,7 +770,7 @@ files = [
 name = "lxml"
 version = "5.4.0"
 description = "Powerful and Pythonic XML processing library combining libxml2/libxslt with the ElementTree API."
-optional = true
+optional = false
 python-versions = ">=3.6"
 groups = ["dev"]
 files = [
@@ -919,7 +919,7 @@ source = ["Cython (>=3.0.11,<3.1.0)"]
 name = "multiprocess"
 version = "0.70.18"
 description = "better multiprocessing and multithreading in Python"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1018,7 +1018,7 @@ files = [
 name = "niquests"
 version = "3.14.1"
 description = "Niquests is a simple, yet elegant, HTTP library. It is a drop-in replacement for Requests, which is under feature freeze."
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -1045,7 +1045,7 @@ zstd = ["urllib3-future[zstd]"]
 name = "openai"
 version = "1.86.0"
 description = "The official Python library for the openai API"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1084,7 +1084,7 @@ files = [
 name = "pathos"
 version = "0.3.4"
 description = "parallel graph management and execution in heterogeneous computing"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1130,7 +1130,7 @@ testing = ["coverage", "pytest", "pytest-benchmark"]
 name = "pox"
 version = "0.3.6"
 description = "utilities for filesystem exploration and automated builds"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1142,7 +1142,7 @@ files = [
 name = "ppft"
 version = "1.7.7"
 description = "distributed and parallel Python"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1157,7 +1157,7 @@ dill = ["dill (>=0.4.0)"]
 name = "pycparser"
 version = "2.22"
 description = "C parser in Python"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 markers = "platform_python_implementation != \"PyPy\""
@@ -1328,7 +1328,7 @@ yaml = ["pyyaml (>=6.0.1)"]
 name = "pyparsing"
 version = "3.2.3"
 description = "pyparsing module - Classes and methods to define and execute parsing grammars"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
@@ -1419,7 +1419,7 @@ cli = ["click (>=5.0)"]
 name = "qh3"
 version = "1.5.2"
 description = "A lightway and fast implementation of QUIC and HTTP/3"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 markers = "(platform_system == \"Darwin\" or platform_system == \"Windows\" or platform_system == \"Linux\") and (platform_machine == \"x86_64\" or platform_machine == \"s390x\" or platform_machine == \"armv7l\" or platform_machine == \"ppc64le\" or platform_machine == \"ppc64\" or platform_machine == \"AMD64\" or platform_machine == \"aarch64\" or platform_machine == \"arm64\" or platform_machine == \"ARM64\" or platform_machine == \"x86\" or platform_machine == \"i686\") and (platform_python_implementation == \"CPython\" or platform_python_implementation == \"PyPy\" and python_version < \"3.12\")"
@@ -1525,7 +1525,7 @@ files = [
 name = "requests"
 version = "2.32.4"
 description = "Python HTTP for Humans."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1547,7 +1547,7 @@ use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 name = "requests-toolbelt"
 version = "1.0.0"
 description = "A utility belt for advanced users of python-requests"
-optional = true
+optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 groups = ["dev"]
 files = [
@@ -1589,7 +1589,7 @@ files = [
 name = "sniffio"
 version = "1.3.1"
 description = "Sniff out which async library your code is running under"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -1662,7 +1662,7 @@ files = [
 name = "tqdm"
 version = "4.67.1"
 description = "Fast, Extensible Progress Meter"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -1684,7 +1684,7 @@ telegram = ["requests"]
 name = "translators"
 version = "6.0.1"
 description = "Translators is a library that aims to bring free, multiple, enjoyable translations to individuals and students in Python."
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
@@ -1749,7 +1749,7 @@ typing-extensions = ">=4.12.0"
 name = "urllib3"
 version = "2.4.0"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
@@ -1767,7 +1767,7 @@ zstd = ["zstandard (>=0.18.0)"]
 name = "urllib3-future"
 version = "2.12.922"
 description = "urllib3.future is a powerful HTTP 1.1, 2, and 3 client with both sync and async interfaces"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -1791,7 +1791,7 @@ zstd = ["zstandard (>=0.18.0) ; python_version < \"3.14\""]
 name = "wassima"
 version = "1.2.2"
 description = "Access your OS root certificates with utmost ease"
-optional = true
+optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
@@ -1897,4 +1897,4 @@ translators = []
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9, <3.14"
-content-hash = "480f1ad4ff3e1b5ac8423128d2d0e3904f569b01a307a1b5dd0de2f96a55b0e5"
+content-hash = "c0f906a606e7d4e40bd8d8ce5fcaba51c244aff00ace61d7c1909c26ab8c0f18"
