@@ -1,13 +1,13 @@
-# trans_hub/persistence.py (终极完美版)
+# trans_hub/persistence.py
 """提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
-此版本为纯异步设计，移除了不必要的锁以提升并发性能，并强化了封装。
+此版本为纯异步设计，通过提取通用数据库操作提升了性能和代码复用性。
 """
 
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import aiosqlite
 import structlog
@@ -51,18 +51,38 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
         if self._conn is None:
             raise ConnectionError("Database not connected.")
-        cursor = await self._conn.cursor()
-        try:
-            await cursor.execute("BEGIN")
-            yield cursor
-            await cursor.execute("COMMIT")
-        except Exception:
-            logger.error("事务执行失败，正在回滚", exc_info=True)
-            if self._conn:
-                await cursor.execute("ROLLBACK")
-            raise
-        finally:
-            await cursor.close()
+        # aiosqlite 0.17+ an cursor() is a context manager.
+        async with self._conn.cursor() as cursor:
+            try:
+                await cursor.execute("BEGIN")
+                yield cursor
+                await cursor.execute("COMMIT")
+            except Exception:
+                logger.error("事务执行失败，正在回滚", exc_info=True)
+                if self._conn and self._conn.is_alive():
+                    await cursor.execute("ROLLBACK")
+                raise
+
+    async def _get_or_create_content_id(
+        self, cursor: aiosqlite.Cursor, text_content: str
+    ) -> int:
+        """根据文本内容获取 content_id，如果不存在则创建并返回。
+        此方法必须在一个已开始的事务中被调用。
+        """
+        await cursor.execute(
+            "SELECT id FROM th_content WHERE value = ?", (text_content,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return cast(int, row["id"])
+
+        await cursor.execute(
+            "INSERT INTO th_content (value) VALUES (?)", (text_content,)
+        )
+        content_id = cursor.lastrowid
+        if not content_id:
+            raise RuntimeError("无法为新内容创建 content_id。")
+        return content_id
 
     async def ensure_pending_translations(
         self,
@@ -75,19 +95,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
         context_json: Optional[str] = None,
     ) -> None:
         async with self.transaction() as cursor:
-            await cursor.execute(
-                "SELECT id FROM th_content WHERE value = ?", (text_content,)
-            )
-            row = await cursor.fetchone()
-            content_id = row["id"] if row else None
-            if not content_id:
-                await cursor.execute(
-                    "INSERT INTO th_content (value) VALUES (?)", (text_content,)
-                )
-                content_id = cursor.lastrowid
-
-            if not content_id:
-                raise RuntimeError("无法为翻译任务确定 content_id。")
+            content_id = await self._get_or_create_content_id(cursor, text_content)
 
             if business_id:
                 sql = """
@@ -129,7 +137,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
             if params_to_insert:
                 await cursor.executemany(insert_sql, params_to_insert)
                 logger.info(
-                    f"为 content_id={content_id} 确保了 {len(params_to_insert)} 个 PENDING 任务。"
+                    "任务已入库",
+                    content_id=content_id,
+                    pending_tasks=len(params_to_insert),
                 )
 
     async def stream_translatable_items(
@@ -150,7 +160,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
             batch_items: list[ContentItem] = []
             async with self.transaction() as cursor:
-                find_batch_sql = f"SELECT tr.id, tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.lang_code = ? AND tr.status IN ({','.join('?' for _ in status_values)}) ORDER BY tr.last_updated_at ASC LIMIT ?"
+                placeholders = ",".join("?" for _ in status_values)
+                find_batch_sql = f"SELECT tr.id, tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.lang_code = ? AND tr.status IN ({placeholders}) ORDER BY tr.last_updated_at ASC LIMIT ?"
                 params = [lang_code] + list(status_values) + [current_batch_size]
                 await cursor.execute(find_batch_sql, params)
                 batch_rows = await cursor.fetchall()
@@ -159,7 +170,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
                     break
 
                 batch_ids = [row["id"] for row in batch_rows]
-                update_sql = f"UPDATE th_translations SET status = ?, last_updated_at = ? WHERE id IN ({','.join('?' for _ in batch_ids)})"
+                id_placeholders = ",".join("?" for _ in batch_ids)
+                update_sql = f"UPDATE th_translations SET status = ?, last_updated_at = ? WHERE id IN ({id_placeholders})"
                 now = datetime.now(timezone.utc)
                 await cursor.execute(
                     update_sql,
@@ -186,34 +198,41 @@ class DefaultPersistenceHandler(PersistenceHandler):
         if not results:
             return
 
-        params_to_update = [
-            {
-                "status": res.status.value,
-                "translation_content": res.translated_content,
-                "engine": res.engine,
-                "last_updated_at": datetime.now(timezone.utc).isoformat(),
-                "original_content": res.original_content,
-                "lang_code": res.target_lang,
-                "context_hash": res.context_hash,
-                "current_status": TranslationStatus.TRANSLATING.value,
-            }
-            for res in results
-            if res.original_content
-        ]
-
-        if not params_to_update:
-            return
-
         async with self.transaction() as cursor:
+            params_to_update = []
+            for res in results:
+                if not res.original_content:
+                    continue
+
+                content_id = await self._get_or_create_content_id(
+                    cursor, res.original_content
+                )
+
+                params_to_update.append(
+                    {
+                        "status": res.status.value,
+                        "translation_content": res.translated_content,
+                        "engine": res.engine,
+                        "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                        "lang_code": res.target_lang,
+                        "context_hash": res.context_hash,
+                        "current_status": TranslationStatus.TRANSLATING.value,
+                        "content_id": content_id,
+                    }
+                )
+
+            if not params_to_update:
+                return
+
             await cursor.executemany(
                 """
                 UPDATE th_translations SET
                     status = :status, translation_content = :translation_content,
                     engine = :engine, last_updated_at = :last_updated_at
                 WHERE
-                    lang_code = :lang_code AND context_hash = :context_hash AND status = :current_status
-                    AND content_id = (SELECT id FROM th_content WHERE value = :original_content)
-            """,
+                    content_id = :content_id AND lang_code = :lang_code
+                    AND context_hash = :context_hash AND status = :current_status
+                """,
                 params_to_update,
             )
             logger.info(f"成功更新了 {cursor.rowcount} 条翻译记录。")
@@ -302,7 +321,10 @@ class DefaultPersistenceHandler(PersistenceHandler):
             stats["deleted_content"] = len(orphan_ids)
 
             if not dry_run and orphan_ids:
-                delete_orphan_sql = f"DELETE FROM th_content WHERE id IN ({','.join('?' for _ in orphan_ids)})"
+                placeholders = ",".join("?" for _ in orphan_ids)
+                delete_orphan_sql = (
+                    f"DELETE FROM th_content WHERE id IN ({placeholders})"
+                )
                 await cursor.execute(delete_orphan_sql, orphan_ids)
         return stats
 

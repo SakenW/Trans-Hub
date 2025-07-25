@@ -2,6 +2,7 @@
 """提供一个使用 OpenAI API 的翻译引擎。
 此版本实现已高度简化，仅需实现 _atranslate_one 方法。
 """
+
 from typing import Any, Optional, cast
 
 import structlog
@@ -50,7 +51,7 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
 class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.0.0" # 版本号提升
+    VERSION = "2.0.0"  # 版本号提升
     REQUIRES_SOURCE_LANG = True
 
     def __init__(self, config: OpenAIEngineConfig):
@@ -69,7 +70,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str], # 在这里 source_lang 必不为 None
+        source_lang: Optional[str],  # 在这里 source_lang 必不为 None
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """[实现] 异步翻译单个文本。"""
@@ -77,7 +78,9 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         final_source_lang = cast(str, source_lang)
 
         # 从全局配置和上下文配置中决定最终参数
-        prompt_template = context_config.get("prompt_template", self.config.default_prompt_template)
+        prompt_template = context_config.get(
+            "prompt_template", self.config.default_prompt_template
+        )
         model = context_config.get("model", self.config.openai_model)
         temperature = context_config.get("temperature", self.config.openai_temperature)
 
@@ -89,14 +92,18 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=len(text.encode("utf-8")) * 2 + 100, # 可以考虑也加入配置
+                max_tokens=len(text.encode("utf-8")) * 2 + 100,  # 可以考虑也加入配置
             )
             translated_text = response.choices[0].message.content or ""
             if not translated_text:
-                return EngineError(error_message="API returned empty content.", is_retryable=True)
+                return EngineError(
+                    error_message="API returned empty content.", is_retryable=True
+                )
             return EngineSuccess(translated_text=translated_text.strip())
         except APIError as e:
-            is_retryable = isinstance(e, (RateLimitError, InternalServerError, APIConnectionError))
+            is_retryable = isinstance(
+                e, (RateLimitError, InternalServerError, APIConnectionError)
+            )
             logger.error("OpenAI API 调用出错", error=str(e), is_retryable=is_retryable)
             return EngineError(error_message=str(e), is_retryable=is_retryable)
         except Exception as e:

@@ -25,11 +25,13 @@ logger = structlog.get_logger(__name__)
 
 class TranslatorsContextModel(BaseContextModel):
     """Translators 引擎的上下文，允许动态选择服务商。."""
+
     provider: Optional[str] = None
 
 
 class TranslatorsEngineConfig(BaseEngineConfig):
     """Translators 引擎的配置。."""
+
     provider: str = "google"
 
 
@@ -38,7 +40,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
-    VERSION = "2.0.0" # 版本号提升
+    VERSION = "2.0.0"  # 版本号提升
 
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
@@ -69,7 +71,9 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
                 error=str(e),
                 exc_info=True,
             )
-            return EngineError(error_message=f"Translators({provider}) Error: {e}", is_retryable=True)
+            return EngineError(
+                error_message=f"Translators({provider}) Error: {e}", is_retryable=True
+            )
 
     async def _atranslate_one(
         self,
