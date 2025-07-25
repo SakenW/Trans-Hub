@@ -28,8 +28,8 @@
 
 - **[指南 2：高级用法](./guides/02_advanced_usage.md)**
   - **内容**: 一系列高级功能的“代码食谱”，包括：
+    - **(核心)** 如何通过 `business_id` 和 `context` 实现精确的来源追踪和情境翻译。
     - 如何**轻松激活** OpenAI 等高级翻译引擎。
-    - 如何利用上下文（Context）实现一词多义的精确翻译。
     - 如何使用垃圾回收（GC）管理数据生命周期。
     - 如何配置速率限制器（Rate Limiter）。
     - 如何在 **FastAPI** 等现代 Web 框架中高效地集成 `Trans-Hub`。
@@ -43,16 +43,16 @@
 
 - **[核心类型 (Core Types)](./api/core_types.md)**
 
-  - **内容**: 对 `trans_hub.types` 模块中所有核心数据传输对象（DTOs）的详细说明。
+  - **内容**: 对 `trans_hub.types` 模块中所有核心数据传输对象（DTOs）的详细说明，如 `TranslationResult`, `EngineSuccess` 等。
   - **目标读者**: 所有开发者。
 
-- **[核心修正]** **[`Coordinator` API](./api/coordinator.md)**
+- **[`Coordinator` API](./api/coordinator.md)**
 
-  - **内容**: `Coordinator` 类的每个公共方法的详细描述。
+  - **内容**: `Coordinator` 类的每个公共方法（如 `request`, `process_pending_translations`）的详细描述、参数和用法。
   - **目标读者**: 所有用户和开发者。
 
-- **[核心修正]** **[`PersistenceHandler` 接口](./api/persistence_handler.md)**
-  - **内容**: `PersistenceHandler` 协议中定义的所有异步方法的契约。
+- **[`PersistenceHandler` 接口](./api/persistence_handler.md)**
+  - **内容**: `PersistenceHandler` 协议中定义的所有异步方法的契约，为实现自定义存储后端提供指导。
   - **目标读者**: 希望实现自定义存储后端的开发者。
 
 ---
@@ -63,12 +63,12 @@
 
 - **[架构概述](./architecture/01_overview.md)**
 
-  - **内容**: 对系统设计理念、组件交互和核心工作流的高层描述。
+  - **内容**: 对系统设计理念、组件（Coordinator, Engine, Persistence）交互和核心工作流的高层描述。
   - **目标读者**: 核心维护者和高级用户。
 
 - **[数据模型与数据库设计](./architecture/02_data_model.md)**
-  - **内容**: 对数据库 Schema 的权威、详尽的说明。
-  - **目标读者**: 核心维护者和数据库管理员。
+  - **内容**: 对数据库 Schema（`th_content`, `th_translations`, `th_sources` 等表）的权威、详尽的说明，包括**字段定义、关系和性能优化规范（如索引要求）**。
+  - **目标读者**: 核心维护者、数据库管理员和高级贡献者。
 
 ---
 
@@ -77,7 +77,7 @@
 欢迎您为 `Trans-Hub` 社区做出贡献！
 
 - **[指南：开发第三方引擎](./contributing/developing_engines.md)**
-  - **内容**: 一份完整的、手把手的指南，教您如何为 `Trans-Hub` 开发一个新的翻译引擎。
+  - **内容**: 一份完整的、手把手的指南，教您如何为 `Trans-Hub` 开发一个新的翻译引擎，其中包含了**必须遵循的核心开发模式**。
   - **目标读者**: 社区开发者和贡献者。
 
 ---
@@ -89,4 +89,4 @@
 1.  **遵循既定结构**: 新的文档应根据其内容和目标读者，放置在上述四个目录之一。
 2.  **保持单一事实来源**: API 和架构的定义应始终位于 `/api` 和 `/architecture` 目录。其他文档应**链接**到它们，而不是重复内容。
 3.  **提供可运行的示例**: 在 `/guides` 中提供的代码示例应尽可能完整和可直接运行。
-4.  **更新变更日志**: 对代码或文档的重大变更，都应在项目根目录的 `CHANGL OG.md` 中进行记录。
+4.  **更新变更日志**: 对代码或文档的重大变更，都应在项目根目录的 `CHANGELOG.md` 中进行记录。

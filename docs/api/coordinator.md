@@ -33,11 +33,11 @@ def __init__(
 ```
 
 **描述**:
-`Coordinator` 的构造函数。这是一个同步方法，负责接收所有依赖项并进行内部设置。**此方法不执行任何 I/O 操作。**
+`Coordinator` 的构造函数。这是一个同步方法，负责接收所有依赖项并进行内部设置。**此方法不执行任何 I/O 操作。** 创建的 `Coordinator` 实例是**状态无关**的（除了持有的配置和依赖），因此可以在您的应用中安全地复用。
 
 **参数**:
 
-- **`config`** (`TransHubConfig`): 一个完整的、经过验证的配置对象。`Coordinator` 将从此对象中读取所有行为配置。
+- **`config`** (`TransHubConfig`): 一个完整的 `TransHubConfig` 对象。`Coordinator` 将从此对象中读取所有行为配置。
 - **`persistence_handler`** (`PersistenceHandler`): 一个实现了 `PersistenceHandler` 协议的、纯异步的持久化处理器实例。
 - **`rate_limiter`** (`Optional[RateLimiter]`): (可选) 一个 `RateLimiter` 实例。如果提供，`Coordinator` 将在调用引擎前遵守其速率限制。
 
@@ -81,7 +81,7 @@ def switch_engine(self, engine_name: str) -> None:
 **描述**:
 在运行时动态地切换当前活动的翻译引擎。这是一个同步方法。
 
-**重要**: 要切换到的引擎，其配置必须在**最初**创建 `TransHubConfig` 实例时就已经提供。
+**重要**: 由于 `TransHubConfig` 的智能配置加载机制，只要目标引擎的配置可以从环境变量中自动加载（例如 `OpenAI`），或者它不需要任何特殊配置（例如 `translators`），此切换操作通常都能成功。
 
 **参数**:
 
@@ -93,7 +93,7 @@ def switch_engine(self, engine_name: str) -> None:
 **使用示例**:
 
 ```python
-# 假设 coordinator 最初使用 'debug' 引擎
+# 假设 coordinator 最初使用 'translators' 引擎
 coordinator.switch_engine("openai")
 # 现在 coordinator 的所有后续翻译都将使用 OpenAI 引擎
 ```
@@ -114,7 +114,7 @@ async def request(
 **描述**:
 一个轻量级的异步方法，用于**登记**一个或多个翻译任务。它会确保相应的待处理（`PENDING`）任务存在于数据库中。
 
-此方法**不执行**实际的翻译，因此响应速度非常快。
+此方法**不执行**实际的翻译，因此响应速度非常快，非常适合在 Web 请求处理等高并发场景中使用。
 
 **参数**:
 
@@ -154,7 +154,7 @@ async def process_pending_translations(
 
 **Yields**:
 
-- `TranslationResult`: 每当一个翻译任务（成功或失败）完成后，就会产生一个 `TranslationResult` 对象。
+- `TranslationResult`: 每当一个翻译任务（成功或失败）完成后，就会产生一个 `TranslationResult` 对象。当所有符合条件的任务都处理完毕后，生成器将正常结束。
 
 **使用示例**:
 
@@ -209,14 +209,16 @@ async def close(self) -> None:
 
 ```python
 async def main():
-    coordinator = await initialize_trans_hub()
+    coordinator = None
     try:
+        coordinator = await initialize_trans_hub()
         # ... 在这里执行您的应用逻辑 ...
         await coordinator.request(...)
         # ...
     finally:
         # 确保无论发生什么，资源都会被关闭
-        await coordinator.close()
+        if coordinator:
+            await coordinator.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

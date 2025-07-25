@@ -1,15 +1,19 @@
 # **API 参考：核心类型**
 
+**模块**: `trans_hub.types`
+
 本文档是 `trans_hub.types` 模块中定义的所有核心数据传输对象（DTOs）的权威参考。这些 Pydantic 模型构成了 `Trans-Hub` 内部数据流的基础。
+
+[返回文档索引](../INDEX.md)
 
 ---
 
 ## **`TranslationStatus`**
 
-一个字符串枚举（`Enum`），表示翻译任务的当前状态。
+一个字符串枚举（`Enum`），表示翻译任务在数据库中的生命周期状态。
 
 - **`PENDING`**: 任务已登记，等待被处理。
-- **`TRANSLATING`**: 任务正在被 `Coordinator` 处理中。
+- **`TRANSLATING`**: 任务正在被 `Coordinator` 处理中，已被锁定。
 - **`TRANSLATED`**: 任务已成功翻译。
 - **`FAILED`**: 任务在翻译过程中失败（可能在多次重试后）。
 - **`APPROVED`**: (预留状态) 翻译结果已经过人工审核或批准。
@@ -25,7 +29,7 @@
 表示单个文本翻译成功。
 
 - **`translated_text`** (`str`): 翻译后的文本。
-- **[核心修正]** **`from_cache`** (`bool`): 一个标志，指示结果是否来自引擎内部的缓存。默认为 `False`。
+- **`from_cache`** (`bool`): 一个标志，指示结果是否来自**翻译引擎自身**的内部缓存（而非 `Coordinator` 的缓存）。默认为 `False`。
 
 ### **`EngineError`**
 
@@ -43,9 +47,9 @@
 - **`original_content`** (`str`): 被翻译的原始文本。
 - **`translated_content`** (`Optional[str]`): 翻译后的文本。如果翻译失败，此字段为 `None`。
 - **`target_lang`** (`str`): 目标语言代码 (例如, 'zh-CN')。
-- **`status`** (`TranslationStatus`): 翻译任务的最终状态 (`TRANSLATED` 或 `FAILED`)。
+- **`status`** (`TranslationStatus`): 翻译任务的状态。由 `Coordinator` 返回时，通常是 `TRANSLATED` 或 `FAILED`。
 - **`engine`** (`Optional[str]`): 执行此次翻译的引擎名称。
-- **[核心修正]** **`from_cache`** (`bool`): 指示此结果是否直接从**持久化缓存**（数据库）中获取，而不是通过实时 API 调用。
+- **`from_cache`** (`bool`): 一个关键标志。如果为 `True`，表示此结果来自 `Trans-Hub` 的缓存（内存缓存或数据库），并未通过实时 API 调用翻译引擎。如果为 `False`，表示这是本次工作流中新产生的翻译。
 - **`error`** (`Optional[str]`): 如果翻译失败，此字段包含错误信息。
 - **`context_hash`** (`str`): 与此翻译关联的上下文的哈希值。对于无上下文的翻译，其值为 `GLOBAL_CONTEXT_SENTINEL`。
 - **`business_id`** (`Optional[str]`): 与此翻译关联的业务 ID。如果任务是即席翻译或关联已被 GC，则为 `None`。

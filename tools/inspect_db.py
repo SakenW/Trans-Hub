@@ -1,5 +1,6 @@
 # tools/inspect_db.py (终极完整版)
-"""一个专业的命令行工具，用于检查和解读 Trans-Hub 数据库的内容。
+"""
+一个专业的命令行工具，用于检查和解读 Trans-Hub 数据库的内容。
 
 使用方法:
  poetry run python tools/inspect_db.py /path/to/your/database.db

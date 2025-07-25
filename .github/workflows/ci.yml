@@ -1,6 +1,6 @@
-# .github/workflows/ci.yml (终极完美版)
+# .github/workflows/ci.yml
 
-name: Python CI Pipeline
+name: Python CI/CD Pipeline
 
 on:
   push:
@@ -8,35 +8,50 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# [优化] 使用 concurrency 来自动取消过时的 CI 运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
+  # [优化] 设置 Poetry 的配置，使其更适合 CI 环境
+  POETRY_NO_INTERACTION: 1
+  POETRY_VIRTUALENVS_CREATE: false
+  # 从 Secrets 注入环境变量
   TH_OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
   TH_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
 jobs:
-  # 任务一：在最新的稳定版上进行快速的代码质量检查
+  # 任务一：快速代码质量检查
   lint:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-        cache: 'poetry'
+    - name: Install Poetry
+      run: pipx install poetry
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
     - name: Install dependencies
-      run: poetry install --with dev
+      # [优化] 只安装 lint 组的依赖，更快
+      run: poetry install --only lint
     - name: Run Code Quality Checks
       run: |
         poetry run ruff check .
         poetry run ruff format --check .
         poetry run mypy .
 
-  # 任务二：在所有稳定版本上运行功能测试
-  test-stable:
-    needs: lint # 依赖于 lint 任务的成功，实现快速失败
+  # 任务二：在所有稳定版本上运行功能测试并报告覆盖率
+  test:
+    needs: lint
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -46,37 +61,57 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        cache: 'poetry'
+    - name: Install Poetry
+      run: pipx install poetry
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
     - name: Install dependencies
-      run: poetry install --with dev
-    - name: Run Tests with Pytest
-      run: poetry run pytest
+      # [优化] 安装测试组和所有可选引擎的依赖
+      run: poetry install --with test --extras "translators openai"
+    - name: Run Tests with Coverage
+      # [优化] 生成覆盖率报告
+      run: poetry run pytest --cov=trans_hub --cov-report=xml
+    - name: Upload coverage to Codecov
+      # [优化] 上传覆盖率报告到 Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }} # 需要在仓库 secrets 中设置 CODECOV_TOKEN
+        files: ./coverage.xml
+        fail_ci_if_error: true
 
-  # 任务三：在最新的预览版上进行完整的、允许失败的实验性测试
+  # 任务三：在最新的预览版上进行完整的实验性测试
   test-experimental:
+    needs: lint
     runs-on: ubuntu-latest
-    continue-on-error: true # 这个任务的失败不会阻塞整个 CI
+    continue-on-error: true
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
     - name: Set up Python 3.13
       uses: actions/setup-python@v5
       with:
         python-version: '3.13'
-        cache: 'poetry'
+    - name: Install Poetry
+      run: pipx install poetry
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
     - name: Install dependencies
-      run: poetry install --with dev
+      # 允许安装失败，因为某些依赖可能不支持预览版
+      run: poetry install --with test --extras "translators openai" || true
       
-    # --- 核心修正：在实验性测试中，也必须包含所有检查步骤 ---
     - name: Run Code Quality Checks (Python 3.13)
       run: |
         poetry run ruff check .

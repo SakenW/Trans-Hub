@@ -1,5 +1,6 @@
 # tests/diag/check_env.py (Mypy 最终修复版)
-"""一个独立的、最小化的脚本，用于验证 pydantic-settings
+"""
+一个独立的、最小化的脚本，用于验证 pydantic-settings
 是否能从 .env 文件中成功加载 Trans-Hub 的配置。
 
 运行方式:

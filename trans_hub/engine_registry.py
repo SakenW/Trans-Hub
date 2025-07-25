@@ -13,7 +13,8 @@ ENGINE_REGISTRY: dict[str, type[BaseTranslationEngine]] = {}
 
 
 def discover_engines():
-    """动态发现 `trans_hub.engines` 包下的所有引擎并尝试注册。
+    """
+    动态发现 `trans_hub.engines` 包下的所有引擎并尝试注册。
     此函数是幂等的，只会执行一次。.
     """
     if ENGINE_REGISTRY:

@@ -1,5 +1,6 @@
 # trans_hub/persistence.py
-"""提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
+"""
+提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
 此版本为纯异步设计，通过提取通用数据库操作提升了性能和代码复用性。
 """
 
@@ -66,7 +67,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def _get_or_create_content_id(
         self, cursor: aiosqlite.Cursor, text_content: str
     ) -> int:
-        """根据文本内容获取 content_id，如果不存在则创建并返回。
+        """
+        根据文本内容获取 content_id，如果不存在则创建并返回。
         此方法必须在一个已开始的事务中被调用。
         """
         await cursor.execute(

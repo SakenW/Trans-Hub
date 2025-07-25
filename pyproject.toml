@@ -11,7 +11,7 @@ build-backend = "poetry.core.masonry.api"
 # ==============================================================================
 [tool.poetry]
 name = "trans-hub"
-version = "2.0.0"
+version = "2.0.1" # 建议在修改配置后增加补丁版本号
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
@@ -19,7 +19,7 @@ readme = "README.md"
 
 homepage = "https://github.com/SakenW/trans-hub"
 repository = "https://github.com/SakenW/trans-hub"
-documentation = "https://github.com/SakenW/trans-hub/blob/main/README.md"
+documentation = "https://github.com/SakenW/trans-hub/blob/main/docs/INDEX.md" # <-- [优化] 指向更详细的文档索引
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -37,39 +37,41 @@ classifiers = [
     "Topic :: Text Processing",
 ]
 
-# --- 核心依赖 ---
+# --- 核心依赖 (更轻量) ---
 [tool.poetry.dependencies]
 python = ">=3.9, <3.14"
 pydantic = "^2.0"
 structlog = "^23.0"
-translators = "^6.0.1"
-pydantic-settings = "^2.3.4"
-python-dotenv = "^1.0.1"
+# [优化] 让 pydantic-settings 明确声明它需要 dotenv 支持
+pydantic-settings = {version = "^2.3.4", extras = ["dotenv"]}
 aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
 
 
 # --- 可选依赖 (Extras) ---
+# [优化] 将所有可选引擎都放在这里
 [tool.poetry.extras]
+translators = ["translators"]
 openai = ["openai"]
 
 
 # ==============================================================================
-#  开发依赖
+#  开发依赖 (拆分为更小的组)
 # ==============================================================================
-[tool.poetry.group.dev.dependencies]
-# 测试
-pytest = "^7.4"
-pytest-cov = "^4.1"
-pytest-asyncio = "^0.21.0"
-
-# 代码质量
+[tool.poetry.group.lint.dependencies]
 ruff = "^0.4.0"
 mypy = "^1.5"
 
-# 可选功能测试
-openai = "^1.37.0"
+[tool.poetry.group.test.dependencies]
+pytest = "^7.4"
+pytest-cov = "^4.1"
+pytest-asyncio = "^0.21.0"
 types-cachetools = "^5.3.1"
+
+# 可选功能依赖 (用于开发和测试)
+# 引用 extras
+translators = {version = "^6.0.1", optional = true}
+openai = {version = "^1.37.0", optional = true}
 
 
 # ==============================================================================
@@ -82,25 +84,40 @@ line-length = 88
 target-version = "py39"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4"]
-# --- 核心修正：优化忽略列表 ---
+# 保持广泛的规则选择，以便 Ruff 能检查更多潜在问题
+select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4", "A"]
+
+# --- [最终优化版] 精确的忽略列表 ---
 ignore = [
-    "E501",   # line too long, handled by formatter
-    # 忽略“缺少文档字符串”的规则，因为我们不要求所有函数都有
-    "D100",   # Missing docstring in public module
-    "D101",   # Missing docstring in public class
-    "D102",   # Missing docstring in public method
-    "D103",   # Missing docstring in public function
-    "D104",   # Missing docstring in public package
-    "D105",   # Missing docstring in magic method
-    "D107",   # Missing docstring in `__init__`
-    # 忽略一些主观性较强的文档字符串格式规则
-    "D205",   # 1 blank line required between summary line and description
-    "D400",   # First line should end with a period
-    "D415",   # First line should end with a period, question mark, or exclamation point
-    # 添加这些以消除配置警告
-    "D203",
-    "D213",
+    # --------------------------------------------------------------------------
+    #  核心忽略
+    # --------------------------------------------------------------------------
+    "E501",   # 行过长，由 ruff format 处理
+
+    # --------------------------------------------------------------------------
+    #  文档字符串 (pydocstyle) 规则 - 我们不强制要求所有地方都有文档字符串
+    # --------------------------------------------------------------------------
+    "D100",   # 缺少公共模块的文档字符串
+    "D101",   # 缺少公共类的文档字符串
+    "D102",   # 缺少公共方法的文档字符串
+    "D103",   # 缺少公共函数的文档字符串
+    "D104",   # 缺少公共包的文档字符串
+    "D105",   # 缺少魔术方法的文档字符串
+    "D106",   # 缺少公共嵌套类的文档字符串
+    "D107",   # 缺少 `__init__` 的文档字符串
+
+    # --------------------------------------------------------------------------
+    #  文档字符串格式规则 - 我们采用更灵活的格式，忽略以下主观性强的规则
+    # --------------------------------------------------------------------------
+    # 结尾标点相关
+    "D400",   # 第一行应以句号结尾
+    "D401",   # 第一行应为祈使语气
+    "D415",   # 第一行应以句号、问号或感叹号结尾
+
+    # 空行与格式相关 (这些规则经常互相冲突)
+    "D203",   # 摘要前需要一个空行 (与 D211 冲突)
+    "D212",   # 多行文档字符串摘要应从第二行开始 (与 D213 冲突)
+    "D205",   # 摘要行和描述之间需要一个空行
 ]
 
 # --- MyPy ---
@@ -108,7 +125,15 @@ ignore = [
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
-ignore_missing_imports = true
+# [优化] 移除全局 ignore_missing_imports，改为精确控制
+# ignore_missing_imports = true
 strict_optional = true
 show_error_codes = true
 pretty = true
+
+# [优化] 为没有类型存根的库单独配置
+[[tool.mypy.overrides]]
+module = [
+    "translators",
+]
+ignore_missing_imports = true

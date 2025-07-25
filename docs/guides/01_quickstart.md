@@ -23,118 +23,121 @@ pip install trans-hub
 ```python
 # quick_start.py
 import asyncio
-import os
-import structlog
+from pathlib import Path
+
+# 注意：在您自己的项目中，您会直接 `import trans_hub`
+# 这里我们为了让示例脚本能独立运行，需要手动设置路径
+try:
+    import trans_hub
+except ImportError:
+    import sys
+    # 将项目根目录添加到 Python 路径中
+    PROJECT_ROOT = Path(__file__).parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
+from trans_hub.types import TranslationStatus
 
-log = structlog.get_logger()
+async def get_or_create_coordinator(db_name: str = "my_translations.db"):
+    """
+    一个健壮的异步工厂函数，用于获取一个初始化完成的 Coordinator 实例。
+    """
+    # 使用 pathlib 确保数据库路径的健壮性
+    db_path = Path(__file__).parent / db_name
 
-async def initialize_trans_hub():
-    """一个标准的异步初始化函数，返回一个配置好的 Coordinator 实例。"""
-    DB_FILE = "my_translations.db"
+    # 首次运行时，创建数据库并应用迁移
+    if not db_path.exists():
+        print(f"数据库不存在，正在创建并迁移: {db_path}")
+        # apply_migrations 是同步函数，直接调用
+        apply_migrations(str(db_path))
 
-    # 检查数据库文件是否存在，如果不存在，则创建并应用迁移。
-    if not os.path.exists(DB_FILE):
-        log.info("数据库不存在，正在创建并迁移...", db_path=DB_FILE)
-        apply_migrations(DB_FILE)
-
-    # 初始化默认的持久化处理器
-    handler = DefaultPersistenceHandler(db_path=DB_FILE)
-
-    # 创建一个最简单的配置对象。
-    # 它将自动使用默认的、免费的 'translators' 引擎。
-    config = TransHubConfig(database_url=f"sqlite:///{DB_FILE}")
-
-    # 创建 Coordinator 实例
+    # 使用绝对路径初始化配置，避免任何歧义
+    config = TransHubConfig(database_url=f"sqlite:///{db_path.resolve()}")
+    handler = DefaultPersistenceHandler(db_path=config.db_path)
     coordinator = Coordinator(config=config, persistence_handler=handler)
 
-    # Coordinator 必须被异步初始化以建立数据库连接
+    # 异步初始化 Coordinator 以建立数据库连接
     await coordinator.initialize()
     return coordinator
 
 async def main():
     """程序的主异步入口。"""
     setup_logging(log_level="INFO")
-    coordinator = await initialize_trans_hub()
+    log = structlog.get_logger(__name__)
+    coordinator = None
 
     try:
+        coordinator = await get_or_create_coordinator()
+
         text_to_translate = "Hello, world!"
         target_lang = "zh-CN"
+        # 使用 business_id 来唯一标识这个翻译项
+        text_id = "app.greeting.hello_world"
 
-        # 1. 登记任务：告诉 Trans-Hub 我们有一个翻译需求。
-        log.info("正在登记翻译任务", text=text_to_translate, lang=target_lang)
+        # --- 第一次运行 ---
+        log.info("▶️ 第一次尝试翻译...")
+
+        # 1. 登记任务
+        log.info("登记翻译任务", text=text_to_translate, business_id=text_id)
         await coordinator.request(
             target_langs=[target_lang],
             text_content=text_to_translate,
-            business_id="app.greeting.hello_world"
+            business_id=text_id
         )
 
-        # 2. 执行任务：处理所有待办的翻译。
-        log.info(f"正在处理 '{target_lang}' 的待翻译任务...")
-        results = [res async for res in coordinator.process_pending_translations(target_lang=target_lang)]
+        # 2. 执行待处理的任务
+        log.info(f"处理 '{target_lang}' 的待翻译任务...")
+        processed_results = [
+            res async for res in coordinator.process_pending_translations(target_lang=target_lang)
+        ]
 
-        if results:
-            log.info("翻译完成！", result=results[0])
+        if processed_results:
+            log.info("翻译完成！", result=processed_results[0])
         else:
-            log.warning("没有需要处理的新任务（这是缓存机制在生效）。")
+            log.warning("没有需要处理的新任务。")
 
+        # --- 第二次运行 (模拟) ---
+        log.info("\n▶️ 第二次尝试翻译 (模拟缓存命中)...")
+
+        # 1. 再次登记同一个任务
+        log.info("再次登记同一个翻译任务", text=text_to_translate, business_id=text_id)
+        await coordinator.request(
+            target_langs=[target_lang],
+            text_content=text_to_translate,
+            business_id=text_id
+        )
+
+        # 2. 再次执行
+        # 因为任务已在第一次完成，这次 process_pending_translations 将不会返回任何结果
+        log.info(f"再次处理 '{target_lang}' 的待翻译任务...")
+        processed_again = [
+            res async for res in coordinator.process_pending_translations(target_lang=target_lang)
+        ]
+
+        if not processed_again:
+            log.info("✅ 成功！没有需要处理的新任务，表明持久化缓存生效。")
+            # 我们可以直接从数据库获取已有的翻译
+            # 注意: get_translation 是 PersistenceHandler 的方法
+            existing_translation = await coordinator.handler.get_translation(
+                text_content=text_to_translate, target_lang=target_lang
+            )
+            if existing_translation:
+                log.info("直接从数据库获取到已有的翻译", result=existing_translation)
+
+    except Exception as e:
+        log.error("程序发生意外错误", error=str(e), exc_info=True)
     finally:
-        # 3. 清理资源：优雅地关闭数据库连接。
-        if 'coordinator' in locals() and coordinator:
+        if coordinator:
             await coordinator.close()
+            log.info("数据库连接已关闭。")
+            # 在快速入门中，可以选择保留或删除数据库
+            # (Path(__file__).parent / "my_translations.db").unlink(missing_ok=True)
+            # log.info("临时数据库已删除。")
 
 if __name__ == "__main__":
-    # 这是运行异步 main 函数的标准方式
     asyncio.run(main())
 ```
-
-### 步骤 3：运行并观察结果
-
-现在，在您的终端中运行这个脚本。
-
-```bash
-python quick_start.py
-```
-
-#### 第一次运行（进行真实翻译）
-
-您将看到类似以下的输出。`Trans-Hub` 创建了数据库，登记了任务，调用了翻译引擎，并打印了翻译结果。
-
-```
-... [info     ] 数据库不存在，正在创建并迁移...
-... [info     ] 正在登记翻译任务...
-... [info     ] 正在处理 'zh-CN' 的待翻译任务...
-... [info     ] 翻译完成！ result=TranslationResult(original_content='Hello, world!', translated_content='你好，世界！', ...)
-```
-
-#### 第二次运行（体验智能缓存）
-
-现在，**不要删除**生成的 `my_translations.db` 文件，**再次运行**完全相同的命令：
-
-```bash
-python quick_start.py
-```
-
-这一次，您将看到不同的输出。`Trans-Hub` 发现这个翻译任务已经存在于数据库中，因此 `process_pending_translations` 没有返回任何新的结果。
-
-```
-... [info     ] 正在登记翻译任务...
-... [info     ] 正在处理 'zh-CN' 的待翻译任务...
-... [warning  ] 没有需要处理的新任务（这是缓存机制在生效）。
-```
-
----
-
-### 恭喜！
-
-您已经成功地运行了您的第一个 `Trans-Hub` 翻译任务，并验证了其核心的持久化缓存功能。
-
-**下一步去哪里？**
-
-- 准备好使用更强大的引擎了吗？请查阅我们的 **[高级用法指南](./02_advanced_usage.md)**。
-- 想深入了解 `Trans-Hub` 的内部工作原理？请访问 **[架构文档](../architecture/01_overview.md)**。

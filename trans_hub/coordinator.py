@@ -1,5 +1,6 @@
 # trans_hub/coordinator.py
-"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
+"""
+本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 
 它采用动态引擎发现机制，并负责编排所有核心工作流，包括任务处理、重试、
 速率限制、请求处理和垃圾回收等。
@@ -32,7 +33,8 @@ logger = structlog.get_logger(__name__)
 
 
 class Coordinator:
-    """异步主协调器。
+    """
+    异步主协调器。
 
     负责编排翻译工作流，全面支持异步引擎、异步持久化和异步任务处理。
     """

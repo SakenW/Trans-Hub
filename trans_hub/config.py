@@ -1,5 +1,6 @@
 # trans_hub/config.py (最终优化版)
-"""定义了 Trans-Hub 项目的主配置模型和相关的子模型。
+"""
+定义了 Trans-Hub 项目的主配置模型和相关的子模型。
 这是所有配置的“单一事实来源”，上层应用应该创建并传递 TransHubConfig 对象。.
 """
 
@@ -51,7 +52,8 @@ class EngineConfigs(BaseModel):
 
 
 class TransHubConfig(BaseModel):
-    """Trans-Hub 的主配置对象。
+    """
+    Trans-Hub 的主配置对象。
     这是初始化 Coordinator 时需要传入的核心配置。.
     """
 
@@ -85,7 +87,8 @@ class TransHubConfig(BaseModel):
     # --- 核心修正 2：使用更强大的 model_validator 来智能处理引擎配置 ---
     @model_validator(mode="after")
     def validate_and_autocreate_engine_config(self) -> "TransHubConfig":
-        """验证活动的引擎是否在配置中定义，如果未定义，则尝试自动创建。
+        """
+        验证活动的引擎是否在配置中定义，如果未定义，则尝试自动创建。
         这极大地改善了用户体验。.
         """
         active_config = getattr(self.engine_configs, self.active_engine, None)

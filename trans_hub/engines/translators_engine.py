@@ -1,5 +1,6 @@
 # trans_hub/engines/translators_engine.py (重构后)
-"""提供一个使用 `translators` 库的免费翻译引擎。
+"""
+提供一个使用 `translators` 库的免费翻译引擎。
 此版本实现已高度简化，仅需实现 _atranslate_one 方法。
 """
 

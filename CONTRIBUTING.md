@@ -17,6 +17,7 @@
   - [语言与沟通](#语言与沟通)
   - [代码风格与质量](#代码风格与质量)
   - [架构与设计](#架构与设计)
+  - [引擎开发规范](#引擎开发规范)
   - [测试](#测试)
   - [其他关键约定](#其他关键约定)
 - [发布流程](#发布流程)
@@ -30,6 +31,7 @@
 ## **如何贡献**
 
 我们欢迎任何形式的贡献，包括但不限于：
+
 - **报告 Bug** 或 **提交功能建议** (通过 [GitHub Issues](https://github.com/SakenW/trans-hub/issues))。
 - **完善文档**：发现拼写错误或不清晰之处？提交一个 PR 来改进它！
 - **编写代码**：修复 Bug 或实现新功能。
@@ -47,6 +49,7 @@
 - **`trans_hub/`**: **核心库代码**。项目的所有运行时逻辑都在这里。
 
 - **`tests/`**: **自动化测试**。
+
   - 这里存放了项目的所有测试用例（使用 `pytest`）。CI/CD 流水线会自动运行此目录下的所有测试。
     ```bash
     # 运行完整的测试套件
@@ -59,28 +62,34 @@
       poetry run python tests/diag/check_env.py
       ```
 
-- **`docs/`**: **官方文档**。所有面向用户的指南、API参考和架构文档都存放在这里。
+- **`docs/`**: **官方文档**。所有面向用户的指南、API 参考和架构文档都存放在这里。请先阅读 [**文档库索引 (INDEX.md)**](./docs/INDEX.md) 来了解其结构。
 
 - **`examples/`**: **“活”的示例代码**。
-  - **`demo_complex_workflow.py`**: 这是一个**端到端的、功能完善的演示**。它旨在向人类用户直观地、可运行地展示如何在一个复杂的场景中使用 `Trans-Hub` 的各项核心功能。
+
+  - **`translate_strings_file.py`**: 这是一个**端到端的、功能完善的演示**。它旨在向人类用户直观地、可运行地展示如何在一个复杂的场景中使用 `Trans-Hub` 的各项核心功能。
     ```bash
     # 运行复杂工作流演示
-    poetry run python examples/demo_complex_workflow.py
+    poetry run python examples/translate_strings_file.py
     ```
 
 - **`tools/`**: **开发者工具**。
   - **`inspect_db.py`**: 一个专业的**数据库检查命令行工具**。它能连接到任何 `Trans-Hub` 数据库文件，并以一种易于理解的方式将其内容和解读打印出来，是调试持久化问题的利器。
     ```bash
     # 检查示例数据库的内容
-    poetry run python tools/inspect_db.py examples/complex_demo.db
+    poetry run python tools/inspect_db.py examples/strings_translator_demo_dynamic.db
     ```
 
 ## **环境设置**
 
 1.  **克隆仓库**: `git clone https://github.com/SakenW/trans-hub.git && cd trans-hub`
 2.  **安装 Poetry**: 请确保您已安装 [Poetry](https://python-poetry.org/)。
-3.  **安装所有依赖**: `poetry install --with dev`
-4.  **运行测试套件**: 在开始编码前，请运行 `poetry run pytest` 确保本地环境正常。
+3.  **安装所有依赖**: `poetry install --with dev --with openai`
+4.  **配置环境变量**:
+    根据 `.env.example` 模板创建您的本地 `.env` 文件，并填入必要的 API 密钥以运行完整的测试套件。
+    ```bash
+    cp .env.example .env
+    ```
+5.  **运行测试套件**: 在开始编码前，请运行 `poetry run pytest` 确保本地环境正常。
 
 ## **提交前的本地检查清单**
 
@@ -104,7 +113,7 @@
 ## **提交 Pull Request**
 
 1.  完成开发和测试后，创建一个 Pull Request (PR)，目标分支为 `main`。
-2.  在 PR 的描述中，请清晰地说明您解决了什么问题或实现了什么功能。
+2.  在 PR 的描述中，请清晰地说明您解决了什么问题或实现了什么功能。我们推荐使用项目提供的 [PR 模板](./.github/pull_request_template.md)。
 3.  请确保您的 PR 通过了我们 CI 流水线的所有自动化检查。
 4.  项目维护者会尽快审查您的代码。
 
@@ -117,26 +126,27 @@
 ### **语言与沟通**
 
 1.  **代码内语言:**
-    -   **注释、文档字符串 (Docstrings)、日志信息、用户可见字符串:** **必须全部使用中文**。
-    -   **变量/函数/类名等代码标识符:** **必须使用英文**，并遵循 PEP 8 命名约定。
+    - **注释、文档字符串 (Docstrings)、日志信息、用户可见字符串:** **必须全部使用中文**。
+    - **变量/函数/类名等代码标识符:** **必须使用英文**，并遵循 PEP 8 命名约定。
 2.  **沟通工具语言:**
-    -   **所有对话:** **默认使用中文**。
-    -   **AI Prompt:** 可以使用英文。
+    - **所有对话:** **默认使用中文**。
+    - **AI Prompt:** 可以使用英文。
 
 ### **代码风格与质量**
 
 1.  **格式化:** 严格遵循 `PEP 8`，使用 `ruff format`，行长限制为 88 字符。
 2.  **静态检查:**
-    -   **Linter:** 使用 `ruff`，配置见 `pyproject.toml`。
-    -   **类型检查:** 使用 `mypy`，新代码必须有完整的类型注解。
+    - **Linter:** 使用 `ruff`，配置见 `pyproject.toml`。
+    - **类型检查:** 使用 `mypy`，新代码必须有完整的类型注解。
 3.  **日志规范:**
-    -   **必须使用 `structlog`**，禁止 `print()`。
-    -   充分利用上下文绑定功能。
-    -   严格遵循日志级别语义（`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）。`ERROR` 及以上级别必须附带 `exc_info=True`。
+    - **必须使用 `structlog`**，禁止 `print()` 用于调试。
+    - 充分利用上下文绑定功能。
+    - 严格遵循日志级别语义（`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）。`ERROR` 及以上级别必须附带 `exc_info=True`。
 4.  **文件头规范:**
-    -   所有 `.py` 文件第一行必须是标识其完整路径的注释，如 `# trans_hub/coordinator.py`。
-    -   **严禁**在文件头添加 `(修正版)` 等非正式状态描述。
-    -   文档字符串（`"""..."""`）**只用于**描述模块的当前功能，**严禁**包含任何变更历史。变更记录的唯一归宿是 **Git 提交信息**和 **`CHANGELOG.md`**。
+    - 所有 `.py` 文件第一行必须是标识其完整路径的注释，如 `# trans_hub/coordinator.py`。
+    - **严禁**在文件头添加 `(修正版)` 等非正式状态描述。
+    - 文档字符串（`"""..."""`）**只用于**描述模块的当前功能，**严禁**包含任何变更历史。变更记录的唯一归宿是 **Git 提交信息**和 **`CHANGELOG.md`**。
+5.  **处理 Linter 规则例外 (`# noqa`):** 我们力求代码 100% 符合 `ruff` 的规则。但在极少数情况下，为了实现特定功能（如在工具或示例脚本中修改 `sys.path`），可能会与 `E402` 等规则冲突。在这种情况下，允许使用 `# noqa: E402` 注释来局部禁用该规则，但**必须**在代码中清晰地说明为何需要这样做。滥用 `# noqa` 是不被允许的。
 
 ### **架构与设计**
 
@@ -144,6 +154,15 @@
 2.  **依赖倒置原则 (DIP):** 核心逻辑依赖抽象（`Protocol`），而非具体实现。
 3.  **配置分离:** 严禁硬编码。所有配置项必须在 `config.py` 中定义，并通过 `pydantic-settings` 加载。
 4.  **纯异步优先:** 核心工作流必须异步。任何阻塞调用都**必须使用 `asyncio.to_thread`** 包装。
+5.  **核心概念的正确使用:** 贡献的代码必须正确使用 `business_id` 和 `context` 等核心概念。关于它们的使用场景和最佳实践，请参阅 [**高级用法指南**](./docs/guides/02_advanced_usage.md)。
+6.  **性能优先的数据库设计:** 所有数据库相关的代码和 Schema 变更，都必须遵循性能最佳实践。详细规范请参阅 [**数据模型与数据库设计**](./docs/architecture/02_data_model.md)。
+
+### **引擎开发规范**
+
+所有新贡献的翻译引擎都必须遵循严格的开发模式，以确保与核心系统的兼容性和可维护性。
+
+- **核心要求**: 新引擎必须继承 `BaseTranslationEngine` 并实现 `_atranslate_one` 异步方法。所有批处理和并发逻辑均由基类处理。
+- **详细指南**: 在开始开发前，请务必完整阅读并遵循 [**新引擎开发指南**](./docs/contributing/developing_engines.md) 中的每一个步骤。
 
 ### **测试**
 
@@ -167,6 +186,7 @@
 这是一个为项目核心维护者准备的、严格的版本发布标准作业流程 (SOP)。
 
 ### **阶段一：本地准备**
+
 1.  更新 `pyproject.toml` 中的 `version` 字段。
 2.  在 `CHANGELOG.md` 顶部为新版本添加详尽的变更记录。
 3.  确保所有相关文档都已同步。
@@ -175,6 +195,7 @@
 6.  构建发布包: `poetry build`
 
 ### **阶段二：技术发布与验证**
+
 1.  配置 PyPI API 令牌: `poetry config pypi-token.pypi <你的令牌>`
 2.  执行发布: `poetry publish`
 3.  **立即在全新环境中测试安装**:
@@ -188,12 +209,15 @@
     > 🚨 如果此步骤失败，立即去 PyPI **废弃 (Yank)** 该版本，修复问题，然后从阶段一重新开始。
 
 ### **阶段三：官方发布定稿**
+
 **只有在阶段二成功通过后**，才能进入此阶段。
+
 1.  提交所有发布相关文件: `git commit -m "chore(release): release v<新版本号>"`
 2.  创建 Git 标签: `git tag v<新版本号>`
 3.  推送所有内容: `git push && git push --tags`
 
 ### **阶段四：社区沟通**
+
 1.  在 GitHub 基于新标签创建 Release，并将 `CHANGELOG.md` 的内容作为说明。
 
 ---

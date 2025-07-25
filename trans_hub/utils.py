@@ -27,7 +27,8 @@ def get_context_hash(context: Optional[dict[str, Any]]) -> str:
 
 
 def validate_lang_codes(lang_codes: list[str]) -> None:
-    """校验语言代码列表中的每个代码是否符合 'en' 或 'zh-CN' 格式。
+    """
+    校验语言代码列表中的每个代码是否符合 'en' 或 'zh-CN' 格式。
     如果任何一个代码无效，则抛出 ValueError。.
     """
     lang_code_pattern = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")

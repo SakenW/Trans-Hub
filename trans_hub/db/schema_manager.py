@@ -1,5 +1,6 @@
 # trans_hub/db/schema_manager.py (最终优化版)
-"""本模块负责管理数据库的 Schema 版本。
+"""
+本模块负责管理数据库的 Schema 版本。
 它提供了应用迁移脚本、检查当前版本等功能。.
 """
 
@@ -15,7 +16,8 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 def get_current_schema_version(conn: sqlite3.Connection) -> int:
-    """查询数据库中当前的 schema 版本。
+    """
+    查询数据库中当前的 schema 版本。
     返回当前 schema 版本号，如果元数据表或版本记录不存在，则返回 0。.
     """
     cursor = conn.cursor()

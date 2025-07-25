@@ -1,5 +1,6 @@
 # trans_hub/interfaces.py (终极完美版)
-"""本模块使用 typing.Protocol 定义了核心组件的接口。
+"""
+本模块使用 typing.Protocol 定义了核心组件的接口。
 此版本为纯异步设计，并强化了封装性。
 """
 

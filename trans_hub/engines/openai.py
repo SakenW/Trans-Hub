@@ -1,5 +1,6 @@
 # trans_hub/engines/openai.py (重构后)
-"""提供一个使用 OpenAI API 的翻译引擎。
+"""
+提供一个使用 OpenAI API 的翻译引擎。
 此版本实现已高度简化，仅需实现 _atranslate_one 方法。
 """
 

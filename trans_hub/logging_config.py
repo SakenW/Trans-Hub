@@ -1,5 +1,6 @@
 # trans_hub/logging_config.py (终极完美版)
-"""集中配置项目的日志系统。
+"""
+集中配置项目的日志系统。
 使用 structlog 实现结构化的、带上下文的日志记录。
 """
 
@@ -21,7 +22,8 @@ structlog.contextvars.bind_contextvars(correlation_id=None)
 def setup_logging(
     log_level: str = "INFO", log_format: Literal["json", "console"] = "console"
 ) -> None:
-    """配置整个应用的日志系统。
+    """
+    配置整个应用的日志系统。
 
     根据 `log_format` 决定使用开发环境友好的控制台格式或生产环境友好的 JSON 格式。
     """

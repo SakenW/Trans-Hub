@@ -111,7 +111,7 @@ async def stream_translatable_items(
 
 **Yields**:
 
-- `list[ContentItem]`: 一批待翻译的任务。
+- `list[ContentItem]`: 一批待翻译的任务。生成器每次 `yield` 的是一个列表，其长度不超过 `batch_size`。
 
 ### `save_translations()`
 
@@ -157,7 +157,7 @@ async def get_business_id_for_content(
 ```
 
 **描述**:
-一个只读方法，根据 `content_id` 和 `context_hash` 从 `th_sources` 表中查找对应的 `business_id`。这是 `Coordinator` 进行性能优化的关键辅助方法。
+一个只读方法，根据 `content_id` 和 `context_hash` 的**唯一组合**从 `th_sources` 表中查找对应的 `business_id`。这是 `Coordinator` 进行性能优化的关键辅助方法，用于在处理批次前预加载所有业务 ID。
 
 **返回**:
 
@@ -180,7 +180,7 @@ async def touch_source(self, business_id: str) -> None:
 ### `garbage_collect()`
 
 ```python
-async def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict:
+async def garbage_collect(self, retention_days: int, dry_run: bool = False) -> dict[str, int]:
 ```
 
 **描述**:
