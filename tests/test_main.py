@@ -50,10 +50,16 @@ def test_config() -> TransHubConfig:
     db_file = f"test_{os.urandom(4).hex()}.db"
 
     openai_api_key_str = os.getenv("TH_OPENAI_API_KEY", "dummy-key-for-testing")
+    openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
 
     # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    # 确保即使环境变量为空字符串，我们也能得到一个有效的默认 URL
-    openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
+    # 手动为 model_rebuild 提供一个包含所有前向引用类型的命名空间
+    types_namespace = {
+        "DebugEngineConfig": DebugEngineConfig,
+        "OpenAIEngineConfig": OpenAIEngineConfig,
+        "TranslatorsEngineConfig": TranslatorsEngineConfig,
+    }
+    EngineConfigs.model_rebuild(_types_namespace=types_namespace)
     # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     return TransHubConfig(
@@ -82,8 +88,7 @@ async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator
     await coord.close()
 
 
-# --- 测试用例 (保持不变) ---
-# ... (所有测试用例函数都保持不变) ...
+# --- 测试用例 ---
 
 
 @pytest.mark.asyncio
