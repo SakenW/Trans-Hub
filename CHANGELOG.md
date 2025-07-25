@@ -9,43 +9,43 @@
 
 ## **[2.0.0] - 2024-07-25**
 
-这是一个**里程碑式**的版本，标志着 `Trans-Hub` 从混合模式框架全面演进为一个**纯异步 (Async-First)** 的高性能引擎。本次重构触及了项目的每一个核心角落，极大地提升了性能、健壮性和开发者体验。
+这是一个**里程碑式**的版本，对项目的核心架构和开发体验进行了全面的重构和优化。`Trans-Hub` 现在是一个更健壮、更易于使用和扩展的纯异步本地化后端。
 
 ### 💥 **重大变更 (BREAKING CHANGES)**
 
 - **架构核心：全面转向纯异步**
-  - `Coordinator` 类现在是一个**纯异步**类。所有与其交互的方法（如 `request`, `process_pending_translations`）都必须使用 `async/await` 进行调用。
-  - 所有同步方法和代码路径已被**彻底移除**，以消除潜在的性能瓶颈和简化心智模型。
-- **引擎接口 (`BaseTranslationEngine`) 简化**
-  - 引擎的契约被简化为**唯一必须实现**的异步方法：`async def atranslate_batch(...)`。
-  - `translate_batch` 同步方法和 `IS_ASYNC_ONLY` 标志已被**彻底移除**。
-  - 贡献指南已更新，明确要求同步库必须通过 `asyncio.to_thread` 进行适配。
+  - `Coordinator` 类的所有核心方法（如 `request`, `process_pending_translations`）现在都是**纯异步**的，必须使用 `async/await` 调用。所有同步方法和代码路径已被彻底移除。
+- **引擎接口 (`BaseTranslationEngine`) 重构**
+  - 引擎的开发模式被**极大地简化**。开发者现在只需继承 `BaseTranslationEngine` 并实现 `_atranslate_one` 异步方法。所有批处理和并发逻辑都已上移到基类中，`atranslate_batch` 不再需要被重写。
 - **持久化层 (`PersistenceHandler`) 纯异步化**
-  - `PersistenceHandler` 接口及其默认实现 `DefaultPersistenceHandler` 已被重构为**纯异步**，所有方法都使用 `async def`。
-  - 彻底修复了所有与 `aiosqlite` 相关的事务嵌套、连接管理和路径解析的底层 bug。
+  - `PersistenceHandler` 接口及其默认实现 `DefaultPersistenceHandler` 已被重构为**纯异步**，所有 I/O 方法都使用 `async def`。
 
 ### ✨ 新增 (Added)
 
-- **`Coordinator.switch_engine()`**: 新增了一个便捷的同步方法，允许在运行时动态地切换当前活动的翻译引擎实例，极大地增强了灵活性。
-- **智能配置加载**: `TransHubConfig` 现在更加智能。当用户通过 `active_engine="openai"` 激活一个引擎时，如果其配置尚未提供，系统会自动尝试创建并从 `.env` 文件加载，显著简化了用户的初始化代码。
-- **专业的开发者工具**: `tools/inspect_db.py` 被重写为一个功能强大的、异步的、接受命令行参数的专业诊断工具。
+- **动态上下文翻译**: `OpenAIEngine` 现在支持通过 `context` 传入 `system_prompt`，实现了真正的情境翻译，能够根据上下文区分“Jaguar”（美洲虎）和“Jaguar”（捷豹）等词义。
+- **动态引擎配置**: `TransHubConfig` 现在可以根据 `active_engine` 的值，**动态地、自动地**从 `ENGINE_REGISTRY` 发现并创建所需的引擎配置实例，无需用户手动配置，实现了真正的“约定优于配置”。
+- **`Coordinator.switch_engine()`**: 新增了一个便捷的同步方法，允许在运行时动态地切换当前活动的翻译引擎。
+- **专业的开发者与示例工具**:
+  - `tools/inspect_db.py`: 新增了一个功能强大的命令行工具，用于检查和解读数据库内容。
+  - `examples/demo_complex_workflow.py`: 新增了一个端到端的演示脚本，全面展示了上下文、缓存、GC 等所有高级功能。
+- **完整的文档库**: 建立了结构化的 `/docs` 目录，为用户、开发者和贡献者提供了全面的指南、API 参考和架构文档。
 
 ### 🚀 变更与优化 (Changed)
 
-- **测试套件全面升级**:
-  - `tests/run_coordinator_test.py` 已被完全重构，使用 `pytest-asyncio` 和 `fixture` 来实现**完全隔离的、可靠的**异步测试。
-  - 修复了所有在严格测试中发现的 bug，包括引擎切换逻辑、默认配置和 N+1 查询性能问题。
-- **CI/CD 流程优化**:
-  - `.github/workflows/ci.yml` 已被重构，现在可以并行测试多个稳定 Python 版本，并包含一个“允许失败”的实验性任务来测试未来的 Python 3.13。
-  - CI 现在通过 **GitHub Secrets** 安全地获取 API 密钥，使得 OpenAI 等引擎的测试能够真正在自动化流程中运行。
-- **文档全面同步**:
-  - 所有文档（`README.md`、指南、架构文档、API 参考）都已更新，以 100%准确地反映 v2.0.0 的纯异步架构和最新的 API。
+- **CI/CD 与测试套件**:
+  - GitHub Actions 工作流 (`ci.yml`) 被全面重构，现在使用隔离的虚拟环境，并行测试多个 Python 版本，并集成了 Codecov 以报告测试覆盖率。
+  - 测试套件 (`tests/test_main.py`) 被完全重写，使用 `pytest-asyncio` 和 `fixture` 实现了**完全隔离的、可靠的**异步端到端测试。
+- **依赖管理**:
+  - `pyproject.toml` 被重构，核心库变得更轻量。可选的翻译引擎（如 `translators`, `openai`）现在通过 `extras` (`pip install "trans-hub[openai]"`) 按需安装。
+- **配置与日志**:
+  - 移除了所有可能导致循环导入的依赖关系，使得配置系统更加健壮。
+  - `Coordinator` 现在会按 `context_hash` 对任务批次进行分组处理，确保了上下文翻译的准确性。
 
 ### 🐛 修复 (Fixed)
 
-- **修复了数据库性能瓶颈**: 移除了 `DefaultPersistenceHandler` 中不必要的全局锁，充分利用了 SQLite WAL 模式的并发能力。
-- **修复了所有底层数据库错误**: 彻底解决了包括 `cannot start a transaction within a transaction`, `NameError`, `AttributeError` 在内的所有数据库相关问题。
-- **修复了示例代码**: `examples/demo_complex_workflow.py` 已被完全重写，现在是一个展示如何正确使用 `Trans-Hub` v2.0 的、功能完善的异步应用范例。
+- **修复了潜在的上下文应用错误**: 解决了 `Coordinator` 在处理混合上下文批次时可能错误应用 `context` 的逻辑漏洞。
+- **修复了所有静态类型检查错误**: 通过重构和使用 `TYPE_CHECKING`，彻底解决了所有 `mypy` 报告的循环导入和类型不兼容问题。
+- **修复了 CI 环境中的所有已知问题**: 解决了包括系统包冲突 (`typing-extensions`)、`ImportError` 和 Pydantic 验证错误在内的所有 CI 故障，确保了自动化流程的稳定运行。
 
 ---
 
