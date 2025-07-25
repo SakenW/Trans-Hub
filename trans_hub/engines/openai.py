@@ -1,7 +1,7 @@
-# trans_hub/engines/openai.py (重构后)
+# trans_hub/engines/openai.py
 """
 提供一个使用 OpenAI API 的翻译引擎。
-此版本实现已高度简化，仅需实现 _atranslate_one 方法。
+此版本实现已高度简化，仅需实现 _atranslate_one 方法，并支持通过 context 传入 system_prompt。
 """
 
 from typing import Any, Optional, cast
@@ -17,10 +17,19 @@ from trans_hub.engines.base import (
 )
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
-_AsyncOpenAI: Optional[type] = None
+# 使用不同的变量名来避免 mypy 的 'no-redef' 错误
+# 这个变量将持有 AsyncOpenAI 类（如果可用）
+_AsyncOpenAIClient: Optional[type] = None
 try:
-    from openai import APIConnectionError, APIError, InternalServerError, RateLimitError
-    from openai import AsyncOpenAI as _AsyncOpenAI
+    from openai import (
+        APIConnectionError,
+        APIError,
+        AsyncOpenAI,
+        InternalServerError,
+        RateLimitError,
+    )
+
+    _AsyncOpenAIClient = AsyncOpenAI
 except ImportError:
     pass
 
@@ -28,6 +37,8 @@ logger = structlog.get_logger(__name__)
 
 
 class OpenAIContext(BaseContextModel):
+    """OpenAI 引擎的上下文模型。"""
+
     system_prompt: Optional[str] = None
     prompt_template: Optional[str] = None
     model: Optional[str] = None
@@ -35,6 +46,8 @@ class OpenAIContext(BaseContextModel):
 
 
 class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
+    """OpenAI 引擎的配置模型。"""
+
     model_config = SettingsConfigDict(
         env_prefix="TH_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
@@ -43,42 +56,46 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     openai_model: str = "gpt-3.5-turbo"
     openai_temperature: float = 0.1
     default_prompt_template: str = (
-        "You are a professional translation engine. Please translate the following text from {source_lang} to {target_lang}. "
-        "Only return the translated text, without any additional explanations or superfluous quotes.\n\n"
+        "Translate the following text from {source_lang} to {target_lang}. "
+        "Return only the translated text, without any additional explanations or quotes.\n\n"
         'Text to translate: "{text}"'
     )
 
 
 class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
+    """使用 OpenAI API 的翻译引擎实现。"""
+
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.0.0"  # 版本号提升
+    VERSION = "2.1.0"
     REQUIRES_SOURCE_LANG = True
 
     def __init__(self, config: OpenAIEngineConfig):
         super().__init__(config)
-        if _AsyncOpenAI is None:
+        if _AsyncOpenAIClient is None:
             raise ImportError(
                 "要使用 OpenAIEngine, 请先安装 'openai' 库: pip install \"trans-hub[openai]\""
             )
-        self.client = _AsyncOpenAI(
+
+        # 为 self.client 提供类型提示
+        self.client: AsyncOpenAI = _AsyncOpenAIClient(  # type: ignore
             api_key=self.config.openai_api_key.get_secret_value(),
             base_url=str(self.config.openai_endpoint),
         )
-        logger.info("OpenAI 引擎初始化成功", model=self.config.openai_model)
+        logger.info(
+            "OpenAI 引擎初始化成功",
+            model=self.config.openai_model,
+        )
 
     async def _atranslate_one(
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],  # 在这里 source_lang 必不为 None
+        source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """[实现] 异步翻译单个文本。"""
-        # 基类已确保 source_lang 存在
         final_source_lang = cast(str, source_lang)
 
-        # 从全局配置和上下文配置中决定最终参数
         prompt_template = context_config.get(
             "prompt_template", self.config.default_prompt_template
         )
@@ -94,19 +111,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             text=text, source_lang=final_source_lang, target_lang=target_lang
         )
         messages.append({"role": "user", "content": prompt})
+
         try:
             response = await self.client.chat.completions.create(
                 model=model,
-                messages=messages,
+                messages=messages,  # type: ignore
                 temperature=temperature,
-                max_tokens=len(text.encode("utf-8")) * 2 + 100,  # 可以考虑也加入配置
+                max_tokens=len(text.encode("utf-8")) * 3 + 150,
             )
             translated_text = response.choices[0].message.content or ""
             if not translated_text:
                 return EngineError(
                     error_message="API returned empty content.", is_retryable=True
                 )
-            return EngineSuccess(translated_text=translated_text.strip())
+            return EngineSuccess(translated_text=translated_text.strip().strip('"'))
         except APIError as e:
             is_retryable = isinstance(
                 e, (RateLimitError, InternalServerError, APIConnectionError)

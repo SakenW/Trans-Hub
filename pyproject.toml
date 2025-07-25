@@ -135,5 +135,6 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "translators",
+    "openai.*"
 ]
 ignore_missing_imports = true
