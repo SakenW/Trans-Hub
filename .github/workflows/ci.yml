@@ -15,6 +15,7 @@ concurrency:
 env:
   POETRY_NO_INTERACTION: 1
   POETRY_VIRTUALENVS_IN_PROJECT: "true"
+  # 我们不再需要 PIP_BREAK_SYSTEM_PACKAGES，因为虚拟环境提供了隔离
 
 jobs:
   lint:
@@ -33,10 +34,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-    - name: Install all dependencies for linting
-      # 为了 mypy，需要安装所有依赖
-      run: poetry install --with dev --extras "translators openai"
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
+    - name: Install all dev dependencies
+      # [核心修复] 使用简化的命令，安装所有 dev 组依赖
+      run: poetry install --with dev
 
     - name: Run Code Quality Checks
       run: |
@@ -70,12 +71,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-    - name: Install dependencies
-      # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-      # 同时安装 translators 和 openai 两个 extras
-      run: poetry install --with dev --extras "translators openai"
-      # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
+    - name: Install all dev dependencies
+      # [核心修复] 使用简化的命令，它已包含所有 extras
+      run: poetry install --with dev
       
     - name: Run Tests with Coverage
       run: poetry run pytest --cov=trans_hub --cov-report=xml
@@ -107,12 +106,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-    - name: Install dependencies
-      # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-      # 同样，在这里也安装所有 extras
-      run: poetry install --with dev --extras "translators openai" || true
-      # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
+    - name: Install all dev dependencies
+      # [核心修复] 使用简化的命令
+      run: poetry install --with dev || true
       
     - name: Run Code Quality Checks (Python 3.13)
       run: |
