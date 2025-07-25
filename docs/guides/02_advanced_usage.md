@@ -32,17 +32,14 @@
     ```
 
 3.  **修改初始化代码**:
-    得益于 `Trans-Hub` 的智能配置系统，您只需在创建 `TransHubConfig` 时，**声明您想使用的引擎**即可。无需手动创建任何子配置对象！
+    得益于 `Trans-Hub` 的智能配置系统，您只需在创建 `TransHubConfig` 时，**声明您想使用的引擎**即可。
 
     ```python
     # a_script_with_openai.py
     from trans_hub.config import TransHubConfig
     # ... 其他导入与初始化代码 ...
 
-    # --- 核心修改：只需一行代码即可激活 OpenAI ---
-    config = TransHubConfig(active_engine="openai")
-
-    # Coordinator 将自动使用 OpenAIEngine 及其从 .env 加载的配置
+    config = TransHubConfig(active_engine="openai", source_lang="en")
     coordinator = Coordinator(config=config, persistence_handler=handler)
     # ...
     ```
@@ -51,34 +48,26 @@
 
 ## **2. 来源追踪与情境翻译：`business_id` vs `context`**
 
-在深入研究具体用法之前，理解 `Trans-Hub` 的两个核心概念至关重要：`business_id` 和 `context`。正确地使用它们，是发挥 `Trans-Hub` 全部能力的关键。
+在深入研究具体用法之前，理解 `Trans-Hub` 的两个核心概念至关重要：`business_id` 和 `context`。
 
-| 特性               | `business_id: str`                                                                  | `context: dict`                                                                                  |
-| :----------------- | :---------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------- |
-| **核心目的**       | **身份标识 (Identity)**                                                             | **翻译情境 (Circumstance)**                                                                      |
-| **回答的问题**     | “这段文本**是什么**？” <br> “它**来自哪里**？”                                      | “应该**如何**翻译这段文本？”                                                                     |
-| **主要作用**       | - **来源追踪**：将文本与业务实体关联。 <br> - **生命周期管理**：用于垃圾回收 (GC)。 | - **影响翻译结果**：为引擎提供额外信息。 <br> - **区分翻译版本**：不同上下文产生不同翻译。       |
-| **对复用性的影响** | **促进复用**：不同 `business_id` 可以共享相同原文和上下文的翻译结果。               | **隔离翻译**：不同的 `context` 会生成不同的 `context_hash`，导致独立的翻译记录，**降低复用性**。 |
-| **数据存储**       | `th_sources` 表                                                                     | `th_translations` 表 (`context_hash`, `context`)                                                 |
-| **最佳实践**       | 用于稳定、唯一的业务标识，如 `ui.login.title` 或 `product_123_description`。        | 用于影响翻译质量的动态信息，如 `{"tone": "formal"}` 或 `{"text_type": "button_label"}`。         |
+| 特性 | `business_id: str` | `context: dict` |
+| :--- | :--- | :--- |
+| **核心目的** | **身份标识 (Identity)** | **翻译情境 (Circumstance)** |
+| **回答的问题** | “这段文本**是什么**？” <br> “它**来自哪里**？” | “应该**如何**翻译这段文本？” |
+| **主要作用** | - **来源追踪**：将文本与业务实体关联。 <br> - **生命周期管理**：用于垃圾回收 (GC)。 | - **影响翻译结果**：为引擎提供额外信息。 <br> - **区分翻译版本**：不同上下文产生不同翻译。 |
+| **对复用性的影响** | **促进复用**：不同 `business_id` 可以共享相同原文和上下文的翻译结果。 | **隔离翻译**：不同的 `context` 会生成不同的 `context_hash`，导致独立的翻译记录。 |
 
-**一句话总结**: 使用 `business_id` 来管理你的文本资产，使用 `context` 来提升特定场景下的翻译质量。在实际应用中，我们**强烈推荐将两者结合使用**。
+**一句话总结**: 使用 `business_id` 来管理你的文本资产，使用 `context` 来提升特定场景下的翻译质量。我们**强烈推荐将两者结合使用**。
 
 ---
 
 ## **3. 上下文翻译：一词多义的艺术**
 
-同一个词在不同语境下可能有不同的含义（例如 "Apple" 可以指水果或公司）。`Trans-Hub` 支持在翻译请求中添加 `context`，以实现更精准的本地化。
+### **目标**
 
-### **最佳实践**
-
-与其粗暴地重写整个 prompt 模板，不如通过 `context` 为大语言模型提供**附加的系统级指令 (System Prompt)**。这更符合 `context` 的设计理念——“提供情境”，而不是“改变行为”。
-
-_(注: 这需要对 `OpenAIEngine` 进行简单的修改以支持 `system_prompt`。这是一个推荐的自定义扩展。)_
+使用 `context` 向 OpenAI 引擎提供系统级指令 (`system_prompt`)，将 "Jaguar" 根据上下文分别翻译为“动物”和“汽车品牌”。
 
 ### **示例**
-
-假设我们要根据上下文翻译 "Apple"。
 
 ```python
 # context_demo.py
@@ -90,14 +79,14 @@ async def main():
         target_lang = "zh-CN"
         tasks = [
             {
-                "text": "Apple",
-                "context": {"system_prompt": "You are a professional translator specializing in fruits."},
-                "business_id": "product.fruit.apple",
+                "text": "Jaguar",
+                "context": {"system_prompt": "You are a professional translator specializing in wildlife and animals."},
+                "business_id": "wildlife.big_cat.jaguar",
             },
             {
-                "text": "Apple",
-                "context": {"system_prompt": "You are a professional translator specializing in technology companies."},
-                "business_id": "tech.company.apple_inc",
+                "text": "Jaguar",
+                "context": {"system_prompt": "You are a professional translator specializing in luxury car brands."},
+                "business_id": "automotive.brand.jaguar",
             },
         ]
 
@@ -107,11 +96,7 @@ async def main():
                 context=task['context'], business_id=task['business_id'], source_lang='en'
             )
 
-        log.info("正在处理所有待翻译任务...")
-        results = [res async for res in coordinator.process_pending_translations(target_lang)]
-
-        for result in results:
-            log.info("翻译结果", result=result)
+        # ... process and print results ...
     finally:
         if coordinator: await coordinator.close()
 
@@ -121,10 +106,8 @@ if __name__ == "__main__":
 
 ### **预期输出**
 
-`Trans-Hub` 通过 `context_hash` 将这两个请求视为独立的翻译任务并分别缓存。OpenAI 引擎会根据不同的 `system_prompt` 生成不同的结果。
-
-- `result=... original_content='Apple', translated_content='苹果', ...`
-- `result=... original_content='Apple', translated_content='苹果公司', ...`
+- `result=... original_content='Jaguar', translated_content='美洲虎', ...`
+- `result=... original_content='Jaguar', translated_content='捷豹', ...`
 
 ---
 

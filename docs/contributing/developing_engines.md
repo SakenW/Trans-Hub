@@ -102,7 +102,41 @@ class AwesomeEngine(BaseTranslationEngine[...]):
         return await asyncio.to_thread(self._translate_single_sync, text)
 ```
 
-### **5. 一份完整的示例：`AwesomeEngine`**
+### **5. 进阶技巧：支持自定义上下文**
+
+`Trans-Hub` 的一个强大功能是允许在翻译请求中传递 `context` 字典。要让你的引擎能够利用这些上下文，你需要做两件事：
+
+1.  **定义一个 `ContextModel`**: 在你的引擎文件中，创建一个继承自 `BaseContextModel` 的 Pydantic 模型，并定义你希望从 `context` 中接收的字段。
+
+    ```python
+    # awesome_engine.py
+    from trans_hub.engines.base import BaseContextModel
+
+    class AwesomeEngineContext(BaseContextModel):
+        # 允许用户通过 context={"tone": "formal"} 来指定语气
+        tone: Optional[str] = None
+    ```
+
+2.  **在 `_atranslate_one` 中使用 `context_config`**: 基类会自动验证 `context` 并将结果以字典形式传入 `context_config` 参数。你只需在你的核心逻辑中使用它。
+
+    ```python
+    # awesome_engine.py
+    
+    class AwesomeEngine(BaseTranslationEngine[...]):
+        # 别忘了在类属性中注册你的 Context 模型
+        CONTEXT_MODEL = AwesomeEngineContext
+        
+        async def _atranslate_one(self, ..., context_config: dict[str, Any]) -> ...:
+            tone = context_config.get("tone", "neutral") # 从上下文中获取 'tone'
+            
+            # 在你的 API 调用中使用 tone
+            translated_text = await self.client.translate(..., tone=tone)
+            # ...
+    ```
+
+通过这种方式，你可以为你的引擎创建出非常强大和灵活的自定义功能。
+
+### **6. 一份完整的示例：`AwesomeEngine`**
 
 下面是一个完整的、遵循所有最新最佳实践的 `awesome_engine.py` 文件示例。
 
@@ -164,7 +198,7 @@ class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
         )
 ```
 
-### **6. 编写测试：验证你的引擎**
+### **7. 编写测试：验证你的引擎**
 
 为你的引擎编写异步测试是至关重要的。由于所有业务逻辑都由 `Coordinator` 驱动，测试 `Coordinator` 能否成功使用你的新引擎是最好的集成测试方法。
 
