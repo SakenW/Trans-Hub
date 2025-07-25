@@ -28,8 +28,8 @@ logger = structlog.get_logger(__name__)
 
 
 class OpenAIContext(BaseContextModel):
+    system_prompt: Optional[str] = None
     prompt_template: Optional[str] = None
-    # 可以添加更多上下文可覆盖的参数，如 model, temperature
     model: Optional[str] = None
     temperature: Optional[float] = None
 
@@ -84,14 +84,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         )
         model = context_config.get("model", self.config.openai_model)
         temperature = context_config.get("temperature", self.config.openai_temperature)
+        system_prompt = context_config.get("system_prompt")
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
 
         prompt = prompt_template.format(
             text=text, source_lang=final_source_lang, target_lang=target_lang
         )
+        messages.append({"role": "user", "content": prompt})
         try:
             response = await self.client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=temperature,
                 max_tokens=len(text.encode("utf-8")) * 2 + 100,  # 可以考虑也加入配置
             )

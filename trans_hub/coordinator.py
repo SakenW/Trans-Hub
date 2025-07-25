@@ -9,7 +9,8 @@
 import asyncio
 import json
 from collections.abc import AsyncGenerator
-from typing import Any, Optional, Union
+from itertools import groupby
+from typing import Any, Optional, Union, cast
 
 import structlog
 
@@ -75,11 +76,17 @@ class Coordinator:
         )
 
     def _create_engine_instance(self, engine_name: str) -> BaseTranslationEngine[Any]:
+        """根据名称创建并返回一个引擎实例。"""
         engine_class = ENGINE_REGISTRY[engine_name]
-        engine_config_data = getattr(self.config.engine_configs, engine_name, None)
-        if not engine_config_data:
-            raise ValueError(f"在配置中未找到引擎 '{engine_name}' 的配置。")
-        return engine_class(config=engine_config_data)
+
+        # 直接从 config 对象中获取已经由验证器创建好的配置实例
+        engine_config_instance = getattr(self.config.engine_configs, engine_name, None)
+        if not engine_config_instance:
+            # 此处理论上不应被触发，但作为保障
+            raise ValueError(f"在配置中未找到引擎 '{engine_name}' 的配置实例。")
+
+        # 直接将配置实例传递给引擎的构造函数
+        return engine_class(config=engine_config_instance)
 
     def switch_engine(self, engine_name: str) -> None:
         if engine_name == self.active_engine_name:
@@ -145,16 +152,31 @@ class Coordinator:
             if not batch:
                 continue
 
-            logger.debug(f"正在处理一个包含 {len(batch)} 个内容的批次。")
-            batch_results = await self._process_batch_with_retry_logic(
-                batch, target_lang, final_max_retries, final_initial_backoff
-            )
+            # 按 context_hash 对批次进行分组，以确保上下文一致性
+            batch.sort(key=lambda item: item.context_hash)
+            for context_hash, items_group_iter in groupby(
+                batch, key=lambda item: item.context_hash
+            ):
+                items_group = list(items_group_iter)
+                logger.debug(
+                    "正在处理一个上下文一致的小组",
+                    context_hash=context_hash,
+                    item_count=len(items_group),
+                )
 
-            await self.handler.save_translations(batch_results)
-            for result in batch_results:
-                if result.status == TranslationStatus.TRANSLATED and result.business_id:
-                    await self.handler.touch_source(result.business_id)
-                yield result
+                # 对每个上下文一致的小组调用重试逻辑
+                batch_results = await self._process_batch_with_retry_logic(
+                    items_group, target_lang, final_max_retries, final_initial_backoff
+                )
+
+                await self.handler.save_translations(batch_results)
+                for result in batch_results:
+                    if (
+                        result.status == TranslationStatus.TRANSLATED
+                        and result.business_id
+                    ):
+                        await self.handler.touch_source(result.business_id)
+                    yield result
 
     async def _process_batch_with_retry_logic(
         self,
@@ -191,13 +213,14 @@ class Coordinator:
             final_results.extend(processed_results)
 
             if not retryable_items:
-                logger.info(f"批次处理完成（尝试 {attempt + 1}）。")
+                logger.debug(f"上下文小组处理完成（尝试 {attempt + 1}）。")
                 return final_results
 
             if attempt >= max_retries:
                 logger.error(
-                    f"批次处理达到最大重试次数 ({max_retries + 1})，将保留失败状态。",
+                    f"上下文小组达到最大重试次数 ({max_retries + 1})。",
                     retry_item_count=len(retryable_items),
+                    context_hash=batch[0].context_hash if batch else "N/A",
                 )
                 error = EngineError(
                     error_message="达到最大重试次数", is_retryable=False
@@ -214,7 +237,7 @@ class Coordinator:
             items_to_process = retryable_items
             backoff_time = initial_backoff * (2**attempt)
             logger.warning(
-                f"批次中包含可重试的错误，将在 {backoff_time:.2f} 秒后重试。",
+                f"小组中包含可重试的错误，将在 {backoff_time:.2f} 秒后重试。",
                 retry_count=len(items_to_process),
             )
             await asyncio.sleep(backoff_time)
@@ -232,7 +255,6 @@ class Coordinator:
         )
 
         if not uncached_items:
-            logger.debug("批次中的所有项目都在缓存中找到。")
             return cached_results, []
 
         engine_outputs = await self._translate_uncached_items(
@@ -346,7 +368,10 @@ class Coordinator:
         if not batch or not self.active_engine.CONTEXT_MODEL or not batch[0].context:
             return None
         try:
-            return self.active_engine.CONTEXT_MODEL.model_validate(batch[0].context)
+            validated_model = self.active_engine.CONTEXT_MODEL.model_validate(
+                batch[0].context
+            )
+            return cast(BaseContextModel, validated_model)
         except Exception as e:
             error_msg = f"上下文验证失败: {e}"
             logger.error(error_msg, context=batch[0].context, exc_info=True)
