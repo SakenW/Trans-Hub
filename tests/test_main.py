@@ -1,7 +1,7 @@
 # tests/test_main.py
 """
 Trans-Hub 核心功能端到端测试。
-此版本适配了 v2.1+ 的动态注册配置模式。
+此版本适配了 v2.2+ 的终极动态配置模式。
 """
 
 import os
@@ -15,14 +15,10 @@ import pytest
 import pytest_asyncio
 import structlog
 from dotenv import load_dotenv
-from pydantic import HttpUrl, SecretStr
 
-from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
-from trans_hub.engines.debug import DebugEngineConfig
-from trans_hub.engines.openai import OpenAIEngineConfig
-from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
@@ -49,29 +45,21 @@ def setup_test_environment():
 
 @pytest.fixture
 def test_config() -> TransHubConfig:
-    """提供一个隔离的、用于测试的 TransHubConfig 实例。"""
+    """
+    提供一个隔离的、用于测试的 TransHubConfig 实例。
+    [终极简化版] 只提供最基本的配置，让 TransHubConfig 的验证器
+    自动发现和创建所有引擎的配置。
+    """
     db_file = f"test_{os.urandom(4).hex()}.db"
 
-    openai_api_key_str = os.getenv("TH_OPENAI_API_KEY", "dummy-key-for-testing")
-    openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
-
-    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    # 我们必须手动为所有将在测试中使用的引擎提供配置，
-    # 因为 TransHubConfig 的验证器只会自动创建 active_engine 的配置。
+    # 我们不再需要手动创建 EngineConfigs 或任何子配置。
+    # 只需要确保环境变量已通过 load_dotenv() 加载，
+    # TransHubConfig 的验证器就会自动处理剩下的事情。
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
         active_engine=ENGINE_DEBUG,
         source_lang="en",
-        engine_configs=EngineConfigs(
-            debug=DebugEngineConfig(),
-            translators=TranslatorsEngineConfig(),
-            openai=OpenAIEngineConfig(
-                openai_api_key=SecretStr(openai_api_key_str),
-                openai_endpoint=HttpUrl(openai_endpoint_str),
-            ),
-        ),
     )
-    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 
 @pytest_asyncio.fixture

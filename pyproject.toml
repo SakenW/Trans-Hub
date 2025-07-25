@@ -11,7 +11,7 @@ build-backend = "poetry.core.masonry.api"
 # ==============================================================================
 [tool.poetry]
 name = "trans-hub"
-version = "2.1.0"
+version = "2.1.1"
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
@@ -32,12 +32,9 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: Localization",
-    "Topic :: Text Processing",
 ]
 
-# --- 核心依赖 (更轻量) ---
+# --- 核心依赖 ---
 [tool.poetry.dependencies]
 python = ">=3.9, <3.14"
 pydantic = "^2.0"
@@ -46,19 +43,21 @@ pydantic-settings = {version = "^2.3.4", extras = ["dotenv"]}
 aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
 
+# [核心修复] 将 extras 依赖定义为 optional，这是更健壮的方式
+translators = { version = "^6.0.1", optional = true }
+openai = { version = "^1.37.0", optional = true }
+
 
 # --- 可选依赖 (Extras) ---
-# 用户可以按需安装这些
+# 引用上面定义的 optional 依赖
 [tool.poetry.extras]
 translators = ["translators"]
 openai = ["openai"]
 
 
 # ==============================================================================
-#  开发依赖 (所有开发和测试所需的包)
+#  开发依赖
 # ==============================================================================
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 核心修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-# 我们将开发依赖重新合并，并移除 optional = true
 [tool.poetry.group.dev.dependencies]
 # 代码质量
 ruff = "^0.4.0"
@@ -70,18 +69,15 @@ pytest-cov = "^4.1"
 pytest-asyncio = "^0.21.0"
 types-cachetools = "^5.3.1"
 
-# 测试可选功能所需的依赖
-# 将它们作为常规的开发依赖，确保在 CI 中总是被安装
+# 测试可选功能所需的依赖 (直接依赖，确保 CI 环境完整)
 translators = "^6.0.1"
 openai = "^1.37.0"
-# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 
 # ==============================================================================
 #  开发工具统一配置
 # ==============================================================================
 
-# --- Ruff ---
 [tool.ruff]
 line-length = 88
 target-version = "py39"
@@ -95,7 +91,6 @@ ignore = [
     "D203", "D212", "D205",
 ]
 
-# --- MyPy ---
 [tool.mypy]
 python_version = "3.9"
 warn_return_any = true
