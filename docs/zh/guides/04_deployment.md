@@ -2,7 +2,7 @@
 
 欢迎来到 `Trans-Hub` 的部署与运维指南。本指南旨在为希望在**生产环境**中稳定运行 `Trans-Hub` 的开发者和运维工程师提供关键的最佳实践。
 
-我们将涵盖数据库管理、后台任务的部署模式以及数据生命周期维护。
+我们将涵盖数据库管理、后台任务的部署模式、高并发处理以及数据生命周期维护。
 
 [返回文档索引](../INDEX.md)
 
@@ -12,10 +12,10 @@
 
 在生产环境中，`Trans-Hub` 的工作流通常被分离为两个主要部分：
 
-1.  **API 应用 (同步/Web)**: 负责接收用户请求并快速响应。它的主要职责是调用 `Coordinator.request()` 来**登记**翻译任务。
+1.  **API 应用 (Producers)**: 负责接收用户请求并快速响应。它的主要职责是调用 `Coordinator.request()` 来**登记**翻译任务。
 2.  **后台工作进程 (Worker)**: 一个或多个独立的、长期运行的进程。它的唯一职责是持续调用 `Coordinator.process_pending_translations()` 来**处理**积压的任务。
 
-这种分离确保了即使用户的翻译请求量激增，API 应用也能保持低延迟，因为它只做最轻量级的数据库写入操作。繁重的、耗时的翻译任务（涉及网络 I/O）则由后台的 Worker 异步处理。
+这种分离确保了即使用户的翻译请求量激增，API 应用也能保持低延迟，因为它只做最轻量级的数据库写入操作。繁重的、耗时的翻译任务则由后台的 Worker 异步处理。
 
 ---
 
@@ -30,14 +30,13 @@
 
 **这是每次部署或应用启动时都必须执行的关键步骤。**
 
-`Trans-Hub` 使用独立的 SQL 文件来管理数据库 schema 的演进。`apply_migrations()` 函数会检查数据库当前的 schema 版本，并按顺序应用所有新的迁移脚本。
+`apply_migrations()` 函数会检查数据库当前的 schema 版本，并按顺序应用所有新的迁移脚本。
 
 **最佳实践**: 将 `apply_migrations()` 调用放在您的应用启动逻辑的最前端，在初始化任何 `Coordinator` 实例之前。
 
 ```python
 # main_app.py (应用入口)
 from trans_hub.db.schema_manager import apply_migrations
-from trans_hub.config import TransHubConfig
 
 # 在应用启动时
 def startup():
@@ -72,7 +71,6 @@ async def main():
     setup_logging(log_level="INFO", log_format="json") # 生产环境使用 JSON 格式
     log = structlog.get_logger("worker")
 
-    # 从 .env 或环境变量加载配置
     config = TransHubConfig()
     handler = DefaultPersistenceHandler(config.db_path)
     coordinator = Coordinator(config, handler)
@@ -83,19 +81,15 @@ async def main():
 
         while True:
             try:
-                # 在这里定义你想处理的语言列表
                 target_languages = ["zh-CN", "fr", "de", "ja"]
-
                 for lang in target_languages:
                     log.info(f"正在检查 '{lang}' 的任务...")
                     processed_count = 0
                     async for result in coordinator.process_pending_translations(lang):
                         processed_count += 1
-                        log.debug("任务已处理", result=result)
                     if processed_count > 0:
                         log.info(f"本轮处理了 {processed_count} 个 '{lang}' 任务。")
 
-                # 所有语言都检查完毕后，等待一段时间再开始下一轮
                 log.info("所有语言检查完毕，Worker 将在 60 秒后再次轮询。")
                 await asyncio.sleep(60)
 
@@ -113,70 +107,68 @@ if __name__ == "__main__":
 
 ### **3.2 运行 Worker**
 
-你应该使用一个进程管理工具（如 `systemd`, `supervisor`, 或 `pm2`）来确保你的 `worker.py` 脚本能够作为后台服务长期运行，并在意外崩溃时自动重启。
-
-**使用 `systemd` 的服务单元文件示例 (`/etc/systemd/system/trans-hub-worker.service`)**:
-
-```ini
-[Unit]
-Description=Trans-Hub Background Worker
-After=network.target
-
-[Service]
-User=your_app_user
-Group=your_app_group
-WorkingDirectory=/path/to/your/project
-# 确保 poetry 在 PATH 中，或者使用绝对路径
-ExecStart=/path/to/your/poetry/bin/poetry run python worker.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
+你应该使用一个进程管理工具（如 `systemd`, `supervisor`）来确保你的 `worker.py` 脚本能够作为后台服务长期运行，并在意外崩溃时自动重启。
 
 ---
 
-## **4. 维护：垃圾回收 (GC)**
+## **4. 高并发写入与 `database is locked` 错误**
 
-定期运行垃圾回收对于控制数据库大小和清理无用数据至关重要。
+这是一个在使用 SQLite 后端时，进行大规模并发写入需要特别注意的高级主题。
 
-### **4.1 GC 脚本示例**
+### **场景**
 
-创建一个名为 `run_gc.py` 的独立维护脚本。
+当你有一个需要**在极短时间内、并发地调用 `coordinator.request()` 数百次**的应用时（例如，一个批量导入脚本，或者像我们的 `doc_translator` 工具那样并发处理大量文件），你可能会遇到 `sqlite3.OperationalError: database is locked` 错误。
+
+### **原因**
+
+- **并发风暴**: `asyncio.gather` 等并发工具会同时启动大量需要写入数据库的协程。
+- **写锁**: `Trans-Hub` 的 `PersistenceHandler` 内部有一个异步写锁，它会将这些并发的写请求**串行化**。
+- **SQLite 超时**: 当一个请求等待写锁的时间超过 SQLite 的默认超时（通常是 5 秒）时，它就会失败并抛出 `database is locked` 错误。
+
+**这不是 `Trans-Hub` 的 bug**，而是任何高并发应用在使用 SQLite 时的物理限制。
+
+### **解决方案：在应用层使用 `asyncio.Semaphore`**
+
+最佳解决方案是在**你的应用层**对并发进行**节流 (Throttling)**。`asyncio.Semaphore` 是实现这一点的完美工具。
+
+**核心思想**: 创建一个 `Semaphore` 来限制**同时**有多少个调用 `coordinator.request()` 的任务在运行。
+
+**示例代码**:
 
 ```python
-# run_gc.py
+# a_batch_importer.py
 import asyncio
-import structlog
-from trans_hub import Coordinator, DefaultPersistenceHandler, TransHubConfig
-from trans_hub.logging_config import setup_logging
+from trans_hub import Coordinator
+
+MAX_CONCURRENT_REQUESTS = 10 # 根据你的服务器性能和 I/O 调整
+
+async def process_item(item: dict, coordinator: Coordinator, semaphore: asyncio.Semaphore):
+    # 在执行操作前，先异步地获取信号量
+    async with semaphore:
+        # 这里的代码块，同时最多只会有 MAX_CONCURRENT_REQUESTS 个在运行
+        await coordinator.request(
+            target_langs=["zh-CN"],
+            text_content=item["text"],
+            business_id=item["id"]
+        )
 
 async def main():
-    setup_logging(log_level="INFO", log_format="console")
-    log = structlog.get_logger("gc_script")
+    # ... (初始化 coordinator) ...
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
-    config = TransHubConfig() # 从 .env 加载配置
-    handler = DefaultPersistenceHandler(config.db_path)
-    coordinator = Coordinator(config, handler)
+    all_items = [...] # 假设这里有 1000 个项目
 
-    try:
-        await coordinator.initialize()
-        log.info("开始执行垃圾回收...", retention_days=config.gc_retention_days)
+    tasks = [process_item(item, coordinator, semaphore) for item in all_items]
+    await asyncio.gather(*tasks)
 
-        # GC 是一个 IO 密集型操作，可能需要一些时间
-        report = await coordinator.run_garbage_collection()
-
-        log.info("✅ 垃圾回收执行完毕。", report=report)
-    finally:
-        if "coordinator" in locals() and coordinator.initialized:
-            await coordinator.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    # ...
 ```
 
-### **4.2 调度 GC 任务**
+通过这种模式，你既利用了 `asyncio` 的并发优势，又温和地对待你的数据库，避免了因超时而导致的失败。
+
+---
+
+## **5. 维护：垃圾回收 (GC)**
 
 使用 `cron` 来定期（例如每天凌晨）执行这个脚本。
 
@@ -188,7 +180,7 @@ if __name__ == "__main__":
 
 ---
 
-## **5. 生产环境配置清单**
+## **6. 生产环境配置清单**
 
 在部署前，请检查以下配置点：
 
