@@ -47,6 +47,8 @@ cachetools = "^5.3.3"
 translators = { version = "^6.0.1", optional = true }
 openai = { version = "^1.37.0", optional = true }
 
+# [核心修复] 为 doc_translator 工具添加 mistune 依赖
+mistune = "^3.0.0"
 
 # --- 可选依赖 (Extras) ---
 # 引用上面定义的 optional 依赖
@@ -102,6 +104,7 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "translators",
-    "openai.*"
+    "openai.*",
+    "mistune"
 ]
 ignore_missing_imports = true

@@ -1,4 +1,4 @@
-<div align="right">[English Version](./docs/en/root_sources/CHANGELOG.md)</div>
+<div align="right">[English Version](./docs/en/root_sources/CHANGELOG.en.md)</div>
 
 # 更新日志 (Changelog)
 

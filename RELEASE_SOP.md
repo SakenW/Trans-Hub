@@ -1,4 +1,4 @@
-<div align="right">[English Version](./docs/en/root_sources/RELEASE_SOP.md)</div>
+<div align="right">[English Version](./docs/en/root_sources/RELEASE_SOP.en.md)</div>
 
 # Trans-Hub 发布标准作业流程 (SOP)
 

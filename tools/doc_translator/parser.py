@@ -1,61 +1,59 @@
 # tools/doc_translator/parser.py
-import re
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Any, List
+
+import mistune
 
 
 @dataclass
 class TranslatableBlock:
     """代表一个从 Markdown 中提取的可翻译内容块。"""
-
-    block_type: str  # e.g., 'paragraph', 'header', 'list_item'
     source_text: str
-    stable_id: str  # 基于内容哈希的稳定ID
+    stable_id: str
+    node_type: str
 
 
-def parse_markdown(content: str) -> list[TranslatableBlock]:
-    """
-    一个智能的解析器，将 Markdown 文件内容拆分为多个可翻译的块。
-
-    注意：这是一个简化的实现。一个生产级的解析器可能需要使用
-    更强大的库（如 mistune）来处理更复杂的 Markdown 结构。
-    """
-    # 1. 在解析前，先移除 YAML front matter (--- ... ---)
-    #    这能防止元数据被当作可翻译内容
-    content = re.sub(
-        r"^---\s*$.*?^---\s*$\n", "", content, flags=re.MULTILINE | re.DOTALL
-    )
-
-    blocks = []
-    # 2. 按一个或多个空行分割内容为段落
-    paragraphs = re.split(r"\n{2,}", content)
-
-    for p in paragraphs:
-        p_stripped = p.strip()
-        if not p_stripped:
+def _extract_text_from_children(children: List[Any]) -> str:
+    """[v3 核心修正] 递归地、安全地从 AST 子节点中提取并拼接所有纯文本。"""
+    texts = []
+    for child in children:
+        if not isinstance(child, dict):
             continue
+        node_type = child.get("type")
+        if node_type == "text":
+            texts.append(child.get("text", ""))
+        if "children" in child and child["children"]:
+            texts.append(_extract_text_from_children(child["children"]))
+    return "".join(texts)
 
-        # 3. 忽略特殊块
-        if p_stripped.startswith("```"):
-            continue
-        if p_stripped.startswith("<!--"):
-            continue
 
-        # 4. 简单的块类型判断
-        block_type = "paragraph"
-        if p_stripped.startswith("#"):
-            block_type = "header"
-        elif re.match(r"^\s*[-*+]\s|\d+\.\s", p_stripped):
-            block_type = "list_item"
+class TranslatableContentExtractor(mistune.BaseRenderer):
+    """一个为 mistune v3 设计的渲染器，用于从 AST 中提取可翻译的文本块。"""
+    NAME = "block_extractor"
 
-        # 5. 使用完整的内容哈希作为稳定 ID
-        stable_id = sha256(p_stripped.encode()).hexdigest()
+    def __init__(self):
+        super().__init__()
+        self.blocks: List[TranslatableBlock] = []
 
-        blocks.append(
-            TranslatableBlock(
-                block_type=block_type,
-                source_text=p_stripped,
-                stable_id=stable_id,
-            )
-        )
-    return blocks
+    def __call__(self, ast: List[Any], state: Any) -> List[TranslatableBlock]:
+        self.blocks = []
+        for token in ast:
+            node_type = token.get("type")
+            if node_type in ("paragraph", "heading", "list_item"):
+                full_text = _extract_text_from_children(token.get("children", [])).strip()
+                if not full_text or full_text.startswith("{{") or full_text.startswith("{%"):
+                    continue
+                stable_id = sha256(full_text.encode()).hexdigest()
+                self.blocks.append(
+                    TranslatableBlock(source_text=full_text, stable_id=stable_id, node_type=node_type)
+                )
+        return self.blocks
+
+
+def parse_markdown(content: str) -> List[TranslatableBlock]:
+    """使用 mistune v3 AST 解析器来智能地提取可翻译内容。"""
+    extractor = TranslatableContentExtractor()
+    markdown_parser = mistune.create_markdown(renderer=extractor)
+    markdown_parser(content)
+    return extractor.blocks
