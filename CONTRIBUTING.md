@@ -214,44 +214,11 @@
 
 ## **发布流程**
 
-> 🚨 **注意**: 此部分仅适用于项目的核心维护者。普通贡献者无需执行以下操作。
+> 🚨 **注意**: 此部分仅适用于项目的核心维护者。
 
-这是一个为项目核心维护者准备的、严格的版本发布标准作业流程 (SOP)。
+本项目遵循一套严格、详细的标准作业流程（SOP）来进行版本发布，以确保每个版本的质量和可靠性。
 
-### **阶段一：本地准备**
-
-1.  更新 `pyproject.toml` 中的 `version` 字段。
-2.  在 `CHANGELOG.md` 顶部为新版本添加详尽的变更记录。
-3.  确保所有相关文档都已同步。
-4.  运行 `poetry lock` 更新锁文件。
-5.  **最终本地验证**: `poetry run pytest && poetry run mypy . && poetry run ruff check .`
-6.  构建发布包: `poetry build`
-
-### **阶段二：技术发布与验证**
-
-1.  配置 PyPI API 令牌: `poetry config pypi-token.pypi <你的令牌>`
-2.  执行发布: `poetry publish`
-3.  **立即在全新环境中测试安装**:
-    ```bash
-    # 在项目目录之外
-    python -m venv .venv && source .venv/bin/activate
-    pip install "trans-hub==<新版本号>"
-    # 运行一个简单的测试脚本，确保核心功能正常
-    deactivate
-    ```
-    > 🚨 如果此步骤失败，立即去 PyPI **废弃 (Yank)** 该版本，修复问题，然后从阶段一重新开始。
-
-### **阶段三：官方发布定稿**
-
-**只有在阶段二成功通过后**，才能进入此阶段。
-
-1.  提交所有发布相关文件: `git commit -m "chore(release): release v<新版本号>"`
-2.  创建 Git 标签: `git tag v<新版本号>`
-3.  推送所有内容: `git push && git push --tags`
-
-### **阶段四：社区沟通**
-
-1.  在 GitHub 基于新标签创建 Release，并将 `CHANGELOG.md` 的内容作为说明。
+👉 **[点击这里查看完整的发布标准作业流程 (SOP)](./RELEASE_SOP.md)**
 
 ---
 
