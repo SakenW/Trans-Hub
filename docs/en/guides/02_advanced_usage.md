@@ -4,25 +4,25 @@ Welcome to the advanced usage guide of `Trans-Hub`! After you have mastered the 
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **1. Activate Advanced Engine (e.g., OpenAI)**
+## **1. 激活高级引擎 (例如 OpenAI)**
 
-When the built-in free engine cannot meet your quality requirements, you can seamlessly switch to a more powerful engine.
+当内置的免费引擎无法满足您的质量需求时，您可以无缝切换到更强大的引擎。
 
-### **Objective**
+### **目标**
 
-Use OpenAI's GPT model as a translation engine for higher translation quality.
+使用 OpenAI 的 GPT 模型作为翻译引擎，以获得更高的翻译质量。
 
-### **Steps**
+### **步骤**
 
-1. **Install OpenAI dependencies**:  
-   `Trans-Hub` uses the `extras` mechanism to manage optional dependencies.
+1.  **安装 OpenAI 依赖**:
+    `Trans-Hub` 使用 `extras` 机制来管理可选依赖。
 
     ```bash
     pip install "trans-hub[openai]"
     ```
 
-2. **Configure the `.env` file**:  
-   Create a `.env` file in your project root directory and add your OpenAI API key and endpoint. `Trans-Hub` will automatically load these environment variables.
+2.  **配置 `.env` 文件**:
+    在您的项目根目录创建一个 `.env` 文件，并添加您的 OpenAI API 密钥和端点。`Trans-Hub` 会自动加载这些环境变量。
 
     ```dotenv
     # .env
@@ -31,7 +31,8 @@ Use OpenAI's GPT model as a translation engine for higher translation quality.
     TH_OPENAI_MODEL="gpt-4o"
     ```
 
-3. **Modify Initialization Code**: Thanks to the intelligent configuration system of `Trans-Hub`, you only need to **declare the engine you want to use** when creating `TransHubConfig`.
+3.  **修改初始化代码**:
+    得益于 `Trans-Hub` 的智能配置系统，您只需在创建 `TransHubConfig` 时，**声明您想使用的引擎**即可。
 
     ```python
     # a_script_with_openai.py
@@ -41,6 +42,7 @@ Use OpenAI's GPT model as a translation engine for higher translation quality.
     config = TransHubConfig(active_engine="openai", source_lang="en")
     coordinator = Coordinator(config=config, persistence_handler=handler)
     # ...
+    ```
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
@@ -48,24 +50,24 @@ It seems there is no text provided for translation. Please provide the text you 
 
 Before delving into the specific usage, it is crucial to understand the two core concepts of `Trans-Hub`: `business_id` and `context`.
 
-| 特性 | `business_id: str` | `context: dict` |
+| Feature | `business_id: str` | `context: dict` |
 | :It seems there is no text provided for translation. Please provide the text you would like to have translated. | :It seems there is no text provided for translation. Please provide the text you would like to have translated. | :It seems there is no text provided for translation. Please provide the text you would like to have translated. |
-| **核心目的** | **身份标识 (Identity)** | **翻译情境 (Circumstance)** |
-| **回答的问题** | “这段文本**是什么**？” <br> “它**来自哪里**？” | “应该**如何**翻译这段文本？” |
-| **主要作用** | - **来源追踪**：将文本与业务实体关联。 <br> - **生命周期管理**：用于垃圾回收 (GC)。 | - **影响翻译结果**：为引擎提供额外信息。 <br> - **区分翻译版本**：不同上下文产生不同翻译。 |
-| **对复用性的影响** | **促进复用**：不同 `business_id` 可以共享相同原文和上下文的翻译结果。 | **隔离翻译**：不同的 `context` 会生成不同的 `context_hash`，导致独立的翻译记录。 |
+| **Core Purpose** | **Identity** | **Circumstance** |
+| **Questions Answered** | “What is this text **about**?” <br> “Where does it **come from**?” | “How should this text be **translated**?” |
+| **Main Functions** | - **Source Tracking**: Associates text with business entities. <br> - **Lifecycle Management**: Used for garbage collection (GC). | - **Influences Translation Results**: Provides additional information to the engine. <br> - **Distinguishes Translation Versions**: Different contexts yield different translations. |
+| **Impact on Reusability** | **Facilitates Reuse**: Different `business_id` can share the same original text and translation results. | **Isolates Translations**: Different `context` generates different `context_hash`, leading to independent translation records. |
 
 **Summary in one sentence**: Use `business_id` to manage your text assets and use `context` to enhance translation quality in specific scenarios. We **strongly recommend using both together**.
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **3. Contextual Translation Practice: Distinguishing "Jaguar" from "Puma"**
+## **3. 上下文翻译实战：区分“捷豹”与“美洲虎”**
 
-The theory is sufficient; let's look at a practical example that best demonstrates the power of `context`. The same word 'Jaguar' has completely different meanings in different contexts. We will use `context` to guide the OpenAI engine for precise translation.
+理论已经足够，让我们来看一个最能体现 `context` 威力的实战例子。同一个词 "Jaguar" 在不同语境下有完全不同的含义。我们将使用 `context` 来引导 OpenAI 引擎进行精确翻译。
 
-### **Example Code (`context_demo.py`)**
+### **示例代码 (`context_demo.py`)**
 
-You can save the following code as a file and run it to witness the power of context firsthand.
+您可以将以下代码保存为一个文件并运行，亲眼见证上下文的力量。
 
 ```python
 import asyncio
@@ -76,7 +78,7 @@ from pathlib import Path
 import structlog
 from dotenv import load_dotenv
 
-# Ensure trans_hub is in the path
+# 确保 trans_hub 在路径中
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from trans_hub import Coordinator, DefaultPersistenceHandler, TransHubConfig
@@ -135,16 +137,17 @@ async def main():
                      translated=result.translated_content, 
                      biz_id=result.business_id)
 
-    finally:  
-        if coordinator: await coordinator.close()  
+    finally:
+        if coordinator: await coordinator.close()
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
 
-### **Expected Output**
+### **预期输出**
 
-When you run this code, you will see that `Trans-Hub` generates two completely different translations for the same original text 'Jaguar':
+当你运行这段代码时，你会看到 `Trans-Hub` 为同一个原文 "Jaguar" 生成了两个完全不同的翻译：
 
 ```
 ... [info] ✅ 翻译结果 original='Jaguar', translated='美洲虎', biz_id='wildlife.big_cat.jaguar'
@@ -167,26 +170,26 @@ This "living document" is the best way to understand how `Trans-Hub` works in th
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 ## **5. 数据生命周期：使用垃圾回收 (GC)**
 
-The built-in garbage collection (GC) feature of `Trans-Hub` allows you to regularly clean up outdated or inactive business associations in the database.
+`Trans-Hub` 内置的垃圾回收（GC）功能允许您定期清理数据库中过时或不再活跃的业务关联。
 
-### **Steps**
+### **步骤**
 
-1.  **Retention Period Configuration**: Set `gc_retention_days` in `TransHubConfig`.
+1.  **配置保留期限**: 在 `TransHubConfig` 中设置 `gc_retention_days`。
     ```python
-    config = TransHubConfig(gc_retention_days=30) # Clean up business associations that have not been active for 30 days
+    config = TransHubConfig(gc_retention_days=30) # 清理30天前未活跃的业务关联
     ```
-2.  **Regularly Invoke GC**: It is recommended to execute it in a separate maintenance script or scheduled task.
+2.  **定期调用 GC**: 建议在独立的维护脚本或定时任务中执行。
 
     ```python
     # gc_demo.py
     # ... (初始化 coordinator) ...
     log.info("It seems there is no text provided for translation. Please provide the text you would like to have translated. 运行垃圾回收 (GC) It seems there is no text provided for translation. Please provide the text you would like to have translated.")
 
-    # It is recommended to first perform a "dry run" (dry_run=True) to check the content to be deleted
+    # 建议先进行“干跑”（dry_run=True），检查将要删除的内容
     report = await coordinator.run_garbage_collection(dry_run=True, expiration_days=30)
-    log.info("GC dry run report", report=report)
+    log.info("GC 干跑报告", report=report)
 
-    # After confirming that there are no errors, proceed with the actual deletion
+    # 确认无误后，再执行真正的删除
     # await coordinator.run_garbage_collection(dry_run=False, expiration_days=30)
     ```
 

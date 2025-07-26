@@ -20,8 +20,14 @@ def parse_markdown(content: str) -> list[TranslatableBlock]:
     注意：这是一个简化的实现。一个生产级的解析器可能需要使用
     更强大的库（如 mistune）来处理更复杂的 Markdown 结构。
     """
+    # 1. 在解析前，先移除 YAML front matter (--- ... ---)
+    #    这能防止元数据被当作可翻译内容
+    content = re.sub(
+        r"^---\s*$.*?^---\s*$\n", "", content, flags=re.MULTILINE | re.DOTALL
+    )
+
     blocks = []
-    # 简单的按空行分割段落
+    # 2. 按一个或多个空行分割内容为段落
     paragraphs = re.split(r"\n{2,}", content)
 
     for p in paragraphs:
@@ -29,19 +35,21 @@ def parse_markdown(content: str) -> list[TranslatableBlock]:
         if not p_stripped:
             continue
 
-        # 忽略代码块
+        # 3. 忽略特殊块
         if p_stripped.startswith("```"):
             continue
+        if p_stripped.startswith("<!--"):
+            continue
 
-        # 简单的类型判断
+        # 4. 简单的块类型判断
         block_type = "paragraph"
         if p_stripped.startswith("#"):
             block_type = "header"
         elif re.match(r"^\s*[-*+]\s|\d+\.\s", p_stripped):
             block_type = "list_item"
 
-        # 使用内容的 sha256 哈希作为稳定 ID
-        stable_id = sha256(p_stripped.encode()).hexdigest()[:16]
+        # 5. 使用完整的内容哈希作为稳定 ID
+        stable_id = sha256(p_stripped.encode()).hexdigest()
 
         blocks.append(
             TranslatableBlock(

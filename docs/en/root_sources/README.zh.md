@@ -46,7 +46,7 @@ For more specific use cases (such as translating `.strings` files), please brows
 
 我们拥有一个全面的文档库，以帮助您深入了解 `Trans-Hub` 的方方面面。
 
-👉 [点击这里开始探索我们的文档](./docs/{lang}/index.md)
+👉 [点击这里开始探索我们的文档](./docs/en/index.md)
 
 ---
 

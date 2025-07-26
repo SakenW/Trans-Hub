@@ -4,50 +4,50 @@
 
 This is a strict version release standard operating procedure prepared for the core maintainers of the `Trans-Hub` project. Please follow all steps in order to ensure the quality and reliability of each release.
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-### **Phase One: Local Preparation and Construction**
+### **阶段一：本地准备与构建**
 
-The goal of this stage is to prepare all artifacts to be released and conduct final validation locally.
+此阶段的目标是准备好所有待发布的工件 (Artifacts)，并在本地进行最终验证。
 
-1. **Update version file:**
+1.  **更新版本文件**:
 
-    - **`pyproject.toml`**: Update the `version` field under `[tool.poetry]` to the new version number (e.g., `2.2.0`).
-    - **`trans_hub/__init__.py`**: Synchronize the `__version__` variable.
+    - **`pyproject.toml`**: 更新 `[tool.poetry]` 下的 `version` 字段为新版本号（例如 `2.2.0`）。
+    - **`trans_hub/__init__.py`**: 同步更新 `__version__` 变量。
 
-2. **Write update log:**
+2.  **撰写更新日志**:
 
-    - At the top of the **`CHANGELOG.md`** file, add detailed and clear change logs for the new version.
+    - 在 **`CHANGELOG.md`** 文件顶部，为新版本添加详尽、清晰的变更记录。
 
-3. **Review relevant documents:**
+3.  **审查相关文档**:
 
-    - Check the `README.md` and `docs/` directory to ensure that all documentation content is in sync with the new version features.
+    - 检查 `README.md` 和 `docs/` 目录，确保所有文档内容与新版本功能同步。
 
-4. **Update dependency lock file:**
+4.  **更新依赖锁文件**:
 
     ```bash
     poetry lock
     ```
 
-    > **Reason**: This ensures that the `poetry.lock` file is fully synchronized with any changes in dependencies or metadata in `pyproject.toml`.
+    > **原因**: 这确保了 `poetry.lock` 文件与 `pyproject.toml` 中的任何依赖或元数据变更完全同步。
 
-5. **Final Local Verification (CI/CD Final Inspection Standards):**
+5.  **最终本地验证 (CI/CD 最终检查标准)**:
 
-    - Run a complete code quality check and test suite.
+    - 运行完整的代码质量检查和测试套件。
 
     ```bash
     poetry run ruff check . && poetry run mypy . && poetry run pytest
     ```
 
-6.  **Build the release package**:
+6.  **构建发布包**:
     ```bash
     poetry build
     ```
-    > **Result**: This command will create the final release files (`.whl` and `.tar.gz`) in the `dist/` directory.
+    > **结果**: 此命令会在 `dist/` 目录中创建最终的发布文件 (`.whl` 和 `.tar.gz`)。
 
-**Current Status**: Your local codebase is ready for a technical release, but **no Git commits have been made yet**.
+**此刻状态**: 您的本地代码库已准备就绪，可以进行技术发布，但**尚未做任何 Git 提交**。
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ### **Phase Two: Technology Release and Verification**
 
@@ -111,7 +111,7 @@ setup_logging()
 log = structlog.get_logger()
 
       async def run_verification():
-          log.info("It seems there is no text provided for translation. Please provide the text you would like to have translated. Verifying Trans-Hub Package It seems there is no text provided for translation. Please provide the text you would like to have translated.")
+          log.info("--- Verifying Trans-Hub Package ---")
           DB_FILE = "verify_test.db"
           if os.path.exists(DB_FILE): os.remove(DB_FILE)
           apply_migrations(DB_FILE)
@@ -159,37 +159,37 @@ except Exception as e:
 
 If the `verify.py` script fails at any step, please immediately abort the release process and **yank** that version on PyPI, then restart from **Phase One**.
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-### **Stage Three: Official Release of Final Draft**
+### **阶段三：官方发布定稿**
 
-Only after successfully passing the online verification in Phase Two can one enter this stage.
+**只有在阶段二的线上验证成功通过后**，才能进入此阶段。
 
-1. **Submit all publication-related documents:**
+1.  **提交所有发布相关文件**:
 
-    - Now, we confirm that everything is normal and will submit all modifications (including code, documentation, `pyproject.toml`, `poetry.lock`, etc.) to Git.
+    - 现在，我们确认一切正常，将所有修改（包括代码、文档、`pyproject.toml`, `poetry.lock` 等）提交到 Git。
 
     ```bash
     git add .
     git commit -m "chore(release): Release v<新版本号>"
     ```
 
-2. **Create Git Tag:**
+2.  **创建 Git 标签**:
 
-    - Create a corresponding Git tag for this verified commit.
+    - 为这个已验证的提交创建一个对应的 Git 标签。
 
     ```bash
     git tag v<新版本号>
     ```
 
-3. **Push all content to the remote repository**:
-   - Push the commits from the main branch along with the new tags to GitHub.
-   ```bash
-   git push
-   git push --tags
-   ```
+3.  **推送所有内容到远程仓库**:
+    - 将主分支的提交和新标签一起推送到 GitHub。
+    ```bash
+    git push
+    git push --tags
+    ```
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ### **Stage Four: Community Communication**
 

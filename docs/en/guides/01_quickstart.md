@@ -4,33 +4,35 @@
 
 **Prerequisite**: You have installed Python 3.9 or higher.
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-### **Step 1: Install Trans-Hub**
+### **步骤 1：安装 Trans-Hub**
 
-Install `Trans-Hub` and its default `translators` engine.
+安装 `Trans-Hub` 及其默认的 `translators` 引擎。
 
 ```bash
 pip install "trans-hub[translators]"
 ```
 
-### **Step 2: Run the Basic Usage Example**
+### **步骤 2：运行基础用法示例**
 
-We have prepared a fully functional introductory script for you. It will show you the core workflow of `Trans-Hub`: initialization, task registration, executing translations, and demonstrating persistent caching through a simulated second run.
+我们已经为您准备好了一个功能完善的入门脚本。它将向您展示 `Trans-Hub` 的核心工作流：初始化、登记任务、执行翻译，并通过模拟第二次运行来演示持久化缓存。
 
-1. **Find the example file**: In the project's `examples/` directory, locate the `01_basic_usage.py` file.
+1.  **找到示例文件**:
+    在项目的 `examples/` 目录中，找到 `01_basic_usage.py` 文件。
 
-2. **Read the code**: Open the file and read the comments, which explain the function of each step in detail.
+2.  **阅读代码**:
+    打开文件并阅读其中的注释，它详细解释了每一步的作用。
 
-3.  **Run the script**:
-    In your terminal, execute the following command from the project root directory:
+3.  **运行脚本**:
+    在您的终端中，从项目根目录执行以下命令：
     ```bash
     poetry run python examples/01_basic_usage.py
     ```
 
-By observing the log output, you will see that the script demonstrates both the first translation and cache hit scenarios in a single run.
+观察日志输出，您将看到脚本在一次运行中就演示了首次翻译和缓存命中两种情况。
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ### **Congratulations!**
 

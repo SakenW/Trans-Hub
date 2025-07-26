@@ -10,13 +10,13 @@ It seems there is no text provided for translation. Please provide the text you 
 
 ## **`TranslationStatus`**
 
-A string enumeration (`Enum`) that represents the lifecycle status of a translation task in the database.
+一个字符串枚举（`Enum`），表示翻译任务在数据库中的生命周期状态。
 
-- **`PENDING`**: The task has been registered and is waiting to be processed.
-- **`TRANSLATING`**: The task is being processed by the `Coordinator` and has been locked.
-- **`TRANSLATED`**: The task has been successfully translated.
-- **`FAILED`**: The task failed during the translation process (possibly after multiple retries).
-- **`APPROVED`**: (Reserved status) The translation result has been manually reviewed or approved.
+- **`PENDING`**: 任务已登记，等待被处理。
+- **`TRANSLATING`**: 任务正在被 `Coordinator` 处理中，已被锁定。
+- **`TRANSLATED`**: 任务已成功翻译。
+- **`FAILED`**: 任务在翻译过程中失败（可能在多次重试后）。
+- **`APPROVED`**: (预留状态) 翻译结果已经过人工审核或批准。
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
@@ -42,17 +42,17 @@ It seems there is no text provided for translation. Please provide the text you 
 
 ## **`TranslationResult`**
 
-This is the final result object returned to the user by the `Coordinator`. It aggregates all relevant information from the database and the translation engine.
+这是 `Coordinator` 返回给用户的最终结果对象。它聚合了来自数据库和翻译引擎的所有相关信息。
 
-- **`original_content`** (`str`): The original text to be translated.
-- **`translated_content`** (`Optional[str]`): The translated text. If the translation fails, this field is `None`.
-- **`target_lang`** (`str`): The target language code (e.g., 'zh-CN').
-- **`status`** (`TranslationStatus`): The status of the translation task. When returned by the `Coordinator`, it is usually `TRANSLATED` or `FAILED`.
-- **`engine`** (`Optional[str]`): The name of the engine that performed this translation.
-- **`from_cache`** (`bool`): A key flag. If `True`, it indicates that this result comes from the `Trans-Hub` cache (memory cache or database) and was not translated through a real-time API call to the translation engine. If `False`, it indicates that this is a newly generated translation in this workflow.
-- **`error`** (`Optional[str]`): If the translation fails, this field contains the error message.
-- **`context_hash`** (`str`): The hash value of the context associated with this translation. For translations without context, its value is `GLOBAL_CONTEXT_SENTINEL`.
-- **`business_id`** (`Optional[str]`): The business ID associated with this translation. If the task is ad-hoc translation or the association has been garbage collected, it is `None`.
+- **`original_content`** (`str`): 被翻译的原始文本。
+- **`translated_content`** (`Optional[str]`): 翻译后的文本。如果翻译失败，此字段为 `None`。
+- **`target_lang`** (`str`): 目标语言代码 (例如, 'zh-CN')。
+- **`status`** (`TranslationStatus`): 翻译任务的状态。由 `Coordinator` 返回时，通常是 `TRANSLATED` 或 `FAILED`。
+- **`engine`** (`Optional[str]`): 执行此次翻译的引擎名称。
+- **`from_cache`** (`bool`): 一个关键标志。如果为 `True`，表示此结果来自 `Trans-Hub` 的缓存（内存缓存或数据库），并未通过实时 API 调用翻译引擎。如果为 `False`，表示这是本次工作流中新产生的翻译。
+- **`error`** (`Optional[str]`): 如果翻译失败，此字段包含错误信息。
+- **`context_hash`** (`str`): 与此翻译关联的上下文的哈希值。对于无上下文的翻译，其值为 `GLOBAL_CONTEXT_SENTINEL`。
+- **`business_id`** (`Optional[str]`): 与此翻译关联的业务 ID。如果任务是即席翻译或关联已被 GC，则为 `None`。
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 

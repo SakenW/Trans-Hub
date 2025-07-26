@@ -4,28 +4,29 @@ Welcome to the in-depth configuration guide for `Trans-Hub`. This document will 
 
 [Return to Document Index](../INDEX.md)
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-## **1. Core Concept: `TransHubConfig`**
+## **1. 核心理念：`TransHubConfig`**
 
-All configurations of `Trans-Hub` are managed by a core Pydantic model `TransHubConfig`. This is the "single source of truth" for all configurations. You should create an instance of `TransHubConfig` during your application initialization and pass it to the `Coordinator`.
+`Trans-Hub` 的所有配置都由一个核心的 Pydantic 模型 `TransHubConfig` 管理。这是所有配置的“单一事实来源”。你应该在你的应用初始化时创建一个 `TransHubConfig` 实例，并将其传递给 `Coordinator`。
 
-Basic usage:
+**基本用法**:
 
 ```python
 from trans_hub.config import TransHubConfig
 
-# Create a configuration object using all default settings
+# 创建一个使用所有默认设置的配置对象
 default_config = TransHubConfig()
 
-# Create an object with a custom configuration
+# 创建一个自定义配置的对象
 custom_config = TransHubConfig(
     active_engine="openai",
     source_lang="en",
     batch_size=100
 )
+```
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ## **2. Top-level Configuration Parameters**
 
@@ -65,72 +66,73 @@ These parameters can be set directly when initializing `TransHubConfig`.
   - **Description**: The default data retention period for garbage collection (GC) in days. `run_garbage_collection` will use this value when the `expiration_days` parameter is not specified.
   - **Default value**: `90`
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-## **3. Sub-configuration Model**
+## **3. 子配置模型**
 
-`TransHubConfig` manages the behavior of different modules by combining multiple sub-configuration models. You can achieve deep customization by creating instances of the sub-models and passing them to `TransHubConfig`.
+`TransHubConfig` 通过组合多个子配置模型来管理不同模块的行为。你可以通过创建子模型的实例并将其传递给 `TransHubConfig` 来进行深度定制。
 
 ### **3.1 `cache_config: CacheConfig`**
 
-Control the memory cache (L1 cache) behavior inside the `Coordinator`.
+控制 `Coordinator` 内部的内存缓存（L1 缓存）行为。
 
-- **`maxsize`** (`int`): The maximum number of items that can be stored in the cache.
-  - **Default value**: `1000`
-- **`ttl`** (`int`): The lifespan of cache items (in seconds). Only effective when `cache_type="ttl"`.
-  - **Default value**: `3600` (1 hour)
-- **`cache_type`** (`str`): Cache strategy. Can be `"ttl"` (time-based expiration) or `"lru"` (least recently used eviction).
-  - **Default value**: `"ttl"`
+- **`maxsize`** (`int`): 缓存中可以存储的最大项目数。
+  - **默认值**: `1000`
+- **`ttl`** (`int`): 缓存项目的生命周期（秒）。只在 `cache_type="ttl"` 时有效。
+  - **默认值**: `3600` (1 小时)
+- **`cache_type`** (`str`): 缓存策略。可以是 `"ttl"` (基于时间过期) 或 `"lru"` (最近最少使用淘汰)。
+  - **默认值**: `"ttl"`
 
-**Example**:
+**示例**:
 
 ```python
 from trans_hub.cache import CacheConfig
 
-# Create an LRU cache configuration that can hold 10,000 items and has a validity period of 24 hours
+# 创建一个能容纳 10000 个项目、有效期为 24 小时的 LRU 缓存配置
 custom_cache = CacheConfig(maxsize=10000, ttl=86400, cache_type="lru")
 
 config = TransHubConfig(cache_config=custom_cache)
+```
 
 ### **3.2 `retry_policy: RetryPolicyConfig`**
 
-Define the retry strategy for `Coordinator` when encountering retryable errors.
+定义 `Coordinator` 在遇到可重试错误时的重试策略。
 
-- **`max_attempts`** (`int`): Maximum number of attempts (excluding the first call). `2` means a total of 3 attempts will be made.
-  - **Default value**: `2`
-- **`initial_backoff`** (`float`): Initial wait time before the first retry (seconds).
-  - **Default value**: `1.0`
-- **`max_backoff`** (`float`): Maximum wait time limit under exponential backoff strategy (seconds).
-  - **Default value**: `60.0`
+- **`max_attempts`** (`int`): 最大尝试次数（不包括第一次调用）。`2` 表示总共会尝试 3 次。
+  - **默认值**: `2`
+- **`initial_backoff`** (`float`): 首次重试前的初始等待时间（秒）。
+  - **默认值**: `1.0`
+- **`max_backoff`** (`float`): 指数退避策略下的最大等待时间上限（秒）。
+  - **默认值**: `60.0`
 
 ### **3.3 `logging: LoggingConfig`**
 
-Configure the behavior of the `structlog` logging system.
+配置 `structlog` 日志系统的行为。
 
-- **`level`** (`str`): Log level, such as `"DEBUG"`, `"INFO"`, `"WARNING"`.
-  - **Default value**: `"INFO"`
-- **`format`** (`str`): Log output format. `"console"` is suitable for development environments (with color), while `"json"` is suitable for production environments.
-  - **Default value**: `"console"`
+- **`level`** (`str`): 日志级别，如 `"DEBUG"`, `"INFO"`, `"WARNING"`。
+  - **默认值**: `"INFO"`
+- **`format`** (`str`): 日志输出格式。`"console"` 适用于开发环境（带颜色），`"json"` 适用于生产环境。
+  - **默认值**: `"console"`
 
 ### **3.4 `engine_configs: EngineConfigs`**
 
-This is a special sub-model used to aggregate the configurations of all specific engines.
+这是一个特殊的子模型，用于聚合所有特定引擎的配置。
 
-Usually, you do not need to manually create `EngineConfigs` instances. The smart validator of `TransHubConfig` will automatically create and populate it for you.
+**通常，你不需要手动创建 `EngineConfigs` 实例。** `TransHubConfig` 的智能验证器会自动为你创建和填充它。
 
-However, if you need to provide a specific startup configuration for a **non-active** engine (for example, to switch to it later using `switch_engine`), you can do so:
+但是，如果你需要为一个**非激活**的引擎提供特定的启动配置（例如，为了之后通过 `switch_engine` 切换到它），你可以这样做：
 
 ```python
 from trans_hub.config import EngineConfigs
 from trans_hub.engines.openai import OpenAIEngineConfig
 
-# Manually provide a custom model for the OpenAI engine
+# 手动为 OpenAI 引擎提供一个自定义模型
 openai_config = OpenAIEngineConfig(
     openai_model="gpt-4-turbo",
-    # openai_api_key will be automatically loaded from .env
+    # openai_api_key 会自动从 .env 加载
 )
 
-# Default activates translators, but also provides pre-configuration for openai
+# 默认激活 translators，但同时为 openai 提供了预配置
 config = TransHubConfig(
     active_engine="translators",
     engine_configs=EngineConfigs(
@@ -139,7 +141,7 @@ config = TransHubConfig(
 )
 ```
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ## **4. Configuration through environment variables and `.env` files**
 

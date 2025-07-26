@@ -1,9 +1,20 @@
-# Trans-Hub：您的异步本地化后端引擎 🚀
+# **Trans-Hub: Your Async Localization Backend Engine** 🚀
+# **Trans-Hub：您的异步本地化后端引擎** 🚀
+
+<div align="right">
+
+**[English](#english-version)** | **[简体中文](#简体中文版)**
+
+</div>
 
 [![Python CI/CD Pipeline](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/SakenW/trans-hub/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/SakenW/trans-hub)
 [![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+---
+
+> **一个为 Python 设计的可嵌入异步本地化引擎，专用于自动化动态内容翻译。**
 
 `Trans-Hub` 是一个**异步优先**、可嵌入 Python 应用程序的、带持久化存储的智能本地化（i18n）后端引擎。它旨在统一和简化多语言翻译工作流，通过智能缓存、可插拔的翻译引擎、以及健壮的错误处理和策略控制，为上层应用提供高效、低成本、高可靠的翻译能力。
 
@@ -50,7 +61,7 @@
 
 我们拥有一个全面的文档库，以帮助您深入了解 `Trans-Hub` 的方方面面。
 
-👉 **[点击这里开始探索我们的文档](./docs/INDEX.md)**
+👉 [点击这里开始探索我们的文档](./docs/{lang}/index.md)
 
 ---
 

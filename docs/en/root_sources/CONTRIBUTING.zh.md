@@ -1,8 +1,7 @@
-# 为 `Trans-Hub` 做出贡献
 
-我们非常欢迎并感谢您有兴趣为 `Trans-Hub` 做出贡献！无论是报告 bug、提交功能请求，还是直接贡献代码，您的每一份努力都对我们至关重要。❤️
+We warmly welcome and thank you for your interest in contributing to `Trans-Hub`! Whether it's reporting bugs, submitting feature requests, or directly contributing code, every effort you make is vital to us. ❤️
 
----
+It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
 ## **目录**
 
@@ -22,102 +21,101 @@
   - [其他关键约定](#其他关键约定)
 - [发布流程](#发布流程)
 
----
+It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **行为准则**
+## **Code of Conduct**
 
-为了营造一个开放、友好的社区环境，我们希望所有参与者都能遵守我们的 [**行为准则 (Code of Conduct)**](./CODE_OF_CONDUCT.md)。
+To create an open and friendly community environment, we hope that all participants will adhere to our [**Code of Conduct**](./CODE_OF_CONDUCT.md).
 
-## **如何贡献**
+## **How to Contribute**
 
-我们欢迎任何形式的贡献，包括但不限于：
+We welcome any form of contribution, including but not limited to:
 
-- **报告 Bug** 或 **提交功能建议** (通过 [GitHub Issues](https://github.com/SakenW/trans-hub/issues))。
-- **完善文档**：发现拼写错误或不清晰之处？提交一个 PR 来改进它！
-- **编写代码**：修复 Bug 或实现新功能。
+- **Report a Bug** or **Submit a Feature Suggestion** (via [GitHub Issues](https://github.com/SakenW/trans-hub/issues)).
+- **Improve Documentation**: Found a typo or something unclear? Submit a PR to improve it!
+- **Write Code**: Fix bugs or implement new features.
 
-## **开发规范总则**
+## **General Principles of Development Specifications**
 
-**在开始任何代码工作之前，请务必仔细阅读本文档末尾的 [附录：详细开发规范](#附录详细开发规范)。**
+Before starting any coding work, please be sure to carefully read the [Appendix: Detailed Development Specifications](#Appendix-Detailed-Development-Specifications) at the end of this document.
 
-`Trans-Hub` 是一个对代码质量、架构清晰度和可维护性有严格要求的项目。所有贡献的代码都必须严格遵守这些规范。这确保了项目能够长期健康发展。
+Trans-Hub" is a project with strict requirements for code quality, architectural clarity, and maintainability. All contributed code must strictly adhere to these standards. This ensures the project can develop healthily in the long term.
 
-## **代码库结构概览**
+## **Overview of Code Repository Structure**
 
-为了帮助您快速熟悉项目，以下是核心目录及其中关键脚本的职责说明：
+To help you quickly familiarize yourself with the project, here are the core directories and the responsibilities of the key scripts within them:
 
-- **`trans_hub/`**: **核心库代码**。项目的所有运行时逻辑都在这里。
+- **`trans_hub/`**: **Core library code**. All runtime logic of the project is here.
 
-- **`tests/`**: **自动化测试**。
+- **`tests/`**: **Automated Testing**.
 
-  - 这里存放了项目的所有测试用例（使用 `pytest`）。CI/CD 流水线会自动运行此目录下的所有测试。
+  - This directory contains all the test cases for the project (using `pytest`). The CI/CD pipeline will automatically run all tests in this directory.
     ```bash
-    # 运行完整的测试套件
+    # Run the complete test suite
     poetry run pytest
     ```
-  - **`tests/diag/`**: 包含一些独立的**诊断脚本**。
-    - `check_env.py`: 专门用于快速验证 `.env` 文件配置。当您遇到与 API Key 相关的配置问题时，它非常有用。
+  - **`tests/diag/`**: Contains some standalone **diagnostic scripts**.
+    - `check_env.py`: Specifically designed for quickly validating the configuration of the `.env` file. It is very useful when you encounter configuration issues related to the API Key.
       ```bash
-      # 运行环境检查脚本
+      # Run the environment check script
       poetry run python tests/diag/check_env.py
       ```
 
-- **`docs/`**: **官方文档**。所有面向用户的指南、API 参考和架构文档都存放在这里。请先阅读 [**文档库索引 (INDEX.md)**](./docs/INDEX.md) 来了解其结构。
+- **`docs/`**: **Official Documentation**. All user-facing guides, API references, and architectural documentation are stored here. Please read the [**Documentation Index (INDEX.md)**](./docs/INDEX.md) first to understand its structure.
 
-- **`examples/`**: **“活”的示例代码**。
+- **`examples/`**: **Example code for "living".**
 
-  - **`translate_strings_file.py`**: 这是一个**端到端的、功能完善的演示**。它旨在向人类用户直观地、可运行地展示如何在一个复杂的场景中使用 `Trans-Hub` 的各项核心功能。
+  - **`translate_strings_file.py`**: This is a **fully functional end-to-end demonstration**. It is designed to intuitively and operationally show human users how to use the core features of `Trans-Hub` in a complex scenario.
     ```bash
-    # 运行复杂工作流演示
+    # Run complex workflow demonstration
     poetry run python examples/translate_strings_file.py
     ```
 
-- **`tools/`**: **开发者工具**。
-  - **`inspect_db.py`**: 一个专业的**数据库检查命令行工具**。它能连接到任何 `Trans-Hub` 数据库文件，并以一种易于理解的方式将其内容和解读打印出来，是调试持久化问题的利器。
+- **`tools/`**: **Developer Tools**.
+  - **`inspect_db.py`**: A specialized **database inspection command-line tool**. It can connect to any `Trans-Hub` database file and print its contents and interpretations in an easy-to-understand manner, making it a powerful tool for debugging persistence issues.
     ```bash
-    # 检查示例数据库的内容
+    # Check the contents of the example database
     poetry run python tools/inspect_db.py examples/strings_translator_demo_dynamic.db
     ```
 
-## **环境设置**
+## **Environment Setup**
 
-1.  **克隆仓库**: `git clone https://github.com/SakenW/trans-hub.git && cd trans-hub`
-2.  **安装 Poetry**: 请确保您已安装 [Poetry](https://python-poetry.org/)。
-3.  **安装所有依赖**: `poetry install --with dev --with openai`
-4.  **配置环境变量**:
-    根据 `.env.example` 模板创建您的本地 `.env` 文件，并填入必要的 API 密钥以运行完整的测试套件。
+1.  **Clone the repository**: `git clone https://github.com/SakenW/trans-hub.git && cd trans-hub`
+2.  **Install Poetry**: Please ensure you have installed [Poetry](https://python-poetry.org/).
+3.  **Install all dependencies**: `poetry install --with dev --with openai`
+4.  **Configure environment variables**: Create your local `.env` file based on the `.env.example` template and fill in the necessary API keys to run the full test suite.
     ```bash
     cp .env.example .env
     ```
-5.  **运行测试套件**: 在开始编码前，请运行 `poetry run pytest` 确保本地环境正常。
+5.  **Run the test suite**: Before you start coding, please run `poetry run pytest` to ensure the local environment is working properly.
 
-## **提交前的本地检查清单**
+## **Local Checklist Before Submission**
 
-在您执行 `git commit` 之前，请务必在本地运行以下三个命令，以确保您的代码符合项目的质量标准。这可以避免在提交 Pull Request 后因为 CI/CD 检查失败而被驳回。
+Before you execute `git commit`, please make sure to run the following three commands locally to ensure your code meets the project's quality standards. This can prevent your Pull Request from being rejected due to CI/CD check failures after submission.
 
-1.  **格式化代码**: 确保所有代码风格统一。
+1.  **Format Code**: Ensure all code styles are consistent.
     ```bash
     poetry run ruff format .
     ```
-2.  **代码质量与风格检查**: 自动修复潜在问题。
+2.  **Code Quality and Style Check**: Automatically fix potential issues.
     ```bash
     poetry run ruff check --fix .
     ```
-3.  **静态类型检查**: 确保没有类型错误。
+3.  **Static Type Checking**: Ensure there are no type errors.
     ```bash
     poetry run mypy .
     ```
 
-> **提示**: 频繁运行这些命令是个好习惯。
+> **Tip**: Running these commands frequently is a good habit.
 
-## **提交 Pull Request**
+## **Submit Pull Request**
 
-1.  完成开发和测试后，创建一个 Pull Request (PR)，目标分支为 `main`。
-2.  在 PR 的描述中，请清晰地说明您解决了什么问题或实现了什么功能。我们推荐使用项目提供的 [PR 模板](./.github/pull_request_template.md)。
-3.  请确保您的 PR 通过了我们 CI 流水线的所有自动化检查。
-4.  项目维护者会尽快审查您的代码。
+1. After completing development and testing, create a Pull Request (PR) with the target branch as `main`.  
+2. In the PR description, please clearly state what issue you have resolved or what feature you have implemented. We recommend using the [PR template](./.github/pull_request_template.md) provided by the project.  
+3. Please ensure that your PR passes all automated checks in our CI pipeline.  
+4. Project maintainers will review your code as soon as possible.
 
----
+It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
 ## **附录：详细开发规范**
 
@@ -210,16 +208,16 @@
 3.  **数据库演进:** 任何 Schema 变更都**必须通过新的迁移脚本**实现。
 4.  **文档:** 除了代码内文档，还需维护 `README.md` 和 `docs/` 目录。
 
----
+It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **发布流程**
+## **Release Process**
 
-> 🚨 **注意**: 此部分仅适用于项目的核心维护者。
+> 🚨 **Note**: This section is only applicable to the core maintainers of the project.
 
-本项目遵循一套严格、详细的标准作业流程（SOP）来进行版本发布，以确保每个版本的质量和可靠性。
+This project follows a strict and detailed standard operating procedure (SOP) for version releases to ensure the quality and reliability of each version.
 
-👉 **[点击这里查看完整的发布标准作业流程 (SOP)](./RELEASE_SOP.md)**
+👉 **[Click here to view the complete release standard operating procedure (SOP)](./RELEASE_SOP.md)**
 
----
+It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-再次感谢您的贡献！我们期待与您共建 `Trans-Hub`。
+Thank you again for your contribution! We look forward to building `Trans-Hub` together with you.

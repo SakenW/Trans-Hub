@@ -8,14 +8,14 @@ We will cover database management, deployment patterns for background tasks, and
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **1. Core Deployment Philosophy: Separation of Concerns**
+## **1. 核心部署理念：分离关注点**
 
-In a production environment, the workflow of `Trans-Hub` is typically divided into two main parts:
+在生产环境中，`Trans-Hub` 的工作流通常被分离为两个主要部分：
 
-1.  **API Application (Synchronous/Web)**: Responsible for receiving user requests and responding quickly. Its main duty is to call `Coordinator.request()` to **register** translation tasks.  
-2.  **Background Worker (Worker)**: One or more independent, long-running processes. Its sole responsibility is to continuously call `Coordinator.process_pending_translations()` to **process** backlog tasks.
+1.  **API 应用 (同步/Web)**: 负责接收用户请求并快速响应。它的主要职责是调用 `Coordinator.request()` 来**登记**翻译任务。
+2.  **后台工作进程 (Worker)**: 一个或多个独立的、长期运行的进程。它的唯一职责是持续调用 `Coordinator.process_pending_translations()` 来**处理**积压的任务。
 
-This separation ensures that even if there is a surge in user translation requests, the API application can maintain low latency, as it only performs the lightest database write operations. Heavy and time-consuming translation tasks (involving network I/O) are handled asynchronously by backend workers.
+这种分离确保了即使用户的翻译请求量激增，API 应用也能保持低延迟，因为它只做最轻量级的数据库写入操作。繁重的、耗时的翻译任务（涉及网络 I/O）则由后台的 Worker 异步处理。
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
@@ -51,13 +51,13 @@ def startup():
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 
-## **3. Deploying Background Worker Processes**
+## **3. 部署后台工作进程 (Worker)**
 
-The backend Worker is the "heart" of the `Trans-Hub` translation capability.
+后台 Worker 是 `Trans-Hub` 翻译能力的“心脏”。
 
-### **3.1 Worker Script Example**
+### **3.1 Worker 脚本示例**
 
-Create a script named `worker.py`. Its logic is very simple: call `process_pending_translations` in an infinite loop.
+创建一个名为 `worker.py` 的脚本。它的逻辑非常简单：在一个无限循环中调用 `process_pending_translations`。
 
 ```python
 # worker.py
@@ -67,70 +67,71 @@ from trans_hub import Coordinator, DefaultPersistenceHandler, TransHubConfig
 from trans_hub.logging_config import setup_logging
 
 async def main():
-    """A long-running background worker process."""
-    setup_logging(log_level="INFO", log_format="json") # Use JSON format in production environment
+    """一个长期运行的后台工作进程。"""
+    setup_logging(log_level="INFO", log_format="json") # 生产环境使用 JSON 格式
     log = structlog.get_logger("worker")
 
-    # Load configuration from .env or environment variables
-config = TransHubConfig()
-handler = DefaultPersistenceHandler(config.db_path)
-coordinator = Coordinator(config, handler)
+    # 从 .env 或环境变量加载配置
+    config = TransHubConfig()
+    handler = DefaultPersistenceHandler(config.db_path)
+    coordinator = Coordinator(config, handler)
 
     try:
         await coordinator.initialize()
-        log.info("Background Worker started, beginning to listen for pending tasks...")
+        log.info("后台 Worker 启动，开始监听待处理任务...")
 
         while True:
             try:
-                # Define the list of languages you want to process here
+                # 在这里定义你想处理的语言列表
                 target_languages = ["zh-CN", "fr", "de", "ja"]
 
                 for lang in target_languages:
-                    log.info(f"Checking tasks for '{lang}'...")
+                    log.info(f"正在检查 'en' 的任务...")
                     processed_count = 0
                     async for result in coordinator.process_pending_translations(lang):
                         processed_count += 1
-                        log.debug("Task processed", result=result)
+                        log.debug("任务已处理", result=result)
                     if processed_count > 0:
-                        log.info(f"Processed {processed_count} '{lang}' tasks this round.")
+                        log.info(f"本轮处理了 {processed_count} 个 'en' 任务。")
 
-                # After all languages have been checked, wait for a while before starting the next round
-                log.info("All language checks are complete, the Worker will poll again in 60 seconds.")
+                # 所有语言都检查完毕后，等待一段时间再开始下一轮
+                log.info("所有语言检查完毕，Worker 将在 60 秒后再次轮询。")
                 await asyncio.sleep(60)
 
             except Exception:
-                log.error("An unexpected error occurred in the Worker loop, will retry in 60 seconds.", exc_info=True)
+                log.error("Worker 循环中发生意外错误，将在 60 秒后重试。", exc_info=True)
                 await asyncio.sleep(60)
     finally:
         if "coordinator" in locals() and coordinator.initialized:
             await coordinator.close()
-            log.info("Background Worker has been closed.")
+            log.info("后台 Worker 已关闭。")
 
 if __name__ == "__main__":
     asyncio.run(main())
 
-### **3.2 Run Worker**
+### **3.2 运行 Worker**
 
-You should use a process management tool (such as `systemd`, `supervisor`, or `pm2`) to ensure that your `worker.py` script can run as a background service for a long time and automatically restart in case of an unexpected crash.
+你应该使用一个进程管理工具（如 `systemd`, `supervisor`, 或 `pm2`）来确保你的 `worker.py` 脚本能够作为后台服务长期运行，并在意外崩溃时自动重启。
 
-Example of a service unit file using `systemd` (`/etc/systemd/system/trans-hub-worker.service`):
+**使用 `systemd` 的服务单元文件示例 (`/etc/systemd/system/trans-hub-worker.service`)**:
 
 ```ini
 [Unit]
 Description=Trans-Hub Background Worker
 After=network.target
 
-[Service]  
-User=your_app_user  
-Group=your_app_group  
-WorkingDirectory=/path/to/your/project  
-# Ensure poetry is in PATH, or use absolute path  
-ExecStart=/path/to/your/poetry/bin/poetry run python worker.py  
-Restart=always  
+[Service]
+User=your_app_user
+Group=your_app_group
+WorkingDirectory=/path/to/your/project
+# 确保 poetry 在 PATH 中，或者使用绝对路径
+ExecStart=/path/to/your/poetry/bin/poetry run python worker.py
+Restart=always
 RestartSec=10
 
-[Install]  
+[Install]
 WantedBy=multi-user.target
+```
 
 It seems there is no text provided for translation. Please provide the text you would like to have translated.
 

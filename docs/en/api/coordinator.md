@@ -7,19 +7,19 @@ This document is the authoritative API reference for the `Coordinator` class. Th
 
 [Return to Document Index](../INDEX.md)
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-## **Overview**
+## **概述**
 
-Coordinator" is a **purely asynchronous** class responsible for managing the entire translation lifecycle. Its core responsibilities include:
+`Coordinator` 是一个**纯异步**的类，负责管理整个翻译生命周期。它的核心职责包括：
 
-- Receive translation requests.
-- Pull pending tasks from the persistence layer.
-- Invoke the currently active translation engine.
-- Apply retry, caching, and rate limiting strategies.
-- Write the final results back to the persistence layer.
+- 接收翻译请求。
+- 从持久化层拉取待办任务。
+- 调用当前活动的翻译引擎。
+- 应用重试、缓存和速率限制策略。
+- 将最终结果写回持久化层。
 
-## **Initialization**
+## **初始化**
 
 ### `__init__(...)`
 
@@ -32,15 +32,16 @@ def __init__(
 ) -> None:
 ```
 
-**Description**: The constructor of `Coordinator`. This is a synchronous method responsible for receiving all dependencies and performing internal setup. **This method does not perform any I/O operations.** The created `Coordinator` instance is **state-independent** (except for the held configuration and dependencies), so it can be safely reused in your application.
+**描述**:
+`Coordinator` 的构造函数。这是一个同步方法，负责接收所有依赖项并进行内部设置。**此方法不执行任何 I/O 操作。** 创建的 `Coordinator` 实例是**状态无关**的（除了持有的配置和依赖），因此可以在您的应用中安全地复用。
 
 **Parameters:**
 
-- **`config`** (`TransHubConfig`): A complete `TransHubConfig` object. The `Coordinator` will read all behavior configurations from this object.
-- **`persistence_handler`** (`PersistenceHandler`): An instance of a pure asynchronous persistence handler that implements the `PersistenceHandler` protocol.
-- **`rate_limiter`** (`Optional[RateLimiter]`): (Optional) An instance of `RateLimiter`. If provided, the `Coordinator` will adhere to its rate limits before calling the engine.
+- **`config`** (`TransHubConfig`): 一个完整的 `TransHubConfig` 对象。`Coordinator` 将从此对象中读取所有行为配置。
+- **`persistence_handler`** (`PersistenceHandler`): 一个实现了 `PersistenceHandler` 协议的、纯异步的持久化处理器实例。
+- **`rate_limiter`** (`Optional[RateLimiter]`): (可选) 一个 `RateLimiter` 实例。如果提供，`Coordinator` 将在调用引擎前遵守其速率限制。
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ## **Public Methods**
 

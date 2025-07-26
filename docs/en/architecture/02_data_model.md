@@ -4,15 +4,15 @@ The target audience of this document: core maintainers, database administrators,
 
 **Document Purpose**: This document is the authoritative specification of the data model and database schema for the `Trans-Hub` project. It provides a detailed description of the structure of each table, the meaning of the fields, indexes, and design decisions.
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-## **1. Database Support and Requirements**
+## **1. 数据库支持与要求**
 
-- **Default Implementation**: **SQLite**. To ensure high concurrency performance, **it must run in WAL (Write-Ahead Logging) mode**. This setting is included in the initial migration script.
-- **Atomicity Requirement**: All write operations of `PersistenceHandler` **must be transactional atomic operations**.
-- **Database Migration**: Migration is managed through a separate `schema_manager.py` and SQL files, which is a necessary step during deployment and application startup.
+- **默认实现**: **SQLite**。为保证高并发性能，**必须以 WAL (Write-Ahead Logging) 模式运行**。该设置已包含在初始迁移脚本中。
+- **原子性要求**: `PersistenceHandler` 的所有写操作**必须是事务性原子操作**。
+- **数据库迁移**: 迁移通过独立的 `schema_manager.py` 和 SQL 文件进行管理，是部署和应用启动时的必要步骤。
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ## **2. Database Schema**
 
@@ -54,18 +54,18 @@ It seems there is no text provided for translation. Please provide the text you 
   - **`UNIQUE(content_id, lang_code, context_hash)`**: Ensures that there is only one translation record for the same original text, target language, and context.
   - **`idx_th_translations_lookup`**: Covers fields like `(lang_code, status)` for efficient querying of pending tasks (`stream_translatable_items`).
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
-## **3. Garbage Collection (GC)**
+## **3. 垃圾回收 (GC)**
 
-The `Coordinator.run_garbage_collection()` method performs the following two cleanup steps:
+`Coordinator.run_garbage_collection()` 方法执行以下两步清理：
 
-1. **Clean up expired business associations**: Delete records in the `th_sources` table where `last_seen_at` is earlier than the retention period.
-   - This operation supports `dry_run` mode, allowing a preview of the cleanup report without actually deleting data.
-2. **Clean up isolated content**: Delete "isolated" records in `th_content` that are **no longer referenced by any `th_sources` or `th_translations` records**.
-   - **Important**: Due to foreign key constraints set to `ON DELETE CASCADE`, when an isolated `th_content` record is deleted, all associated `th_translations` records will also be automatically and safely cleaned up.
+1.  **清理过期的业务关联**: 删除 `th_sources` 表中 `last_seen_at` 早于保留期限的记录。
+    - 此操作支持 `dry_run` 模式，允许在不实际删除数据的情况下预览清理报告。
+2.  **清理孤立的内容**: 删除 `th_content` 中**不再被任何 `th_sources` 或 `th_translations` 记录引用**的“孤立”记录。
+    - **重要**: 由于外键约束设置了 `ON DELETE CASCADE`，当一条孤立的 `th_content` 记录被删除时，所有与之关联的 `th_translations` 记录也会被自动、安全地一并清理。
 
-It seems there is no text provided for translation. Please provide the text you would like to have translated.
+---
 
 ## **4. The Role of `business_id` and `context`**
 
