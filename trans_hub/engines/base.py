@@ -1,4 +1,4 @@
-# trans_hub/engines/base.py (最终 Mypy 修复版)
+# trans_hub/engines/base.py
 """
 本模块定义了所有翻译引擎插件必须继承的抽象基类（ABC）。
 
@@ -9,7 +9,7 @@
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Any, Generic, Optional, TypeVar, Union, cast
 
 from pydantic import BaseModel
 
@@ -57,8 +57,24 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self, context: Optional[BaseContextModel]
     ) -> dict[str, Any]:
         if context and isinstance(context, self.CONTEXT_MODEL):
-            return context.model_dump(exclude_unset=True)
+            return cast(dict[str, Any], context.model_dump(exclude_unset=True))
         return {}
+
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 新增方法 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    def validate_and_parse_context(
+        self, context_dict: Optional[dict[str, Any]]
+    ) -> Union[BaseContextModel, EngineError, None]:
+        """验证并解析一个原始的 context 字典。"""
+        if not self.CONTEXT_MODEL or not context_dict:
+            return None
+
+        try:
+            return self.CONTEXT_MODEL.model_validate(context_dict)
+        except Exception as e:
+            error_msg = f"上下文验证失败: {e}"
+            return EngineError(error_message=error_msg, is_retryable=False)
+
+    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     async def atranslate_batch(
         self,
@@ -80,20 +96,16 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
             for text in texts
         ]
 
-        # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 修复点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        # 将 Exception 拓宽为 BaseException，以匹配 asyncio.gather 的行为
         results: list[
             Union[EngineBatchItemResult, BaseException]
         ] = await asyncio.gather(*tasks, return_exceptions=True)
-        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         final_results: list[EngineBatchItemResult] = []
         for res in results:
-            # 同样，使用 BaseException 进行检查
             if isinstance(res, BaseException):
                 error_res = EngineError(
                     error_message=f"引擎执行异常: {res.__class__.__name__}: {res}",
-                    is_retryable=True,  # 对于未知异常，默认为可重试
+                    is_retryable=True,
                 )
                 final_results.append(error_res)
             elif isinstance(res, (EngineSuccess, EngineError)):

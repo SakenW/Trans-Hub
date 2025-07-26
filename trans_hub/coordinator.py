@@ -1,23 +1,23 @@
 # trans_hub/coordinator.py
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
-
-它采用动态引擎发现机制，并负责编排所有核心工作流，包括任务处理、重试、
-速率限制、请求处理和垃圾回收等。
+它负责动态加载、验证引擎配置，并编排所有核心工作流。
 """
 
 import asyncio
 import json
 from collections.abc import AsyncGenerator
 from itertools import groupby
-from typing import Any, Optional, Union, cast
+from typing import Any, Optional, Union
 
 import structlog
+from pydantic import create_model
 
 from trans_hub.cache import TranslationCache
-from trans_hub.config import TransHubConfig
-from trans_hub.engine_registry import ENGINE_REGISTRY
+from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.engine_registry import ENGINE_REGISTRY, discover_engines
 from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
+from trans_hub.engines.meta import ENGINE_CONFIG_REGISTRY
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.rate_limiter import RateLimiter
 from trans_hub.types import (
@@ -34,11 +34,7 @@ logger = structlog.get_logger(__name__)
 
 
 class Coordinator:
-    """
-    异步主协调器。
-
-    负责编排翻译工作流，全面支持异步引擎、异步持久化和异步任务处理。
-    """
+    """异步主协调器。"""
 
     def __init__(
         self,
@@ -46,6 +42,9 @@ class Coordinator:
         persistence_handler: PersistenceHandler,
         rate_limiter: Optional[RateLimiter] = None,
     ) -> None:
+        """初始化协调器实例，并动态完成引擎配置的加载和验证。"""
+        discover_engines()
+
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
@@ -60,51 +59,62 @@ class Coordinator:
         if self.active_engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"指定的活动引擎 '{self.active_engine_name}' 不可用。")
 
+        self._validate_and_populate_engine_configs()
+
         self.active_engine: BaseTranslationEngine[Any] = self._create_engine_instance(
             self.active_engine_name
         )
 
         if self.active_engine.REQUIRES_SOURCE_LANG and not self.config.source_lang:
-            raise ValueError(
-                f"活动引擎 '{self.active_engine_name}' 需要提供源语言，但全局配置 'source_lang' 未设置。"
-            )
+            raise ValueError(f"活动引擎 '{self.active_engine_name}' 需要提供源语言。")
 
-        logger.info(
-            "协调器初始化完成。",
-            active_engine=self.active_engine_name,
-            rate_limiter_enabled=bool(self.rate_limiter),
+        logger.info("协调器初始化完成。", active_engine=self.active_engine_name)
+
+    def _validate_and_populate_engine_configs(self) -> None:
+        """动态地验证和填充 engine_configs，使其成为一个类型完整的 Pydantic 模型。"""
+        dynamic_fields: dict[str, Any] = {
+            name: (Optional[config_class], None)
+            for name, config_class in ENGINE_CONFIG_REGISTRY.items()
+        }
+
+        DynamicEngineConfigs = create_model(  # noqa: N806
+            "DynamicEngineConfigs", __base__=EngineConfigs, **dynamic_fields
         )
 
+        validated_data = self.config.engine_configs.model_dump()
+        rebuilt_configs = DynamicEngineConfigs.model_validate(validated_data)
+
+        for name, config_class in ENGINE_CONFIG_REGISTRY.items():
+            if getattr(rebuilt_configs, name, None) is None:
+                instance = config_class()
+                setattr(rebuilt_configs, name, instance)
+
+        self.config.engine_configs = rebuilt_configs
+
     def _create_engine_instance(self, engine_name: str) -> BaseTranslationEngine[Any]:
-        """根据名称创建并返回一个引擎实例。"""
         engine_class = ENGINE_REGISTRY[engine_name]
-
-        # 直接从 config 对象中获取已经由验证器创建好的配置实例
         engine_config_instance = getattr(self.config.engine_configs, engine_name, None)
-        if not engine_config_instance:
-            # 此处理论上不应被触发，但作为保障
-            raise ValueError(f"在配置中未找到引擎 '{engine_name}' 的配置实例。")
 
-        # 直接将配置实例传递给引擎的构造函数
+        if not engine_config_instance:
+            raise ValueError(f"未能为引擎 '{engine_name}' 创建或找到配置实例。")
+
         return engine_class(config=engine_config_instance)
 
     def switch_engine(self, engine_name: str) -> None:
         if engine_name == self.active_engine_name:
-            logger.debug(f"引擎 '{engine_name}' 已是活动引擎，无需切换。")
             return
 
-        logger.info(
-            "正在切换活动引擎...",
-            current_engine=self.active_engine_name,
-            new_engine=engine_name,
-        )
+        logger.info("正在切换活动引擎...", new_engine=engine_name)
         if engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
+
+        # 在切换时，也要确保配置实例存在
+        if getattr(self.config.engine_configs, engine_name, None) is None:
+            self._validate_and_populate_engine_configs()
 
         self.active_engine = self._create_engine_instance(engine_name)
         self.active_engine_name = engine_name
         self.config.active_engine = engine_name
-
         logger.info(f"成功切换活动引擎至: '{self.active_engine_name}'。")
 
     async def initialize(self) -> None:
@@ -124,7 +134,6 @@ class Coordinator:
         initial_backoff: Optional[float] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
         validate_lang_codes([target_lang])
-
         batch_policy = getattr(
             self.active_engine.config, "max_batch_size", self.config.batch_size
         )
@@ -135,12 +144,8 @@ class Coordinator:
         )
 
         logger.info(
-            "开始处理待翻译任务。",
-            target_lang=target_lang,
-            batch_size=final_batch_size,
-            max_retries=final_max_retries,
+            "开始处理待翻译任务。", target_lang=target_lang, batch_size=final_batch_size
         )
-
         content_batches = self.handler.stream_translatable_items(
             lang_code=target_lang,
             statuses=[TranslationStatus.PENDING, TranslationStatus.FAILED],
@@ -152,19 +157,17 @@ class Coordinator:
             if not batch:
                 continue
 
-            # 按 context_hash 对批次进行分组，以确保上下文一致性
             batch.sort(key=lambda item: item.context_hash)
             for context_hash, items_group_iter in groupby(
                 batch, key=lambda item: item.context_hash
             ):
                 items_group = list(items_group_iter)
                 logger.debug(
-                    "正在处理一个上下文一致的小组",
+                    "正在处理上下文一致的小组",
                     context_hash=context_hash,
                     item_count=len(items_group),
                 )
 
-                # 对每个上下文一致的小组调用重试逻辑
                 batch_results = await self._process_batch_with_retry_logic(
                     items_group, target_lang, final_max_retries, final_initial_backoff
                 )
@@ -186,13 +189,13 @@ class Coordinator:
         initial_backoff: float,
     ) -> list[TranslationResult]:
         business_id_map = await self._get_business_id_map(batch)
-        validated_context = self._validate_and_get_context(batch)
+
+        validated_context = self.active_engine.validate_and_parse_context(
+            batch[0].context if batch else None
+        )
 
         if isinstance(validated_context, EngineError):
-            logger.warning(
-                "批次上下文验证失败，整个批次将标记为失败。",
-                error=validated_context.error_message,
-            )
+            logger.warning("批次上下文验证失败", error=validated_context.error_message)
             return [
                 self._build_translation_result(
                     item, target_lang, business_id_map, error_override=validated_context
@@ -213,14 +216,11 @@ class Coordinator:
             final_results.extend(processed_results)
 
             if not retryable_items:
-                logger.debug(f"上下文小组处理完成（尝试 {attempt + 1}）。")
                 return final_results
 
             if attempt >= max_retries:
                 logger.error(
-                    f"上下文小组达到最大重试次数 ({max_retries + 1})。",
-                    retry_item_count=len(retryable_items),
-                    context_hash=batch[0].context_hash if batch else "N/A",
+                    "小组达到最大重试次数", retry_item_count=len(retryable_items)
                 )
                 error = EngineError(
                     error_message="达到最大重试次数", is_retryable=False
@@ -237,7 +237,7 @@ class Coordinator:
             items_to_process = retryable_items
             backoff_time = initial_backoff * (2**attempt)
             logger.warning(
-                f"小组中包含可重试的错误，将在 {backoff_time:.2f} 秒后重试。",
+                f"小组中包含可重试错误，将在 {backoff_time:.2f}s 后重试。",
                 retry_count=len(items_to_process),
             )
             await asyncio.sleep(backoff_time)
@@ -253,14 +253,12 @@ class Coordinator:
         cached_results, uncached_items = await self._separate_cached_items(
             batch, target_lang, business_id_map
         )
-
         if not uncached_items:
             return cached_results, []
 
         engine_outputs = await self._translate_uncached_items(
             uncached_items, target_lang, context
         )
-
         processed_results: list[TranslationResult] = list(cached_results)
         retryable_items: list[ContentItem] = []
 
@@ -285,17 +283,16 @@ class Coordinator:
             self.handler.get_business_id_for_content(item.content_id, item.context_hash)
             for item in batch
         ]
-        retrieved_ids = await asyncio.gather(*tasks)
         return {
             (item.content_id, item.context_hash): biz_id
-            for item, biz_id in zip(batch, retrieved_ids)
+            for item, biz_id in zip(batch, await asyncio.gather(*tasks))
         }
 
     async def _separate_cached_items(
         self,
         batch: list[ContentItem],
         target_lang: str,
-        business_id_map: dict[tuple[int, str], Optional[str]],
+        business_id_map: dict,
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
         cached_results: list[TranslationResult] = []
         uncached_items: list[ContentItem] = []
@@ -325,9 +322,6 @@ class Coordinator:
         if self.rate_limiter:
             await self.rate_limiter.acquire(len(items))
         try:
-            logger.debug(
-                f"调用异步引擎 '{self.active_engine_name}' 翻译 {len(items)} 个项目。"
-            )
             return await self.active_engine.atranslate_batch(
                 texts=[item.value for item in items],
                 target_lang=target_lang,
@@ -335,12 +329,7 @@ class Coordinator:
                 context=context,
             )
         except Exception as e:
-            logger.error(
-                "引擎调用失败，将所有项目标记为可重试错误。",
-                engine=self.active_engine_name,
-                error=str(e),
-                exc_info=True,
-            )
+            logger.error("引擎调用失败", error=str(e), exc_info=True)
             return [EngineError(error_message=str(e), is_retryable=True)] * len(items)
 
     async def _cache_new_results(
@@ -361,21 +350,6 @@ class Coordinator:
         ]
         if tasks:
             await asyncio.gather(*tasks)
-
-    def _validate_and_get_context(
-        self, batch: list[ContentItem]
-    ) -> Union[BaseContextModel, EngineError, None]:
-        if not batch or not self.active_engine.CONTEXT_MODEL or not batch[0].context:
-            return None
-        try:
-            validated_model = self.active_engine.CONTEXT_MODEL.model_validate(
-                batch[0].context
-            )
-            return cast(BaseContextModel, validated_model)
-        except Exception as e:
-            error_msg = f"上下文验证失败: {e}"
-            logger.error(error_msg, context=batch[0].context, exc_info=True)
-            return EngineError(error_message=error_msg, is_retryable=False)
 
     def _build_translation_result(
         self,
@@ -403,7 +377,6 @@ class Coordinator:
                 context_hash=item.context_hash,
                 business_id=biz_id,
             )
-
         if cached_text is not None:
             return TranslationResult(
                 original_content=item.value,
@@ -411,11 +384,10 @@ class Coordinator:
                 target_lang=target_lang,
                 status=TranslationStatus.TRANSLATED,
                 from_cache=True,
+                engine=f"{self.active_engine_name} (mem-cached)",
                 context_hash=item.context_hash,
-                engine=f"{self.active_engine_name} (cached)",
                 business_id=biz_id,
             )
-
         if isinstance(engine_output, EngineSuccess):
             return TranslationResult(
                 original_content=item.value,
@@ -460,36 +432,16 @@ class Coordinator:
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
-        """
-        直接获取一个已完成的翻译结果。
-
-        此方法会依次检查内存缓存和持久化存储，是获取已翻译内容最高效的方式。
-
-        Args:
-        ----
-            text_content (str): 要查询的原始文本。
-            target_lang (str): 目标语言代码。
-            context (Optional[dict[str, Any]]): 翻译上下文，用于区分不同情境下的翻译。
-
-        Returns:
-        -------
-            Optional[TranslationResult]: 如果找到已完成的翻译，则返回结果对象；否则返回 None。
-
-        """
         validate_lang_codes([target_lang])
         context_hash = get_context_hash(context)
-
-        # 1. 检查内存缓存 (L1 Cache)
         request = TranslationRequest(
             source_text=text_content,
-            source_lang=self.config.source_lang,  # 使用全局源语言进行缓存键生成
+            source_lang=self.config.source_lang,
             target_lang=target_lang,
             context_hash=context_hash,
         )
         cached_text = await self.cache.get_cached_result(request)
         if cached_text:
-            # 注意：从内存缓存返回时，business_id 和 engine 可能是近似值
-            # 因为我们无法直接从内存缓存中得知是哪个 business_id 触发了它
             return TranslationResult(
                 original_content=text_content,
                 translated_content=cached_text,
@@ -498,20 +450,15 @@ class Coordinator:
                 from_cache=True,
                 engine=f"{self.active_engine_name} (mem-cached)",
                 context_hash=context_hash,
-                business_id=None,  # 无法从内存缓存中确定
+                business_id=None,
             )
-
-        # 2. 检查持久化存储 (L2 Cache)
         db_result = await self.handler.get_translation(
             text_content, target_lang, context
         )
-
-        # 3. (可选) 如果在数据库中找到，回填到内存缓存
         if db_result and db_result.translated_content:
             await self.cache.cache_translation_result(
                 request, db_result.translated_content
             )
-
         return db_result
 
     async def run_garbage_collection(

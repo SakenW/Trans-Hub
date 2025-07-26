@@ -1,7 +1,7 @@
 # tests/test_main.py
 """
 Trans-Hub 核心功能端到端测试。
-此版本适配了 v2.2+ 的终极动态配置模式。
+此版本适配了 v2.2+ 的最终动态配置模式，测试代码保持简单。
 """
 
 import os
@@ -15,15 +15,10 @@ import pytest
 import pytest_asyncio
 import structlog
 from dotenv import load_dotenv
-from pydantic import HttpUrl, SecretStr
 
-# [核心修复] 直接从引擎模块导入 Config 类
-from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
-from trans_hub.engines.debug import DebugEngineConfig
-from trans_hub.engines.openai import OpenAIEngineConfig
-from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import DefaultPersistenceHandler
@@ -50,33 +45,24 @@ def setup_test_environment():
 
 @pytest.fixture
 def test_config() -> TransHubConfig:
-    """提供一个隔离的、用于测试的 TransHubConfig 实例。"""
+    """
+    提供一个最简化的、用于测试的 TransHubConfig 实例。
+    引擎配置的创建和验证完全由 Coordinator 的初始化逻辑处理。
+    """
     db_file = f"test_{os.urandom(4).hex()}.db"
-
-    openai_api_key_str = os.getenv("TH_OPENAI_API_KEY", "dummy-key-for-testing")
-    openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
-
-    # [核心修复] 手动为所有将在测试中使用的引擎提供完整的、有效的配置。
-    # 这使得测试不依赖于环境变量，行为完全可预测。
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
         active_engine=ENGINE_DEBUG,
         source_lang="en",
-        engine_configs=EngineConfigs(
-            debug=DebugEngineConfig(),
-            translators=TranslatorsEngineConfig(),
-            openai=OpenAIEngineConfig(
-                openai_api_key=SecretStr(openai_api_key_str),
-                openai_endpoint=HttpUrl(openai_endpoint_str),
-            ),
-        ),
     )
+
 
 @pytest_asyncio.fixture
 async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator, None]:
     """提供一个完全初始化并准备就绪的 Coordinator 实例。"""
     apply_migrations(test_config.db_path)
     handler: PersistenceHandler = DefaultPersistenceHandler(db_path=test_config.db_path)
+    # Coordinator 的 __init__ 将处理所有复杂的引擎配置加载
     coord = Coordinator(config=test_config, persistence_handler=handler)
     await coord.initialize()
     yield coord
