@@ -64,26 +64,95 @@
     ```
 
 3.  **立即进行线上验证 (关键步骤)**:
+    -   **检查 PyPI 页面**: 访问 `https://pypi.org/project/trans-hub/`，确认新版本已显示。
+    -   **在全新环境中测试安装与核心功能**:
+        ```bash
+        # 1. 创建一个全新的、干净的临时目录和虚拟环境
+        cd ~ && rm -rf temp-pypi-test && mkdir temp-pypi-test && cd temp-pypi-test
+        python -m venv .venv && source .venv/bin/activate
 
-    - **检查 PyPI 页面**: 访问 `https://pypi.org/project/trans-hub/`，确认新版本已显示。
-    - **在全新环境中测试安装**:
+        # 2. 从 PyPI 安装刚刚发布的版本（包含所有 extras 以进行完整测试）
+        pip install "trans-hub[translators,openai]==<新版本号>"
+        
+        # 3. 创建一个临时的 .env 文件以供 OpenAI 引擎初始化测试
+        echo 'TH_OPENAI_API_KEY="dummy-key-for-verification"' > .env
 
-      ```bash
-      # 1. 创建全新的、干净的虚拟环境
-      cd ~ && rm -rf temp-pypi-test && mkdir temp-pypi-test && cd temp-pypi-test
-      python -m venv .venv && source .venv/bin/activate
-
-      # 2. 从 PyPI 安装刚刚发布的版本（包含所有 extras 以进行完整测试）
-      pip install "trans-hub[translators,openai]==<新版本号>"
-
-      # 3. 运行一个简单的验证脚本，确保核心功能正常
-      #    (或者使用项目中的 verify.py 脚本)
-      python -c "import asyncio, os; from trans_hub import *; from trans_hub.db.schema_manager import apply_migrations; DB_FILE='v.db'; async def r(): apply_migrations(DB_FILE); h=DefaultPersistenceHandler(DB_FILE); c=Coordinator(TransHubConfig(database_url=f'sqlite:///{os.path.abspath(DB_FILE)}'),h); await c.initialize(); print('OK!'); await c.close(); os.remove(DB_FILE); asyncio.run(r())"
-      ```
+        # 4. 创建一个名为 verify.py 的验证脚本
+        touch verify.py
+        ```
+    -   **将以下完整代码粘贴到 `verify.py` 文件中**:
+        ```python
+        # verify.py
+        import asyncio
+        import os
+        import sys
+        import structlog
+        from dotenv import load_dotenv
+        
+        # 验证 extras 是否已正确安装
+        try:
+            import translators
+            import openai
+            print("✅ OK: 'translators' and 'openai' libraries are installed.")
+        except ImportError as e:
+            print(f"❌ FAILED: A required extra library is missing. Error: {e}")
+            sys.exit(1)
+        
+        from trans_hub import Coordinator, DefaultPersistenceHandler, TransHubConfig
+        from trans_hub.db.schema_manager import apply_migrations
+        from trans_hub.logging_config import setup_logging
+        
+        load_dotenv()
+        setup_logging()
+        log = structlog.get_logger()
+        
+        async def run_verification():
+            log.info("--- Verifying Trans-Hub Package ---")
+            DB_FILE = "verify_test.db"
+            if os.path.exists(DB_FILE): os.remove(DB_FILE)
+            apply_migrations(DB_FILE)
+            
+            handler = DefaultPersistenceHandler(DB_FILE)
+            
+            # 测试默认引擎
+            log.info("\nStep 1: Verifying default engine ('translators')...")
+            try:
+                config_translators = TransHubConfig(database_url=f"sqlite:///{os.path.abspath(DB_FILE)}")
+                coord = Coordinator(config_translators, handler)
+                await coord.initialize()
+                await coord.close()
+                log.info("✅ OK: Default engine initialized successfully.")
+            except Exception as e:
+                log.error("❌ FAILED", error=str(e), exc_info=True); sys.exit(1)
+            
+            # 测试 OpenAI 引擎
+            log.info("\nStep 2: Verifying 'openai' engine can be activated...")
+            try:
+                config_openai = TransHubConfig(active_engine="openai", source_lang="en")
+                coord = Coordinator(config_openai, handler)
+                await coord.initialize()
+                await coord.close()
+                log.info("✅ OK: OpenAI engine initialized successfully.")
+            except Exception as e:
+                log.error("❌ FAILED", error=str(e), exc_info=True); sys.exit(1)
+            
+            if os.path.exists(DB_FILE): os.remove(DB_FILE)
+            log.info("\n🎉 Verification successful! 🎉")
+        
+        asyncio.run(run_verification())
+        ```
+    -   **运行验证脚本**:
+        ```bash
+        python verify.py
+        ```
+    -   **清理环境**:
+        ```bash
+        deactivate
+        cd ~ && rm -rf temp-pypi-test
+        ```
 
 🚨 **紧急预案**:
-
-> 如果线上验证步骤中发现任何问题（安装失败、导入错误），请立即中止发布流程，并**废弃 (Yank)** PyPI 上的该版本，然后从**阶段一**重新开始。
+> 如果 `verify.py` 脚本在任何一步失败，请立即中止发布流程，并**废弃 (Yank)** PyPI 上的该版本，然后从**阶段一**重新开始。
 
 ---
 
