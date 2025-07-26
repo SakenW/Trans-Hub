@@ -1,8 +1,8 @@
 # trans_hub/persistence.py
 """
 提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
-此版本引入了异步写锁，并通过分离“锁定”和“获取”操作，
-确保了在高并发读写场景下的事务安全和无死锁。
+此版本引入了统一的异步数据库锁，确保了在高并发读写场景下的数据安全。
+同时增加了用于系统自愈和强制重翻的逻辑。
 """
 
 import asyncio
@@ -27,12 +27,13 @@ logger = structlog.get_logger(__name__)
 
 
 class DefaultPersistenceHandler(PersistenceHandler):
-    """使用 aiosqlite 实现的、高性能的异步持久化处理器。"""
+    """使用 aiosqlite 实现的、高性能且并发安全的异步持久化处理器。"""
 
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
-        self._write_lock = asyncio.Lock()
+        # 任务一: 引入一个通用的数据库锁来保护所有I/O操作
+        self._db_lock = asyncio.Lock()
 
     async def connect(self):
         try:
@@ -53,6 +54,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
     @asynccontextmanager
     async def transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
+        # 注意：此方法本身不加锁，锁应由调用它的外部方法根据业务逻辑管理
         if self._conn is None:
             raise ConnectionError("Database not connected.")
         async with self._conn.cursor() as cursor:
@@ -66,10 +68,25 @@ class DefaultPersistenceHandler(PersistenceHandler):
                     await cursor.execute("ROLLBACK")
                 raise
 
+    async def reset_stale_tasks(self) -> None:
+        """任务二：将所有卡在 'TRANSLATING' 状态的任务重置为 'PENDING'。"""
+        async with self._db_lock:
+            async with self.transaction() as cursor:
+                await cursor.execute(
+                    "UPDATE th_translations SET status = ? WHERE status = ?",
+                    (
+                        TranslationStatus.PENDING.value,
+                        TranslationStatus.TRANSLATING.value,
+                    ),
+                )
+                if cursor.rowcount > 0:
+                    logger.warning(
+                        "系统自愈：重置了遗留的翻译任务", count=cursor.rowcount
+                    )
+
     async def _get_or_create_content_id(
         self, cursor: aiosqlite.Cursor, text_content: str
     ) -> int:
-        """根据文本内容获取 content_id，如果不存在则创建并返回。"""
         await cursor.execute(
             "SELECT id FROM th_content WHERE value = ?", (text_content,)
         )
@@ -94,8 +111,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
         business_id: Optional[str] = None,
         context_hash: Optional[str] = None,
         context_json: Optional[str] = None,
+        force_retranslate: bool = False,  # 任务四：接收强制重翻标志
     ) -> None:
-        async with self._write_lock:
+        async with self._db_lock:
             async with self.transaction() as cursor:
                 content_id = await self._get_or_create_content_id(cursor, text_content)
 
@@ -110,38 +128,40 @@ class DefaultPersistenceHandler(PersistenceHandler):
                         sql, (business_id, content_id, context_hash, now.isoformat())
                     )
 
-                insert_sql = "INSERT OR IGNORE INTO th_translations (content_id, lang_code, context_hash, status, source_lang_code, engine_version, context) VALUES (?, ?, ?, ?, ?, ?, ?)"
-                params_to_insert = []
-                for lang in target_langs:
-                    await cursor.execute(
-                        "SELECT status FROM th_translations WHERE content_id=? AND lang_code=? AND context_hash=?",
-                        (content_id, lang, context_hash),
-                    )
-                    existing = await cursor.fetchone()
-                    if (
-                        existing
-                        and existing["status"] == TranslationStatus.TRANSLATED.value
-                    ):
-                        continue
-                    params_to_insert.append(
-                        (
-                            content_id,
-                            lang,
-                            context_hash,
-                            TranslationStatus.PENDING.value,
-                            source_lang,
-                            engine_version,
-                            context_json,
-                        )
+                # 任务四：实现强制重翻逻辑
+                if force_retranslate:
+                    # 如果强制重翻，则对所有目标语言的现有记录执行 UPDATE，将其状态重置为 PENDING
+                    placeholders = ",".join("?" for _ in target_langs)
+                    update_sql = f"UPDATE th_translations SET status = ?, engine_version = ? WHERE content_id = ? AND context_hash = ? AND lang_code IN ({placeholders})"
+                    params = [
+                        TranslationStatus.PENDING.value,
+                        engine_version,
+                        content_id,
+                        context_hash,
+                    ] + target_langs
+                    await cursor.execute(update_sql, params)
+                    logger.info(
+                        "强制重翻：任务状态已重置为 PENDING",
+                        content_id=content_id,
+                        langs=target_langs,
+                        updated_rows=cursor.rowcount,
                     )
 
-                if params_to_insert:
-                    await cursor.executemany(insert_sql, params_to_insert)
-                    logger.debug(
-                        "任务已入库",
-                        content_id=content_id,
-                        new_tasks=len(params_to_insert),
+                # 插入尚不存在的翻译任务
+                insert_sql = "INSERT OR IGNORE INTO th_translations (content_id, lang_code, context_hash, status, source_lang_code, engine_version, context) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                params_to_insert = [
+                    (
+                        content_id,
+                        lang,
+                        context_hash,
+                        TranslationStatus.PENDING.value,
+                        source_lang,
+                        engine_version,
+                        context_json,
                     )
+                    for lang in target_langs
+                ]
+                await cursor.executemany(insert_sql, params_to_insert)
 
     async def stream_translatable_items(
         self,
@@ -161,7 +181,8 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 break
 
             batch_ids: list[int] = []
-            async with self._write_lock:
+            # 任务一：锁定写操作
+            async with self._db_lock:
                 async with self.transaction() as cursor:
                     placeholders = ",".join("?" for _ in status_values)
                     find_ids_sql = f"SELECT id FROM th_translations WHERE lang_code = ? AND status IN ({placeholders}) ORDER BY last_updated_at ASC LIMIT ?"
@@ -185,10 +206,14 @@ class DefaultPersistenceHandler(PersistenceHandler):
             if not batch_ids:
                 break
 
-            id_placeholders_for_select = ",".join("?" for _ in batch_ids)
-            find_details_sql = f"SELECT tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.id IN ({id_placeholders_for_select})"
-            async with self.connection.execute(find_details_sql, batch_ids) as cursor:
-                batch_rows_details = await cursor.fetchall()
+            # 任务一：锁定读操作
+            async with self._db_lock:
+                id_placeholders_for_select = ",".join("?" for _ in batch_ids)
+                find_details_sql = f"SELECT tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.id IN ({id_placeholders_for_select})"
+                async with self.connection.execute(
+                    find_details_sql, batch_ids
+                ) as cursor:
+                    batch_rows_details = await cursor.fetchall()
 
             batch_items = [
                 ContentItem(
@@ -210,8 +235,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
         if not results:
             return
 
-        async with self._write_lock:
+        async with self._db_lock:
             async with self.transaction() as cursor:
+                # ... (内部逻辑保持不变)
                 params_to_update = []
                 for res in results:
                     if not res.original_content:
@@ -254,47 +280,51 @@ class DefaultPersistenceHandler(PersistenceHandler):
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
-        context_hash = get_context_hash(context)
-        sql = """
-            SELECT tr.translation_content, tr.status, tr.engine, s.business_id
-            FROM th_translations tr JOIN th_content c ON tr.content_id = c.id
-            LEFT JOIN th_sources s ON tr.content_id = s.content_id AND tr.context_hash = s.context_hash
-            WHERE c.value = ? AND tr.lang_code = ? AND tr.context_hash = ? AND tr.status = ?"""
+        async with self._db_lock:
+            context_hash = get_context_hash(context)
+            sql = """
+                SELECT tr.translation_content, tr.status, tr.engine, s.business_id
+                FROM th_translations tr JOIN th_content c ON tr.content_id = c.id
+                LEFT JOIN th_sources s ON tr.content_id = s.content_id AND tr.context_hash = s.context_hash
+                WHERE c.value = ? AND tr.lang_code = ? AND tr.context_hash = ? AND tr.status = ?"""
 
-        async with self.connection.execute(
-            sql,
-            (
-                text_content,
-                target_lang,
-                context_hash,
-                TranslationStatus.TRANSLATED.value,
-            ),
-        ) as cursor:
-            row = await cursor.fetchone()
+            async with self.connection.execute(
+                sql,
+                (
+                    text_content,
+                    target_lang,
+                    context_hash,
+                    TranslationStatus.TRANSLATED.value,
+                ),
+            ) as cursor:
+                row = await cursor.fetchone()
 
-        if row:
-            return TranslationResult(
-                original_content=text_content,
-                translated_content=row["translation_content"],
-                target_lang=target_lang,
-                status=TranslationStatus.TRANSLATED,
-                engine=row["engine"],
-                from_cache=True,
-                business_id=row["business_id"],
-                context_hash=context_hash,
-            )
-        return None
+            if row:
+                return TranslationResult(
+                    original_content=text_content,
+                    translated_content=row["translation_content"],
+                    target_lang=target_lang,
+                    status=TranslationStatus.TRANSLATED,
+                    engine=row["engine"],
+                    from_cache=True,  # 标记为来自持久化缓存
+                    business_id=row["business_id"],
+                    context_hash=context_hash,
+                )
+            return None
 
     async def get_business_id_for_content(
         self, content_id: int, context_hash: str
     ) -> Optional[str]:
-        sql = "SELECT business_id FROM th_sources WHERE content_id = ? AND context_hash = ?"
-        async with self.connection.execute(sql, (content_id, context_hash)) as cursor:
-            row = await cursor.fetchone()
-        return row["business_id"] if row else None
+        async with self._db_lock:
+            sql = "SELECT business_id FROM th_sources WHERE content_id = ? AND context_hash = ?"
+            async with self.connection.execute(
+                sql, (content_id, context_hash)
+            ) as cursor:
+                row = await cursor.fetchone()
+            return row["business_id"] if row else None
 
     async def touch_source(self, business_id: str) -> None:
-        async with self._write_lock:
+        async with self._db_lock:
             async with self.transaction() as cursor:
                 sql = "UPDATE th_sources SET last_seen_at = ? WHERE business_id = ?"
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -303,8 +333,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
     ) -> dict[str, int]:
-        async with self._write_lock:
+        async with self._db_lock:
             async with self.transaction() as cursor:
+                # ... (内部逻辑保持不变)
                 if retention_days < 0:
                     raise ValueError("retention_days 必须是非负数。")
                 cutoff = (

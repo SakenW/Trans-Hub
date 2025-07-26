@@ -1,4 +1,4 @@
-# trans_hub/interfaces.py (终极完美版)
+# trans_hub/interfaces.py
 """
 本模块使用 typing.Protocol 定义了核心组件的接口。
 此版本为纯异步设计，并强化了封装性。
@@ -23,8 +23,10 @@ class PersistenceHandler(Protocol):
     async def connect(self) -> None: ...
     async def close(self) -> None: ...
 
-    # --- 核心修正：这两个方法本身是同步的，但它们返回的是异步对象 ---
     def transaction(self) -> AbstractAsyncContextManager[aiosqlite.Cursor]: ...
+
+    async def reset_stale_tasks(self) -> None: ...  # 新增：自愈机制接口
+
     def stream_translatable_items(
         self,
         lang_code: str,
@@ -42,6 +44,7 @@ class PersistenceHandler(Protocol):
         business_id: Optional[str] = None,
         context_hash: Optional[str] = None,
         context_json: Optional[str] = None,
+        force_retranslate: bool = False,  # 新增：强制重翻参数
     ) -> None: ...
     async def save_translations(self, results: list[TranslationResult]) -> None: ...
     async def get_translation(

@@ -2,6 +2,7 @@
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
 它负责动态加载、验证引擎配置，并编排所有核心工作流。
+此版本新增了内置请求节流和强制重翻功能。
 """
 
 import asyncio
@@ -40,6 +41,7 @@ class Coordinator:
         config: TransHubConfig,
         persistence_handler: PersistenceHandler,
         rate_limiter: Optional[RateLimiter] = None,
+        max_concurrent_requests: Optional[int] = None,  # 任务三：新增节流参数
     ) -> None:
         """初始化协调器实例，并动态完成引擎配置的加载和验证。"""
         discover_engines()
@@ -51,6 +53,12 @@ class Coordinator:
         self.active_engine_name = config.active_engine
         self.initialized = False
 
+        # 任务三：初始化请求信号量
+        self._request_semaphore: Optional[asyncio.Semaphore] = None
+        if max_concurrent_requests and max_concurrent_requests > 0:
+            self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+            logger.info("请求节流功能已启用", max_concurrent=max_concurrent_requests)
+
         logger.info(
             "协调器初始化开始...", available_engines=list(ENGINE_REGISTRY.keys())
         )
@@ -58,7 +66,6 @@ class Coordinator:
         if self.active_engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"指定的活动引擎 '{self.active_engine_name}' 不可用。")
 
-        # [核心修复] 只确保 active_engine 的配置存在
         self._ensure_engine_config(self.active_engine_name)
 
         self.active_engine: BaseTranslationEngine[Any] = self._create_engine_instance(
@@ -71,17 +78,16 @@ class Coordinator:
         logger.info("协调器初始化完成。", active_engine=self.active_engine_name)
 
     def _ensure_engine_config(self, engine_name: str) -> None:
-        """如果指定引擎的配置不存在，则动态创建它。"""
+        # ... (内部逻辑保持不变)
         if getattr(self.config.engine_configs, engine_name, None) is None:
             config_class = ENGINE_CONFIG_REGISTRY.get(engine_name)
             if not config_class:
                 raise ValueError(f"引擎 '{engine_name}' 的配置模型未在元数据中注册。")
-
-            # BaseSettings 会自动从 .env 加载
             instance = config_class()
             setattr(self.config.engine_configs, engine_name, instance)
 
     def _create_engine_instance(self, engine_name: str) -> BaseTranslationEngine[Any]:
+        # ... (内部逻辑保持不变)
         engine_class = ENGINE_REGISTRY[engine_name]
         engine_config_instance = getattr(self.config.engine_configs, engine_name, None)
 
@@ -91,6 +97,7 @@ class Coordinator:
         return engine_class(config=engine_config_instance)
 
     def switch_engine(self, engine_name: str) -> None:
+        # ... (内部逻辑保持不变)
         if engine_name == self.active_engine_name:
             return
 
@@ -98,7 +105,6 @@ class Coordinator:
         if engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
 
-        # [核心修复] 在切换时，也确保目标引擎的配置存在
         self._ensure_engine_config(engine_name)
 
         self.active_engine = self._create_engine_instance(engine_name)
@@ -111,8 +117,10 @@ class Coordinator:
             return
         logger.info("正在连接持久化存储...")
         await self.handler.connect()
+        # 任务二：在初始化时调用自愈方法
+        await self.handler.reset_stale_tasks()
         self.initialized = True
-        logger.info("持久化存储连接成功。")
+        logger.info("持久化存储连接成功并完成自愈检查。")
 
     async def process_pending_translations(
         self,
@@ -122,6 +130,7 @@ class Coordinator:
         max_retries: Optional[int] = None,
         initial_backoff: Optional[float] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
+        # ... (内部逻辑保持不变)
         validate_lang_codes([target_lang])
         batch_policy = getattr(
             self.active_engine.config, "max_batch_size", self.config.batch_size
@@ -177,6 +186,7 @@ class Coordinator:
         max_retries: int,
         initial_backoff: float,
     ) -> list[TranslationResult]:
+        # ... (内部逻辑保持不变)
         business_id_map = await self._get_business_id_map(batch)
 
         validated_context = self.active_engine.validate_and_parse_context(
@@ -239,6 +249,7 @@ class Coordinator:
         business_id_map: dict[tuple[int, str], Optional[str]],
         context: Optional[BaseContextModel],
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
+        # ... (内部逻辑保持不变)
         cached_results, uncached_items = await self._separate_cached_items(
             batch, target_lang, business_id_map
         )
@@ -266,6 +277,7 @@ class Coordinator:
     async def _get_business_id_map(
         self, batch: list[ContentItem]
     ) -> dict[tuple[int, str], Optional[str]]:
+        # ... (内部逻辑保持不变)
         if not batch:
             return {}
         tasks = [
@@ -283,6 +295,7 @@ class Coordinator:
         target_lang: str,
         business_id_map: dict,
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
+        # ... (内部逻辑保持不变)
         cached_results: list[TranslationResult] = []
         uncached_items: list[ContentItem] = []
         for item in batch:
@@ -308,6 +321,7 @@ class Coordinator:
         target_lang: str,
         context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
+        # ... (内部逻辑保持不变)
         if self.rate_limiter:
             await self.rate_limiter.acquire(len(items))
         try:
@@ -324,6 +338,7 @@ class Coordinator:
     async def _cache_new_results(
         self, results: list[TranslationResult], target_lang: str
     ) -> None:
+        # ... (内部逻辑保持不变)
         tasks = [
             self.cache.cache_translation_result(
                 TranslationRequest(
@@ -350,6 +365,7 @@ class Coordinator:
         cached_text: Optional[str] = None,
         error_override: Optional[EngineError] = None,
     ) -> TranslationResult:
+        # ... (内部逻辑保持不变)
         biz_id = business_id_map.get((item.content_id, item.context_hash))
         final_error = error_override or (
             engine_output if isinstance(engine_output, EngineError) else None
@@ -390,14 +406,16 @@ class Coordinator:
             )
         raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
 
-    async def request(
+    async def _request_internal(
         self,
         target_langs: list[str],
         text_content: str,
-        business_id: Optional[str] = None,
-        context: Optional[dict[str, Any]] = None,
-        source_lang: Optional[str] = None,
+        business_id: Optional[str],
+        context: Optional[dict[str, Any]],
+        source_lang: Optional[str],
+        force_retranslate: bool,
     ) -> None:
+        """任务的内部实现，用于被信号量包裹。"""
         validate_lang_codes(target_langs)
         context_hash = get_context_hash(context)
         context_json = json.dumps(context) if context else None
@@ -410,10 +428,41 @@ class Coordinator:
             context_json=context_json,
             source_lang=(source_lang or self.config.source_lang),
             engine_version=self.active_engine.VERSION,
+            force_retranslate=force_retranslate,  # 任务四：传递参数
         )
         logger.info(
             "翻译任务已成功入队。", business_id=business_id, num_langs=len(target_langs)
         )
+
+    async def request(
+        self,
+        target_langs: list[str],
+        text_content: str,
+        business_id: Optional[str] = None,
+        context: Optional[dict[str, Any]] = None,
+        source_lang: Optional[str] = None,
+        force_retranslate: bool = False,  # 任务四：新增API参数
+    ) -> None:
+        # 任务三：使用信号量包裹内部实现
+        if self._request_semaphore:
+            async with self._request_semaphore:
+                await self._request_internal(
+                    target_langs,
+                    text_content,
+                    business_id,
+                    context,
+                    source_lang,
+                    force_retranslate,
+                )
+        else:
+            await self._request_internal(
+                target_langs,
+                text_content,
+                business_id,
+                context,
+                source_lang,
+                force_retranslate,
+            )
 
     async def get_translation(
         self,
@@ -421,6 +470,7 @@ class Coordinator:
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
+        # ... (内部逻辑保持不变)
         validate_lang_codes([target_lang])
         context_hash = get_context_hash(context)
         request = TranslationRequest(
@@ -453,6 +503,7 @@ class Coordinator:
     async def run_garbage_collection(
         self, expiration_days: Optional[int] = None, dry_run: bool = False
     ) -> dict[str, int]:
+        # ... (内部逻辑保持不变)
         days = expiration_days or self.config.gc_retention_days
         logger.info("开始执行垃圾回收。", expiration_days=days, dry_run=dry_run)
         deleted_counts = await self.handler.garbage_collect(
