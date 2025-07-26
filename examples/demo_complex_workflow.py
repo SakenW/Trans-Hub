@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import aiosqlite  # 导入以用于GC演示
+import aiosqlite
 import structlog
 from dotenv import load_dotenv
 
@@ -37,6 +37,7 @@ from trans_hub.logging_config import setup_logging  # noqa: E402
 
 # --- 演示配置 ---
 DB_FILE_PATH = PROJECT_ROOT / "complex_demo.db"
+log = structlog.get_logger()
 
 
 def generate_context_for_text(text: str, category: str = "") -> dict:
@@ -56,8 +57,6 @@ def generate_context_for_text(text: str, category: str = "") -> dict:
 
 async def initialize_trans_hub() -> Coordinator:
     """一个标准的异步初始化函数，返回一个配置好的 Coordinator 实例。"""
-    log = structlog.get_logger("initializer")
-
     DB_FILE_PATH.unlink(missing_ok=True)
     log.info("旧数据库已清理。")
 
@@ -80,7 +79,6 @@ async def request_and_process(
     coordinator: Coordinator, tasks: list[dict], target_lang: str
 ):
     """辅助函数：登记任务并处理它们。"""
-    log = structlog.get_logger("workflow")
     log.info(f"\n---> 开始登记 {len(tasks)} 个任务到 '{target_lang}' <---")
 
     for task in tasks:
@@ -118,11 +116,10 @@ async def main():
     """主程序入口：复杂异步工作流演示。"""
     setup_logging(log_level="INFO")
     load_dotenv()
-    log = structlog.get_logger("main")
 
-    coordinator = await initialize_trans_hub()
-
+    coordinator = None
     try:
+        coordinator = await initialize_trans_hub()
         zh = "zh-CN"
         fr = "fr"
 
@@ -152,14 +149,13 @@ async def main():
                 "text": "Jaguar",
                 "category": "animal",
                 "business_id": "wildlife.big_cat.jaguar",
-            },
+            }
         ]
         await request_and_process(coordinator, tasks_to_touch, zh)
         log.info(
             "'automotive.brand.jaguar' 和 'legacy.feature.old_text' 没有被重新请求。"
         )
 
-        # ▼▼▼ GC 演示的确定性准备 ▼▼▼
         log.info("为了可靠地演示GC，我们将手动更新数据库中的时间戳。")
         async with aiosqlite.connect(DB_FILE_PATH) as db:
             two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
@@ -173,7 +169,6 @@ async def main():
             )
             await db.commit()
         log.info("已将2个源记录的时间戳手动设置为2天前。")
-        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         log.info("=" * 30 + " 阶段 3: 新任务与多语言 " + "=" * 30)
         new_tasks = [
@@ -191,15 +186,12 @@ async def main():
         log.info(
             "预计 'automotive.brand.jaguar' 和 'legacy.feature.old_text' 将被删除。"
         )
-
         gc_report = await coordinator.run_garbage_collection(
             dry_run=True, expiration_days=1
         )
         log.info("GC 干跑报告", report=gc_report)
-
         await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
         log.info("GC 已实际执行。")
-
         gc_report_after = await coordinator.run_garbage_collection(
             dry_run=True, expiration_days=1
         )
@@ -210,7 +202,7 @@ async def main():
     except Exception as e:
         log.error("演示工作流发生意外错误", error=str(e), exc_info=True)
     finally:
-        if "coordinator" in locals() and coordinator:
+        if coordinator:
             await coordinator.close()
             log.info("Trans-Hub 协调器已关闭。")
             log.info("临时数据库已保留，请使用以下命令检查内容：")

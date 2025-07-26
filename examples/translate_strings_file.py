@@ -1,9 +1,7 @@
 # examples/translate_strings_file.py
 """
 一个使用 Trans-Hub 库来翻译 Apple .strings 格式文件的示例程序。
-
 此版本结合了 business_id 和动态生成的 context，以实现更精确的来源追踪和情境控制。
-
 运行方式:
 在项目根目录执行 `poetry run python examples/translate_strings_file.py`
 """
@@ -16,10 +14,6 @@ from pathlib import Path
 import structlog
 
 # -- 路径设置 --
-# 将项目根目录添加到 Python 路径中，以便能找到 trans_hub 模块
-# Path(__file__) -> /path/to/project/examples/translate_strings_file.py
-# .parent -> /path/to/project/examples
-# .parent -> /path/to/project
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -33,7 +27,7 @@ from trans_hub.db import schema_manager  # noqa: E402
 from trans_hub.logging_config import setup_logging  # noqa: E402
 
 # ==============================================================================
-#  输入数据 (包含一条长文本用于测试动态上下文)
+#  输入数据
 # ==============================================================================
 
 STRINGS_CONTENT = """
@@ -67,9 +61,7 @@ def generate_context_for_text(text: str) -> dict:
         "source_app": "DEVONthink Pro",
         "file_type": ".strings",
     }
-
     word_count = len(text.split())
-
     if text.endswith("…"):
         base_context["text_type"] = "UI String (Menu Item)"
         base_context["note"] = (
@@ -88,7 +80,6 @@ def generate_context_for_text(text: str) -> dict:
     else:
         base_context["text_type"] = "UI String (Generic)"
         base_context["note"] = "This is a generic UI string. Translate accurately."
-
     return base_context
 
 
@@ -100,16 +91,14 @@ def generate_context_for_text(text: str) -> dict:
 async def main():
     """程序主入口"""
     setup_logging(log_level="INFO", log_format="console")
-    log = structlog.get_logger(__name__)
+    log = structlog.get_logger()
 
     log.info("▶️ 翻译程序启动 (使用动态 context)...")
 
-    # -- 数据库准备 --
     db_file_path = Path(__file__).parent / "strings_translator_demo.db"
     log.info("临时数据库路径", path=str(db_file_path))
     db_file_path.unlink(missing_ok=True)
 
-    # 1. 应用数据库迁移
     log.info("▶️ 准备工作：应用数据库迁移...")
     try:
         schema_manager.apply_migrations(str(db_file_path))
@@ -118,50 +107,39 @@ async def main():
         log.error("数据库迁移失败，程序中止。", error=str(e), exc_info=True)
         return
 
-    # -- Trans-Hub 配置 --
-    config = TransHubConfig()  # 默认使用 'translators' 引擎
+    config = TransHubConfig()
     config.database_url = f"sqlite:///{db_file_path.resolve()}"
     handler = DefaultPersistenceHandler(config.db_path)
-    coordinator = Coordinator(config=config, persistence_handler=handler)
 
-    # -- 解析 .strings 文件 --
-    kv_pattern = re.compile(r'"([^"]+)"\s*=\s*"([^"]+)"\s*;')
-    parsed_structure = []
-    texts_to_translate = set()
-
-    log.info("▶️ 第一步：解析 .strings 文件内容...")
-    for line in STRINGS_CONTENT.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            parsed_structure.append(("blank", ""))
-            continue
-        match = kv_pattern.match(line)
-        if match:
-            key, value = match.groups()
-            parsed_structure.append(("kv", (key, value)))
-            texts_to_translate.add(value)
-        else:
-            parsed_structure.append(("comment", line))
-    log.info("解析完成", unique_texts_found=len(texts_to_translate))
-
-    # -- 主流程 --
+    coordinator = None
     try:
-        # 2. 初始化 Coordinator
+        coordinator = Coordinator(config=config, persistence_handler=handler)
         await coordinator.initialize()
 
-        # 3. 提交翻译请求
+        kv_pattern = re.compile(r'"([^"]+)"\s*=\s*"([^"]+)"\s*;')
+        parsed_structure = []
+        texts_to_translate = set()
+
+        log.info("▶️ 第一步：解析 .strings 文件内容...")
+        for line in STRINGS_CONTENT.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                parsed_structure.append(("blank", ""))
+                continue
+            match = kv_pattern.match(line)
+            if match:
+                key, value = match.groups()
+                parsed_structure.append(("kv", (key, value)))
+                texts_to_translate.add(value)
+            else:
+                parsed_structure.append(("comment", line))
+        log.info("解析完成", unique_texts_found=len(texts_to_translate))
+
         log.info("▶️ 第二步：向 Trans-Hub 提交翻译请求...")
         if texts_to_translate:
             source_business_id = "devonthink_pro_services.strings"
-
-            for _i, text in enumerate(texts_to_translate, 1):
+            for text in texts_to_translate:
                 dynamic_context = generate_context_for_text(text)
-                log.debug(
-                    "为文本生成动态上下文",
-                    text=text,
-                    context_type=dynamic_context.get("text_type"),
-                )
-
                 await coordinator.request(
                     target_langs=["zh-CN"],
                     text_content=text,
@@ -169,10 +147,8 @@ async def main():
                     business_id=source_business_id,
                     context=dynamic_context,
                 )
-
         log.info("所有翻译任务已入队。", count=len(texts_to_translate))
 
-        # 4. 执行翻译任务
         log.info("▶️ 第三步：执行翻译流程...")
         translation_results = {}
         async for result in coordinator.process_pending_translations(
@@ -193,7 +169,6 @@ async def main():
                 )
                 translation_results[result.original_content] = result.original_content
 
-        # 5. 重建翻译结果
         log.info("▶️ 第四步：重建翻译后的文件...")
         output_lines = []
         for line_type, content in parsed_structure:
@@ -208,21 +183,18 @@ async def main():
                 )
                 output_lines.append(f'"{key}" = "{translated_value}";')
 
-        # 6. 打印最终结果
         log.info("✅ 翻译流程全部完成！")
         print("\n" + "=" * 20 + " 翻译结果 " + "=" * 20)
         print("\n".join(output_lines))
         print("=" * 52 + "\n")
 
     finally:
-        # 7. 清理资源
-        await coordinator.close()
-        log.info("数据库连接已关闭。")
-        # 保留数据库文件以便检查
-        log.info("临时数据库已保留，请使用以下命令检查内容：")
-        # 生成一个从项目根目录出发的相对路径，方便用户直接复制运行
-        relative_db_path = db_file_path.relative_to(PROJECT_ROOT)
-        print(f"\npoetry run python tools/inspect_db.py {relative_db_path}\n")
+        if coordinator:
+            await coordinator.close()
+            log.info("数据库连接已关闭。")
+            log.info("临时数据库已保留，请使用以下命令检查内容：")
+            relative_db_path = db_file_path.relative_to(PROJECT_ROOT)
+            print(f"\npoetry run python tools/inspect_db.py {relative_db_path}\n")
 
 
 if __name__ == "__main__":
