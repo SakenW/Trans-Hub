@@ -1,84 +1,63 @@
 # Trans-Hub：您的异步本地化后端引擎 🚀
 
+[![Python CI/CD Pipeline](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/SakenW/trans-hub/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/SakenW/trans-hub)
 [![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)
-[![Python versions](https://img.shields.io/pypi/pyversions/trans-hub.svg)](https://pypi.org/project/trans-hub)
-[![CI/CD Status](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/SakenW/trans-hub/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**`Trans-Hub` 是一个强大、异步优先、可嵌入 Python 应用程序的本地化（i18n）后端引擎。**
-
-它旨在统一和简化多语言翻译工作流。通过**智能缓存、插件化翻译引擎、自动重试和速率限制**，`Trans-Hub` 为您的应用提供高效、低成本、高可靠的翻译能力。
-
-最棒的是，`Trans-Hub` **开箱即用**！它内置了强大的免费翻译引擎，让您无需任何 API Key 或复杂配置，即可在几分钟内开始翻译。
+`Trans-Hub` 是一个**异步优先**、可嵌入 Python 应用程序的、带持久化存储的智能本地化（i18n）后端引擎。它旨在统一和简化多语言翻译工作流，通过智能缓存、可插拔的翻译引擎、以及健壮的错误处理和策略控制，为上层应用提供高效、低成本、高可靠的翻译能力。
 
 ---
 
-## ✨ 核心特性
+## **核心特性**
 
-- **异步优先**: 从底层完全异步设计，为高并发环境而生，可与 FastAPI、aiohttp 等现代异步框架无缝集成。
-- **零配置启动**: 内置免费翻译引擎，实现真正的“开箱即用”。
-- **持久化缓存**: 自动将翻译结果存储在本地数据库中，极大降低 API 成本。
-- **🔌 真正的插件化架构**: 按需安装，轻松扩展自定义引擎。
-- **健壮的错误处理**: 内置自动重试和指数退避策略。
-- **⚙️ 精准的策略控制**: 内置速率限制器，并支持上下文（Context）感知翻译。
-- **生命周期管理**: 内置垃圾回收（GC）功能，定期清理过时数据。
-- **专业级可观测性**: 支持结构化的 JSON 日志。
-
-## 🚀 快速上手
-
-在5分钟内完成您的第一次翻译，无需任何 API Key！
-
-1.  **安装**:
-    ```bash
-    pip install trans-hub
-    ```
-2.  **创建脚本**: 创建一个 `quick_start.py` 文件并复制代码。
-3.  **运行**:
-    ```bash
-    python quick_start.py
-    ```
-
-➡️ **欲获取完整的代码和分步详解，请访问我们的 [【快速入门指南】](./docs/guides/01_quickstart.md)**
+- **纯异步设计**: 基于 `asyncio` 构建，与 FastAPI, Starlette 等现代 Python Web 框架完美集成。
+- **持久化缓存**: 所有翻译请求和结果都会被自动存储在 SQLite 数据库中，避免重复翻译，节省成本。
+- **插件化翻译引擎**:
+  - **动态发现**: 自动发现 `engines/` 目录下的所有引擎插件。
+  - **开箱即用**: 内置基于 `translators` 的免费引擎。
+  - **轻松扩展**: 支持 `OpenAI` 等高级引擎，并提供清晰的指南让你轻松添加自己的引擎。
+- **智能配置**: 使用 `Pydantic` 进行类型安全的配置管理，并能从 `.env` 文件自动加载。
+- **健壮的工作流**:
+  - **后台处理**: `request` (登记) 和 `process` (处理) 分离，确保 API 快速响应。
+  - **自动重试**: 内置带指数退避的重试机制，优雅处理网络抖动。
+  - **速率限制**: 可配置的令牌桶速率限制器，保护你的 API 密钥。
+- **数据生命周期管理**: 内置垃圾回收（GC）功能，定期清理过时数据。
 
 ---
 
-## 升级到高级引擎 (例如 OpenAI)
+## **🚀 快速上手**
 
-当您需要更高质量的翻译时，升级过程非常简单：
+我们提供了多个“活文档”示例，帮助您快速理解 `Trans-Hub` 的用法。
 
-1.  **安装可选依赖**: `pip install "trans-hub[openai]"`
-2.  **配置 `.env` 文件**: 添加您的 `TH_OPENAI_API_KEY` 等信息。
-3.  **激活引擎**: 在代码中，只需一行即可切换：
-    ```python
-    config = TransHubConfig(active_engine="openai")
+1.  **基础用法**: 学习如何在 5 分钟内完成您的第一个翻译任务。
+    ```bash
+    # 详情请查看文件内的注释
+    poetry run python examples/01_basic_usage.py
     ```
 
-## 核心概念
+2.  **真实世界模拟**: 想看看 `Trans-Hub` 在高并发、多任务环境下的表现吗？这个终极演示将同时运行内容生产者、后台翻译工作者和 API 查询服务。
+    ```bash
+    # (需要先在 .env 文件中配置 OpenAI API 密钥)
+    poetry run python examples/02_real_world_simulation.py
+    ```
 
-- **Coordinator**: 负责编排整个**异步**翻译工作流的核心对象。
-- **Engine**: 翻译服务的具体实现，可被动态发现和切换。
-- **`request()`**: 轻量级地“登记”一个翻译需求。
-- **`process_pending_translations()`**: “执行”实际的翻译工作，建议在后台运行。
+更多具体用例（如翻译 `.strings` 文件），请直接浏览 `examples/` 目录。
 
-## 深入了解
+---
 
-我们为您准备了详尽的文档库，覆盖了从快速入门到架构设计的方方面面。
+## **📚 文档**
 
-### ➡️ [**探索官方文档中心**](./docs/INDEX.md)
+我们拥有一个全面的文档库，以帮助您深入了解 `Trans-Hub` 的方方面面。
 
-- **使用指南**: 学习高级功能。
-- **API 参考**: 查阅精确的接口定义。
-- **架构文档**: 了解内部工作原理。
-- **贡献指南**: 学习如何贡献新引擎。
+👉 **[点击这里开始探索我们的文档](./docs/INDEX.md)**
 
-## 贡献
+---
 
-我们热烈欢迎任何形式的贡献！请先阅读我们的 **[贡献指南](./CONTRIBUTING.md)**。
+## **贡献**
 
-## 行为准则
+我们热烈欢迎任何形式的贡献！请阅读我们的 **[贡献指南](./CONTRIBUTING.md)** 来开始。
 
-请遵守我们的 **[行为准则](./CODE_OF_CONDUCT.md)**。
+## **许可证**
 
-## 许可证
-
-`Trans-Hub` 采用 [MIT 许可证](./LICENSE.md)。
+本项目采用 MIT 许可证。详见 [LICENSE.md](./LICENSE.md) 文件。

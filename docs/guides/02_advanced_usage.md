@@ -1,6 +1,6 @@
 # 指南 2：高级用法
 
-欢迎来到 `Trans-Hub` 的高级用法指南！在您掌握了[快速入门](./01_quickstart.md)的基础之后，本指南将带您探索 `Trans-Hub` 更强大的功能，包括激活高级翻译引擎、处理上下文、管理数据生命周期以及与现代 Web 框架集成。
+欢迎来到 `Trans-Hub` 的高级用法指南！在您掌握了[快速入门](./01_quickstart.md)的基础之后，本指南将带您探索 `Trans-Hub` 更强大的功能。
 
 ---
 
@@ -61,20 +61,51 @@
 
 ---
 
-## **3. 上下文翻译：一词多义的艺术**
+## **3. 上下文翻译实战：区分“捷豹”与“美洲虎”**
 
-### **目标**
+理论已经足够，让我们来看一个最能体现 `context` 威力的实战例子。同一个词 "Jaguar" 在不同语境下有完全不同的含义。我们将使用 `context` 来引导 OpenAI 引擎进行精确翻译。
 
-使用 `context` 向 OpenAI 引擎提供系统级指令 (`system_prompt`)，将 "Jaguar" 根据上下文分别翻译为“动物”和“汽车品牌”。
+### **示例代码 (`context_demo.py`)**
 
-### **示例**
+您可以将以下代码保存为一个文件并运行，亲眼见证上下文的力量。
 
 ```python
-# context_demo.py
-# ... (使用上面为 OpenAI 准备的初始化代码) ...
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+import structlog
+from dotenv import load_dotenv
+
+# 确保 trans_hub 在路径中
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from trans_hub import Coordinator, DefaultPersistenceHandler, TransHubConfig
+from trans_hub.db.schema_manager import apply_migrations
+from trans_hub.logging_config import setup_logging
+
+# --- 准备工作 ---
+load_dotenv()
+setup_logging()
+log = structlog.get_logger()
+DB_FILE = "context_demo.db"
+
 
 async def main():
-    coordinator = await initialize_trans_hub_for_openai()
+    # --- 1. 初始化 ---
+    if os.path.exists(DB_FILE): os.remove(DB_FILE)
+    apply_migrations(DB_FILE)
+    
+    config = TransHubConfig(
+        database_url=f"sqlite:///{Path(DB_FILE).resolve()}",
+        active_engine="openai",
+        source_lang="en"
+    )
+    handler = DefaultPersistenceHandler(config.db_path)
+    coordinator = Coordinator(config, handler)
+    await coordinator.initialize()
+    
     try:
         target_lang = "zh-CN"
         tasks = [
@@ -90,15 +121,25 @@ async def main():
             },
         ]
 
+        # --- 2. 登记任务 ---
         for task in tasks:
             await coordinator.request(
                 target_langs=[target_lang], text_content=task['text'],
-                context=task['context'], business_id=task['business_id'], source_lang='en'
+                context=task['context'], business_id=task['business_id']
             )
 
-        # ... process and print results ...
+        # --- 3. 处理并打印结果 ---
+        log.info("正在处理 'Jaguar' 的两个不同上下文的翻译...")
+        results = [res async for res in coordinator.process_pending_translations(target_lang)]
+        for result in results:
+            log.info("✅ 翻译结果", 
+                     original=result.original_content, 
+                     translated=result.translated_content, 
+                     biz_id=result.business_id)
+
     finally:
         if coordinator: await coordinator.close()
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -106,12 +147,28 @@ if __name__ == "__main__":
 
 ### **预期输出**
 
-- `result=... original_content='Jaguar', translated_content='美洲虎', ...`
-- `result=... original_content='Jaguar', translated_content='捷豹', ...`
+当你运行这段代码时，你会看到 `Trans-Hub` 为同一个原文 "Jaguar" 生成了两个完全不同的翻译：
+
+```
+... [info] ✅ 翻译结果 original='Jaguar', translated='美洲虎', biz_id='wildlife.big_cat.jaguar'
+... [info] ✅ 翻译结果 original='Jaguar', translated='捷豹', biz_id='automotive.brand.jaguar'
+```
+这完美地展示了 `context` 如何通过 `context_hash` 隔离翻译记录，并通过 `system_prompt` 影响引擎的行为。
 
 ---
 
-## **4. 数据生命周期：使用垃圾回收 (GC)**
+## **4. 综合演练：真实世界并发模拟**
+
+我们已经分别介绍了 `Trans-Hub` 的各项高级功能。想看看它们在一个高并发、多任务的真实世界场景中如何协同工作吗？
+
+我们提供了一个终极演示脚本，它同时运行内容生产者、后台翻译工作者和 API 查询服务。
+
+👉 **[查看并运行 `examples/02_real_world_simulation.py`](../examples/02_real_world_simulation.py)**
+
+这个“活文档”是理解 `Trans-Hub` 在真实世界中如何工作的最佳方式。
+
+---
+## **5. 数据生命周期：使用垃圾回收 (GC)**
 
 `Trans-Hub` 内置的垃圾回收（GC）功能允许您定期清理数据库中过时或不再活跃的业务关联。
 
@@ -138,7 +195,7 @@ if __name__ == "__main__":
 
 ---
 
-## **5. 速率限制：保护您的 API 密钥**
+## **6. 速率限制：保护您的 API 密钥**
 
 在 `Coordinator` 初始化时，传入一个 `RateLimiter` 实例即可。
 
@@ -147,31 +204,28 @@ if __name__ == "__main__":
 from trans_hub.rate_limiter import RateLimiter
 # ...
 
-async def initialize_with_rate_limiter():
-    # ...
-    # 每秒补充 10 个令牌，桶的总容量为 100 个令牌
-    rate_limiter = RateLimiter(refill_rate=10, capacity=100)
+# 每秒补充 10 个令牌，桶的总容量为 100 个令牌
+rate_limiter = RateLimiter(refill_rate=10, capacity=100)
 
-    coordinator = Coordinator(
-        config=config,
-        persistence_handler=handler,
-        rate_limiter=rate_limiter # <-- 传入速率限制器
-    )
-    await coordinator.initialize()
-    return coordinator
+coordinator = Coordinator(
+    config=config,
+    persistence_handler=handler,
+    rate_limiter=rate_limiter # <-- 传入速率限制器
+)
+# ...
 ```
 
 之后，`coordinator.process_pending_translations` 在每次调用翻译引擎前都会自动遵守此速率限制。
 
 ---
 
-## **6. 集成到现代 Web 框架 (以 FastAPI 为例)**
+## **7. 集成到现代 Web 框架 (以 FastAPI 为例)**
 
 `Trans-Hub` 的纯异步设计使其能与 FastAPI 等 ASGI 框架完美集成。
 
 ### **最佳实践**
 
-将 `Coordinator` 作为一个**生命周期依赖项**，在应用启动时创建，在关闭时销毁。这样可以确保整个应用共享同一个 `Coordinator` 实例，从而共享其数据库连接池和缓存。
+将 `Coordinator` 作为一个**生命周期依赖项**，在应用启动时创建，在关闭时销毁。这样可以确保整个应用共享同一个 `Coordinator` 实例。
 
 ### **示例代码 (`fastapi_app.py`)**
 
@@ -193,54 +247,38 @@ from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationResult
 
 log = structlog.get_logger(__name__)
-
-# --- 全局 Coordinator 实例 ---
 coordinator: Coordinator
 
 async def translation_processor_task():
-    """一个健壮的后台任务，用于持续处理待翻译任务。"""
+    """健壮的后台任务，用于持续处理待翻译任务。"""
     while True:
         try:
             log.info("后台任务：开始检查待处理翻译...")
-            processed_count = 0
-            # 在真实应用中，您可能需要更复杂的逻辑来处理所有语言
-            async for _ in coordinator.process_pending_translations(target_lang="zh-CN"):
-                processed_count += 1
-            if processed_count > 0:
-                log.info("后台任务：本轮处理完成", count=processed_count)
+            # ... (循环处理所有目标语言) ...
+            await asyncio.sleep(60)
         except Exception:
-            log.error("后台翻译任务发生意外错误，将在60秒后重试。", exc_info=True)
-
-        await asyncio.sleep(60)
+            log.error("后台翻译任务发生意外错误", exc_info=True)
+            await asyncio.sleep(60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- 在应用启动时执行 ---
     global coordinator
     setup_logging()
-
-    db_path_str = "fastapi_app.db"
-    apply_migrations(db_path_str)
+    
+    apply_migrations("fastapi_app.db")
     log.info("数据库迁移完成。")
-
-    config = TransHubConfig(
-        database_url=f"sqlite:///{db_path_str}",
-        active_engine="openai"
-    )
+    
+    config = TransHubConfig(database_url="sqlite:///fastapi_app.db", active_engine="openai")
     handler = DefaultPersistenceHandler(db_path=config.db_path)
     coordinator = Coordinator(config=config, persistence_handler=handler)
     await coordinator.initialize()
-    log.info("Trans-Hub Coordinator 初始化完成。")
 
-    # 启动后台翻译任务
     task = asyncio.create_task(translation_processor_task())
-
-    yield # 应用在此处运行
-
-    # --- 在应用关闭时执行 ---
+    
+    yield
+    
     task.cancel()
     await coordinator.close()
-    log.info("Trans-Hub Coordinator 已关闭。")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -251,14 +289,9 @@ class TranslationRequestModel(BaseModel):
 
 @app.post("/translate", response_model=Union[TranslationResult, dict])
 async def request_translation(request_data: TranslationRequestModel):
-    """
-    一个高效的翻译请求接口。
-    - 如果已有翻译，立即返回。
-    - 如果没有，则登记任务并返回“已接受”状态。
-    """
-    existing_translation = await coordinator.handler.get_translation(
-        text_content=request_data.text,
-        target_lang=request_data.target_lang
+    """一个高效的翻译请求接口。"""
+    existing_translation = await coordinator.get_translation(
+        text_content=request_data.text, target_lang=request_data.target_lang
     )
     if existing_translation:
         return existing_translation
@@ -270,5 +303,5 @@ async def request_translation(request_data: TranslationRequestModel):
         source_lang="en"
     )
 
-    return {"status": "accepted", "detail": "Translation task has been queued for processing."}
+    return {"status": "accepted", "detail": "Translation task has been queued."}
 ```

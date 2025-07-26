@@ -1,4 +1,4 @@
-# **架构概述：Trans-Hub v2.1**
+# **架构概述：Trans-Hub v2.2**
 
 **本文档的目标读者**: 核心维护者、社区贡献者，以及希望深入理解 `Trans-Hub` 内部工作原理的用户。
 
@@ -38,9 +38,9 @@ graph TD
     subgraph "核心库: Trans-Hub"
         B["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
         U1["<b>配置模型 (TransHubConfig)</b><br/>单一事实来源"]
-        D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象"]
+        D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象<br/><i>(内置并发写锁)</i>"]
         F["统一数据库 (SQLite)"]
-
+        
         subgraph "插件化引擎子系统"
             E_meta["<b>引擎元数据注册表 (meta.py)</b><br/>解耦中心"]
             C3["<b>引擎加载器 (engine_registry.py)</b><br/>动态发现"]
@@ -56,30 +56,30 @@ graph TD
     G -- "加载环境变量" --> U1
     A -- "创建" --> U1
     A -- "实例化并调用" --> B
-
+    
     B -- "使用" --> C1 & C2
     B -- "依赖于" --> D
-
+    
     subgraph "初始化/发现流程"
         style C3 fill:#e6f3ff,stroke:#36c
         style E_impl fill:#e6f3ff,stroke:#36c
         style E_meta fill:#e6f3ff,stroke:#36c
-
+        
         U1 -- "1. 查询配置类型" --> E_meta
         B -- "2. 使用引擎名查询" --> C3
         C3 -- "3. 导入模块, 触发" --> E_impl
         E_impl -- "4. 自我注册 Config" --> E_meta
     end
-
+    
     D -- "操作" --> F
 ```
 
 ### **组件职责**
 
 - **`Coordinator` (主协调器)**: **业务流程的大脑**。它是上层应用与之交互的唯一入口。它负责编排所有操作：接收请求、应用重试/速率限制策略、调用引擎、处理缓存和将结果存入数据库。
-- **`PersistenceHandler` (持久化处理器)**: **数据库的守门人**。它是一个定义了所有数据库读写操作（如 `save_translations`）的抽象接口 (`Protocol`)。`DefaultPersistenceHandler` 是其基于 `aiosqlite` 的默认实现。
+- **`PersistenceHandler` (持久化处理器)**: **数据库的守门人**。它是一个定义了所有数据库读写操作的抽象接口。其默认实现 `DefaultPersistenceHandler` 基于 `aiosqlite`，并通过**内部的异步写锁**来保证所有写操作的事务安全，即使在多个并发的 Worker 和 API 请求下也能稳定工作。
 - **`BaseTranslationEngine` (引擎基类)**: **翻译能力的插件插槽**。它定义了所有翻译引擎必须遵守的契约，其核心是实现 `_atranslate_one` 异步方法。
-- **`TransHubConfig` (配置模型)**: **系统的控制面板**。它是一个 Pydantic 模型，集中了所有的配置项，并能从 `.env` 文件智能加载。
+- **`TransHubConfig` (配置模型)**: **系统的控制面板**。它是一个 Pydantic 模型，集中了所有的配置项，并由 `Coordinator` 在初始化时动态填充。
 - **引擎发现与注册机制**:
   - `engine_registry.py` 负责**发现和加载**引擎的**实现代码** (`...Engine` 类)。
   - `engines/meta.py` 负责维护一个引擎名到其**配置模型** (`...Config` 类) 的映射。
@@ -101,7 +101,7 @@ sequenceDiagram
 
     App->>+Coord: process_pending_translations('zh-CN')
     Coord->>+Handler: stream_translatable_items('zh-CN', ...)
-    Note over Handler: 事务1: 锁定一批待办任务<br>(状态->TRANSLATING)
+    Note over Handler: (获取写锁)<br>事务1: 锁定一批待办任务<br>(状态->TRANSLATING)<br>(释放写锁)
     Handler-->>-Coord: yield batch_of_items
 
     loop 针对每个翻译批次 (按 context 分组)
@@ -112,9 +112,7 @@ sequenceDiagram
             loop 批次内部的重试尝试
                 Note over Coord: (应用速率限制)
                 Coord->>+Engine: atranslate_batch(uncached_items)
-                Note over Engine: (并发调用 _atranslate_one)
                 Engine-->>-Coord: List<EngineBatchItemResult>
-
                 alt 批次中存在可重试错误
                     Coord->>Coord: await asyncio.sleep(指数退避)
                 else
@@ -125,9 +123,9 @@ sequenceDiagram
             Cache-->>-Coord: (新结果已缓存)
         end
 
-        Note over Coord: 组合所有结果 (缓存+新翻译)
+        Note over Coord: 组合所有结果
         Coord->>+Handler: save_translations(all_results)
-        Note over Handler: 事务2: 原子更新翻译记录
+        Note over Handler: (获取写锁)<br>事务2: 原子更新翻译记录<br>(释放写锁)
         Handler-->>-Coord: (数据库更新完成)
 
         loop 对每个最终结果
@@ -135,6 +133,14 @@ sequenceDiagram
         end
     end
 ```
+
+### **并发安全**
+
+`Trans-Hub` 被设计用于高并发环境。为了处理像“多个生产者 (`request`) 和一个工作者 (`process_pending_translations`) 同时对数据库进行写操作”这样的场景，`DefaultPersistenceHandler` 在其内部实现了一个**异步写锁 (`asyncio.Lock`)**。
+
+- 所有执行**写事务**的方法（如 `ensure_pending_translations`, `save_translations`）在执行前都必须获取这个锁。
+- 这确保了对数据库的写操作是**原子且串行**的，从根本上避免了事务冲突和数据竞争。
+- **只读**操作（如 `get_translation`）**不会**获取这个锁，因此可以与正在进行的写操作并发执行（得益于 SQLite 的 WAL 模式），最大限度地保证了读取性能。
 
 ---
 

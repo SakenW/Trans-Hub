@@ -3,7 +3,7 @@
 一个使用 Trans-Hub 库来翻译 Apple .strings 格式文件的示例程序。
 此版本结合了 business_id 和动态生成的 context，以实现更精确的来源追踪和情境控制。
 运行方式:
-在项目根目录执行 `poetry run python examples/translate_strings_file.py`
+在项目根目录执行 `poetry run python examples/03_specific_use_case_strings_file.py`
 """
 
 import asyncio
@@ -95,7 +95,7 @@ async def main():
 
     log.info("▶️ 翻译程序启动 (使用动态 context)...")
 
-    db_file_path = Path(__file__).parent / "strings_translator_demo.db"
+    db_file_path = Path(__file__).parent / "03_specific_use_case_strings_file.db"
     log.info("临时数据库路径", path=str(db_file_path))
     db_file_path.unlink(missing_ok=True)
 
