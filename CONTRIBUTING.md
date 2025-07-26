@@ -186,12 +186,22 @@
 3.  **模拟外部依赖:** 测试中必须模拟所有外部服务（如 API 调用），以确保测试的稳定性和速度。推荐使用 `unittest.mock.patch`。
 
 4.  **测试代码编写准则**:
-    -   **职责分离**: 测试代码的职责是**验证**核心代码的功能，它**不应该**包含任何用于“修复”或“变通”核心库问题的逻辑。
+    -   **职责分离**: 测试代码的职责是**验证**核心代码的功能。它**不应该**包含任何用于“修复”或“变通”核心库设计缺陷的逻辑。如果测试很难写，通常意味着核心代码需要重构。
     -   **Fixture 设计**:
-        -   **简化 Fixture**: `pytest` 的 fixture (特别是 `test_config`) 应该尽可能地**简单**。它只负责提供最基本的、符合用户常规使用场景的配置。
-        -   **信赖核心逻辑**: 不要为了测试而去手动构建复杂的内部状态（例如，手动创建 `EngineConfigs`）。应该信赖被测试组件（如 `Coordinator`）的初始化逻辑来正确地组装其依赖。
-        -   **测试应关注行为，而非实现细节**: 我们的测试应该验证“当我调用 `coordinator.switch_engine('openai')` 时，它是否能正常工作”，而不是去验证“`config.engine_configs.openai` 是否被正确创建”。后者是 `Coordinator` 的实现细节。
-    -   **明确性**: 测试用例应该有清晰的命名（如 `test_engine_switch_to_unconfigured_engine_fails`），并通过断言来明确验证预期的行为或错误。
+        -   **简化 Fixture**: `pytest` 的 fixture (特别是 `test_config`) 应该尽可能地**简单**，只负责提供最基本的、符合用户常规使用场景的配置。
+        -   **信赖核心逻辑**: 不要为了测试而去手动构建复杂的内部状态。应该信赖被测试组件（如 `Coordinator`）的初始化逻辑来正确地组装其依赖。
+    -   **测试应关注行为，而非实现细节**: 我们的测试应该验证“当我调用 `coordinator.switch_engine('openai')` 时，它是否能正常工作”，而不是去验证“`config.engine_configs.openai` 是否被正确创建”。后者是 `Coordinator` 的实现细节。
+    -   **处理动态模型与 MyPy 的冲突**:
+        - **情景**: `Trans-Hub` 的某些 Pydantic 模型（如 `EngineConfigs`）被设计为动态的 (`extra="allow"`)。这可能导致 `mypy` 在静态分析时，抱怨向这些模型传递了它在静态定义中看不到的字段或类型。
+        - **解决方案**: 在这种特定情况下，为了保持核心代码的纯粹性，我们允许在**测试代码**中使用 `# type: ignore` 来抑制 `mypy` 的 `[arg-type]` 或 `[call-arg]` 错误。这是在不污染核心库实现的情况下，解决静态分析器局限性的最佳实践。
+        ```python
+        # 好的实践：在测试代码中，用 type: ignore 解决动态模型问题
+        engine_configs_dict = {"dynamic_field": SomeConfig()}
+        
+        config = TransHubConfig(
+            engine_configs=engine_configs_dict,  # type: ignore[arg-type]
+        )
+        ```
 
 ### **其他关键约定**
 

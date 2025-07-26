@@ -11,10 +11,9 @@ from itertools import groupby
 from typing import Any, Optional, Union
 
 import structlog
-from pydantic import create_model
 
 from trans_hub.cache import TranslationCache
-from trans_hub.config import EngineConfigs, TransHubConfig
+from trans_hub.config import TransHubConfig
 from trans_hub.engine_registry import ENGINE_REGISTRY, discover_engines
 from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 from trans_hub.engines.meta import ENGINE_CONFIG_REGISTRY
@@ -59,7 +58,8 @@ class Coordinator:
         if self.active_engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"指定的活动引擎 '{self.active_engine_name}' 不可用。")
 
-        self._validate_and_populate_engine_configs()
+        # [核心修复] 只确保 active_engine 的配置存在
+        self._ensure_engine_config(self.active_engine_name)
 
         self.active_engine: BaseTranslationEngine[Any] = self._create_engine_instance(
             self.active_engine_name
@@ -70,26 +70,16 @@ class Coordinator:
 
         logger.info("协调器初始化完成。", active_engine=self.active_engine_name)
 
-    def _validate_and_populate_engine_configs(self) -> None:
-        """动态地验证和填充 engine_configs，使其成为一个类型完整的 Pydantic 模型。"""
-        dynamic_fields: dict[str, Any] = {
-            name: (Optional[config_class], None)
-            for name, config_class in ENGINE_CONFIG_REGISTRY.items()
-        }
+    def _ensure_engine_config(self, engine_name: str) -> None:
+        """如果指定引擎的配置不存在，则动态创建它。"""
+        if getattr(self.config.engine_configs, engine_name, None) is None:
+            config_class = ENGINE_CONFIG_REGISTRY.get(engine_name)
+            if not config_class:
+                raise ValueError(f"引擎 '{engine_name}' 的配置模型未在元数据中注册。")
 
-        DynamicEngineConfigs = create_model(  # noqa: N806
-            "DynamicEngineConfigs", __base__=EngineConfigs, **dynamic_fields
-        )
-
-        validated_data = self.config.engine_configs.model_dump()
-        rebuilt_configs = DynamicEngineConfigs.model_validate(validated_data)
-
-        for name, config_class in ENGINE_CONFIG_REGISTRY.items():
-            if getattr(rebuilt_configs, name, None) is None:
-                instance = config_class()
-                setattr(rebuilt_configs, name, instance)
-
-        self.config.engine_configs = rebuilt_configs
+            # BaseSettings 会自动从 .env 加载
+            instance = config_class()
+            setattr(self.config.engine_configs, engine_name, instance)
 
     def _create_engine_instance(self, engine_name: str) -> BaseTranslationEngine[Any]:
         engine_class = ENGINE_REGISTRY[engine_name]
@@ -108,9 +98,8 @@ class Coordinator:
         if engine_name not in ENGINE_REGISTRY:
             raise ValueError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
 
-        # 在切换时，也要确保配置实例存在
-        if getattr(self.config.engine_configs, engine_name, None) is None:
-            self._validate_and_populate_engine_configs()
+        # [核心修复] 在切换时，也确保目标引擎的配置存在
+        self._ensure_engine_config(engine_name)
 
         self.active_engine = self._create_engine_instance(engine_name)
         self.active_engine_name = engine_name
