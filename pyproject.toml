@@ -4,8 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "trans-hub"
-# 暂时不更新版本号，待功能完善后统一处理
-version = "2.2.0" 
+version = "3.0.0.dev0" 
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
@@ -33,24 +32,36 @@ structlog = "^23.0"
 pydantic-settings = "^2.0"
 aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
-dependency-injector = "^4.41.0"
 
-# --- 可选功能依赖 ---
+# --- 可选功能与工具依赖 ---
+# 翻译引擎
 translators = { version = "^6.0.1", optional = true }
 openai = { version = "^1.37.0", optional = true }
+# --- 核心修正：升级 httpx 版本以解决冲突 ---
+httpx = { version = "^0.28.1", optional = true } 
+# 指标
 prometheus-client = { version = "0.20.0", optional = true }
+# 应用层 (CLI, API)
 typer = { version = "^0.12.3", extras = ["rich"], optional = true }
 fastapi = { version = "^0.111.0", optional = true }
 uvicorn = { version = "^0.30.1", extras = ["standard"], optional = true }
+# 文档工具
+mistune = { version = "^3.0.2", optional = true }
+
 
 # --- 可选依赖分组 (Extras) ---
 [tool.poetry.extras]
 translators = ["translators"]
-openai = ["openai"]
+openai = ["openai", "httpx"]
 metrics = ["prometheus-client"]
 cli = ["typer"]
 api = ["fastapi", "uvicorn"]
-all = ["translators", "openai", "prometheus-client", "typer", "fastapi", "uvicorn"]
+tools = ["typer", "mistune", "openai", "httpx"]
+all = [
+    "translators", "openai", "httpx", "prometheus-client", 
+    "typer", "fastapi", "uvicorn", "mistune"
+]
+
 
 # --- 开发依赖 ---
 [tool.poetry.group.dev.dependencies]
@@ -60,13 +71,16 @@ pytest = "^7.4"
 pytest-cov = "^4.1"
 pytest-asyncio = "^0.21.0"
 types-cachetools = "^5.3.1"
-# 开发环境直接安装所有可选依赖，确保测试全面
+# 开发环境直接安装所有可选依赖，确保测试和工具运行全面
 translators = "^6.0.1"
 openai = "^1.37.0"
+# --- 核心修正：同步升级开发依赖中的 httpx 版本 ---
+httpx = "^0.28.1"
 prometheus-client = "0.20.0"
 typer = { version = "^0.12.3", extras = ["rich"] }
 fastapi = "^0.111.0"
 uvicorn = { version = "^0.30.1", extras = ["standard"] }
+mistune = "^3.0.2"
 
 
 [tool.ruff]
@@ -74,15 +88,11 @@ line-length = 88
 target-version = "py39"
 
 [tool.ruff.lint]
-# --- 核心修正：恢复项目原有的、经过验证的规则集 ---
 select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4", "A"]
 ignore = [
-    "E501", # Line too long, handled by formatter
-    # 忽略所有基础的 docstring 规则
+    "E501", 
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
-    # 忽略一些有争议的 docstring 格式规则
     "D400", "D401", "D415", "D203", "D212", "D205",
-    # --- 核心保留：为兼容 Python 3.9，不自动转换 Optional ---
     "UP007", 
 ]
 
@@ -98,6 +108,7 @@ pretty = true
 module = [
     "translators",
     "openai.*",
-    "mistune"
+    "mistune",
+    "mistune.*",
 ]
 ignore_missing_imports = true

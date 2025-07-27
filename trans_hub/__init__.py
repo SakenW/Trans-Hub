@@ -3,10 +3,11 @@
 
 __version__ = "3.0.0.dev0"
 
-from .config import TransHubConfig
+# --- 核心修正：从 config 模块中导入并暴露 EngineName ---
+from .config import EngineName, TransHubConfig
 from .coordinator import Coordinator
 from .engines.base import BaseContextModel
-from .persistence import DefaultPersistenceHandler  # <-- 核心修正：重新暴露
+from .persistence import DefaultPersistenceHandler
 from .types import TranslationStatus
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "TransHubConfig",
     "Coordinator",
     "BaseContextModel",
-    "DefaultPersistenceHandler",  # <-- 核心修正：重新暴露
+    "DefaultPersistenceHandler",
     "TranslationStatus",
+    "EngineName",  # <-- 将 EngineName 添加到 __all__
 ]
