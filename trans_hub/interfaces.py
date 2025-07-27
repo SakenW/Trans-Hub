@@ -119,3 +119,18 @@ class PersistenceHandler(Protocol):
             一个字典，包含被删除的各类记录的数量。
         """
         ...
+
+    # --- 新增方法 ---
+    async def move_to_dlq(
+        self,
+        item: ContentItem,
+        error_message: str,
+        engine_name: str,
+        engine_version: str,
+    ) -> None:
+        """
+        将一个永久失败的任务从主翻译表移动到死信队列。
+
+        这是一个原子操作，应包含从主表删除和向 DLQ 表插入。
+        """
+        ...

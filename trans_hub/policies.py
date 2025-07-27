@@ -5,6 +5,7 @@
 它包含策略的接口协议（ProcessingPolicy）及其默认实现（DefaultProcessingPolicy）。
 每个策略都封装了一套完整的业务逻辑，用于处理一批待翻译任务，并能智能适配
 不同引擎对上下文（context）的处理能力。
+此版本新增了在任务永久失败后将其移入死信队列（DLQ）的逻辑。
 """
 
 import asyncio
@@ -48,7 +49,8 @@ class ProcessingPolicy(Protocol):
             context: 包含所有必要依赖项的处理上下文“工具箱”。
 
         返回:
-            一个包含所有处理结果（成功或失败）的 `TranslationResult` 列表。
+            一个包含所有处理结果（成功或不可重试失败）的 `TranslationResult` 列表。
+            注意：永久失败的任务将被移入DLQ，不会包含在此返回列表中。
         """
         ...
 
@@ -58,6 +60,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
     默认的翻译处理策略。
 
     实现了包含缓存、指数退避重试和详细错误处理的标准工作流。
+    当任务达到最大重试次数后，会自动将其移入死信队列。
     """
 
     async def process_batch(
@@ -84,14 +87,13 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         max_retries: int,
         initial_backoff: float,
     ) -> list[TranslationResult]:
-        """[私有] 对批次应用完整的翻译和重试逻辑。"""
+        """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
         business_id_map = await self._get_business_id_map(batch, p_context)
         active_engine = p_context.active_engine
 
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
             raw_context_dict = batch[0].context if batch else None
-            # 注意：这是一个同步方法调用
             parsed_context_or_error = active_engine.validate_and_parse_context(
                 raw_context_dict
             )
@@ -99,7 +101,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 logger.warning(
                     "批次上下文验证失败", error=parsed_context_or_error.error_message
                 )
-                # --- 关键逻辑修正：必须在这里立即返回 ---
                 return [
                     self._build_translation_result(
                         item,
@@ -116,6 +117,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
         items_to_process = list(batch)
         final_results: list[TranslationResult] = []
+        dlq_tasks = []
 
         for attempt in range(max_retries + 1):
             (
@@ -131,27 +133,23 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             final_results.extend(processed_results)
 
             if not retryable_items:
-                return final_results
+                break  # 所有任务都已处理完毕
 
             if attempt >= max_retries:
                 logger.error(
-                    "小组达到最大重试次数", retry_item_count=len(retryable_items)
+                    "任务达到最大重试次数，将移至死信队列", count=len(retryable_items)
                 )
-                error = EngineError(
-                    error_message="达到最大重试次数", is_retryable=False
-                )
-                failed_results = [
-                    self._build_translation_result(
-                        item,
-                        target_lang,
-                        p_context,
-                        business_id_map,
-                        error_override=error,
+                error_message = "达到最大重试次数"
+
+                for item in retryable_items:
+                    task = p_context.handler.move_to_dlq(
+                        item=item,
+                        error_message=error_message,
+                        engine_name=p_context.config.active_engine,
+                        engine_version=active_engine.VERSION,
                     )
-                    for item in retryable_items
-                ]
-                final_results.extend(failed_results)
-                return final_results
+                    dlq_tasks.append(task)
+                break  # 结束重试循环
 
             items_to_process = retryable_items
             backoff_time = initial_backoff * (2**attempt)
@@ -160,9 +158,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 retry_count=len(items_to_process),
             )
             await asyncio.sleep(backoff_time)
+
+        if dlq_tasks:
+            await asyncio.gather(*dlq_tasks)
+
         return final_results
 
-    # ... (其他方法保持不变) ...
     async def _process_single_translation_attempt(
         self,
         batch: list[ContentItem],

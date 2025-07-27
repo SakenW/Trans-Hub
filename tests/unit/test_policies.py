@@ -4,7 +4,7 @@
 
 这些测试是独立的，不依赖于真实的数据库或网络连接。
 它们通过模拟（Mocking）依赖项，精确地验证处理策略的内部逻辑，
-如重试、缓存、上下文处理等。
+如重试、缓存、上下文处理以及死信队列（DLQ）行为。
 """
 
 import asyncio
@@ -30,8 +30,8 @@ def mock_processing_context() -> MagicMock:
         EngineSuccess(translated_text="mocked")
     ]
     mock_engine.ACCEPTS_CONTEXT = False
-    # --- 关键修正：这是一个同步方法，必须使用 MagicMock ---
     mock_engine.validate_and_parse_context = MagicMock(return_value=MagicMock())
+    mock_engine.VERSION = "test-ver-1.0"  # 为 DLQ 测试提供版本号
 
     mock_rate_limiter = AsyncMock()
 
@@ -43,6 +43,7 @@ def mock_processing_context() -> MagicMock:
 
     mock_handler = AsyncMock()
     mock_handler.get_business_id_for_content.return_value = "biz-123"
+    mock_handler.move_to_dlq = AsyncMock()  # 为 DLQ 测试添加 mock 方法
 
     mock_cache = AsyncMock()
     mock_cache.get_cached_result.return_value = None
@@ -200,6 +201,50 @@ async def test_policy_no_retry_on_non_retryable_error(
     assert results[0].error == "Invalid API Key"
     mock_engine.atranslate_batch.assert_called_once()
     mock_sleep.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_policy_moves_to_dlq_after_max_retries(
+    mock_processing_context: MagicMock, sample_batch: list[ContentItem], monkeypatch
+):
+    """
+    测试：当任务达到最大重试次数后，是否会被移入死信队列，
+    并且不会作为 TranslationResult 返回。
+    """
+    # 安排：引擎持续返回可重试错误
+    mock_engine = mock_processing_context.active_engine
+    retryable_error = EngineError(error_message="Persistent error", is_retryable=True)
+    # 模拟引擎被调用3次（1次初始 + 2次重试），每次都失败
+    mock_engine.atranslate_batch.return_value = [retryable_error]
+
+    mock_handler = mock_processing_context.handler
+    mock_sleep = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", mock_sleep)
+
+    policy = DefaultProcessingPolicy()
+
+    # 行动
+    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
+
+    # 断言：
+    # 1. 最终返回的结果列表为空，因为唯一的任务被移到了 DLQ
+    assert len(results) == 0
+
+    # 2. 翻译引擎被调用了 3 次（1次初始 + 2次重试）
+    assert mock_engine.atranslate_batch.call_count == 3
+
+    # 3. sleep 被调用了 2 次（在重试之间）
+    assert mock_sleep.call_count == 2
+
+    # 4. handler 的 move_to_dlq 方法被调用了一次
+    mock_handler.move_to_dlq.assert_called_once()
+
+    # 5. 验证传递给 move_to_dlq 的参数是否正确
+    dlq_call_args = mock_handler.move_to_dlq.call_args
+    assert dlq_call_args.kwargs["item"] == sample_batch[0]
+    assert dlq_call_args.kwargs["error_message"] == "达到最大重试次数"
+    assert dlq_call_args.kwargs["engine_name"] == "debug"
+    assert dlq_call_args.kwargs["engine_version"] == "test-ver-1.0"
 
 
 if __name__ == "__main__":

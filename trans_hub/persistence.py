@@ -4,6 +4,7 @@
 
 它通过实现 `PersistenceHandler` 接口，提供了并发安全的异步数据库操作，
 并内置了系统自愈、强制重翻和垃圾回收等高级功能。
+此版本新增了死信队列（DLQ）处理能力。
 """
 
 import asyncio
@@ -35,6 +36,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
     读写场景下的数据一致性和操作原子性。
     """
 
+    # ... (init, connect, connection, transaction, reset_stale_tasks, _get_or_create_content_id, ensure_pending_translations 保持不变) ...
     def __init__(self, db_path: str):
         """
         初始化持久化处理器。
@@ -51,8 +53,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
         try:
             self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row
-            await self._conn.execute("PRAGMA foreign_keys = ON;")
-            await self._conn.execute("PRAGMA journal_mode = WAL;")
+            # PRAGMA 应该由迁移脚本管理，这里不再设置
             logger.info("数据库连接已建立", db_path=self.db_path)
         except aiosqlite.Error:
             logger.error("连接数据库失败", exc_info=True)
@@ -187,6 +188,56 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 ]
                 await cursor.executemany(insert_sql, params_to_insert)
 
+    # --- 新增方法实现 ---
+    async def move_to_dlq(
+        self,
+        item: ContentItem,
+        error_message: str,
+        engine_name: str,
+        engine_version: str,
+    ) -> None:
+        """在一个原子事务中，将失败任务从主表移动到死信队列。"""
+        async with self._db_lock:
+            async with self.transaction() as cursor:
+                # 1. 从 th_translations 表中获取更多信息
+                await cursor.execute(
+                    "SELECT source_lang_code, lang_code FROM th_translations WHERE content_id = ? AND context_hash = ?",
+                    (item.content_id, item.context_hash),
+                )
+                translation_row = await cursor.fetchone()
+
+                if not translation_row:
+                    logger.warning(
+                        "尝试移动到 DLQ 的任务已不存在", content_id=item.content_id
+                    )
+                    return
+
+                # 2. 插入到死信队列
+                insert_sql = """
+                    INSERT INTO th_dead_letter_queue
+                    (original_content, source_lang_code, target_lang_code, context_hash, context_json, engine_name, engine_version, last_error_message)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                params = (
+                    item.value,
+                    translation_row["source_lang_code"],
+                    translation_row["lang_code"],
+                    item.context_hash,
+                    json.dumps(item.context) if item.context else None,
+                    engine_name,
+                    engine_version,
+                    error_message,
+                )
+                await cursor.execute(insert_sql, params)
+
+                # 3. 从主翻译表中删除
+                await cursor.execute(
+                    "DELETE FROM th_translations WHERE content_id = ? AND context_hash = ? AND lang_code = ?",
+                    (item.content_id, item.context_hash, translation_row["lang_code"]),
+                )
+                logger.info("任务已移至死信队列", content_id=item.content_id)
+
+    # ... (stream_translatable_items, save_translations, get_translation, etc. 保持不变) ...
     async def stream_translatable_items(
         self,
         lang_code: str,
@@ -335,7 +386,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                     target_lang=target_lang,
                     status=TranslationStatus.TRANSLATED,
                     engine=row["engine"],
-                    from_cache=True,  # 标记为来自持久化缓存
+                    from_cache=True,
                     business_id=row["business_id"],
                     context_hash=context_hash,
                 )
