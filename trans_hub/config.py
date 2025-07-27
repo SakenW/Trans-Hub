@@ -1,7 +1,6 @@
 # trans_hub/config.py
-"""
-本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。
-"""
+"""本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。"""
+
 import enum
 from typing import Literal, Optional
 from urllib.parse import urlparse
@@ -15,6 +14,7 @@ from trans_hub.exceptions import ConfigurationError
 
 class EngineName(str, enum.Enum):
     """定义了所有受支持的翻译引擎的名称。"""
+
     DEBUG = "debug"
     OPENAI = "openai"
     TRANSLATORS = "translators"
@@ -22,26 +22,28 @@ class EngineName(str, enum.Enum):
 
 class LoggingConfig(BaseModel):
     """日志配置。"""
+
     level: str = "INFO"
     format: Literal["json", "console"] = "console"
 
 
 class RetryPolicyConfig(BaseModel):
     """重试策略配置。"""
+
     max_attempts: int = 2
     initial_backoff: float = 1.0
     max_backoff: float = 60.0
 
 
 class EngineConfigs(BaseModel):
-    """
-    一个用于聚合所有引擎特定配置的容器模型。
-    """
+    """一个用于聚合所有引擎特定配置的容器模型。"""
+
     model_config = ConfigDict(extra="allow")
 
 
 class TransHubConfig(BaseSettings):
     """Trans-Hub 的主配置对象，聚合了所有子配置。"""
+
     # --- 核心修正：添加 extra='ignore' ---
     # 告诉 Pydantic 忽略它在 .env 文件中不认识的字段（如 TH_OPENAI_*)
     model_config = {

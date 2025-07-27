@@ -36,15 +36,29 @@ class BaseEngineConfig(BaseModel):
 class BaseTranslationEngine(ABC, Generic[_ConfigType]):
     """翻译引擎的纯异步抽象基类。所有引擎实现都必须继承此类。"""
 
-    # --- 核心能力声明 ---
     CONFIG_MODEL: type[_ConfigType]
     CONTEXT_MODEL: type[BaseContextModel] = BaseContextModel
     VERSION: str = "1.0.0"
     REQUIRES_SOURCE_LANG: bool = False
-    ACCEPTS_CONTEXT: bool = False  # 默认引擎不支持上下文
+    ACCEPTS_CONTEXT: bool = False
 
     def __init__(self, config: _ConfigType):
         self.config = config
+
+    # --- 核心修正 1.2.1: 添加生命周期钩子 ---
+    async def initialize(self) -> None:
+        """
+        [可选实现] 初始化引擎所需的异步资源（如网络连接池）。
+        此方法将在 Coordinator 初始化时被调用。
+        """
+        pass
+
+    async def close(self) -> None:
+        """
+        [可选实现] 安全关闭引擎占用的异步资源。
+        此方法将在 Coordinator 关闭时被调用。
+        """
+        pass
 
     @abstractmethod
     async def _atranslate_one(
@@ -54,18 +68,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """
-        [必须实现] 翻译单个文本的核心抽象方法。
-
-        参数:
-            text: 要翻译的单个文本。
-            target_lang: 目标语言。
-            source_lang: 源语言（如果引擎需要）。
-            context_config: 从已解析的上下文中提取出的配置字典。
-
-        返回:
-            EngineSuccess 或 EngineError。
-        """
+        """[必须实现] 翻译单个文本的核心抽象方法。"""
         ...
 
     def _get_context_config(
@@ -79,14 +82,8 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
     def validate_and_parse_context(
         self, context_dict: Optional[dict[str, Any]]
     ) -> Union[BaseContextModel, EngineError]:
-        """
-        [便利工具] 验证并解析一个原始的 context 字典。
-
-        如果引擎不支持上下文 (CONTEXT_MODEL 为 BaseContextModel)，
-        或未提供上下文，则返回一个空的 BaseContextModel 实例。
-        """
+        """[便利工具] 验证并解析一个原始的 context 字典。"""
         if not self.ACCEPTS_CONTEXT or not context_dict:
-            # 对于不支持或未提供上下文的情况，返回一个无害的空上下文模型
             return BaseContextModel()
 
         try:
@@ -102,12 +99,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """
-        [通用逻辑] 并发地翻译一批文本。
-
-        此方法处理了通用的并发执行、源语言检查和异常封装逻辑。
-        通常情况下，子类无需覆盖此方法。
-        """
+        """[通用逻辑] 并发地翻译一批文本。"""
         if self.REQUIRES_SOURCE_LANG and not source_lang:
             error_msg = f"引擎 '{self.__class__.__name__}' 需要提供源语言。"
             return [EngineError(error_message=error_msg, is_retryable=False)] * len(
@@ -121,7 +113,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
             for text in texts
         ]
 
-        # --- 核心优化：更健壮的异常处理 ---
         results: list[
             Union[EngineBatchItemResult, BaseException]
         ] = await asyncio.gather(*tasks, return_exceptions=True)
@@ -131,14 +122,12 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
             if isinstance(res, (EngineSuccess, EngineError)):
                 final_results.append(res)
             elif isinstance(res, BaseException):
-                # 将任何未预期的异常都封装成可重试的 EngineError
                 error_res = EngineError(
                     error_message=f"引擎执行异常: {res.__class__.__name__}: {res}",
                     is_retryable=True,
                 )
                 final_results.append(error_res)
             else:
-                # 理论上不应发生，但作为兜底
                 unhandled_error = EngineError(
                     error_message=f"未知的 gather 结果类型: {type(res)}",
                     is_retryable=False,

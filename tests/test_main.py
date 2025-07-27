@@ -20,7 +20,8 @@ import structlog
 from dotenv import load_dotenv
 from pydantic import HttpUrl, SecretStr
 
-from trans_hub.config import EngineConfigs, TransHubConfig
+# --- 核心修正：导入 EngineName ---
+from trans_hub.config import EngineConfigs, EngineName, TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngineConfig
@@ -47,10 +48,7 @@ ENGINE_OPENAI = "openai"
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """
-    在整个测试会话开始前准备测试目录，并在会话结束后自动清理。
-    这是一个会话级别的、自动运行的 Fixture。
-    """
+    """在整个测试会话开始前准备测试目录，并在会话结束后自动清理。"""
     TEST_DIR.mkdir(exist_ok=True)
     logger.info("测试输出目录已创建", path=str(TEST_DIR))
     yield
@@ -60,12 +58,7 @@ def setup_test_environment():
 
 @pytest.fixture
 def test_config() -> TransHubConfig:
-    """
-    为每个测试用例提供一个隔离的、包含所有引擎配置的 TransHubConfig 实例。
-
-    这确保了每个测试都运行在独立的数据库上，避免了相互干扰，
-    并通过预设的引擎配置使得测试行为完全可预测，不依赖于外部 .env 文件。
-    """
+    """为每个测试用例提供一个隔离的、包含所有引擎配置的 TransHubConfig 实例。"""
     db_file = f"test_{os.urandom(4).hex()}.db"
 
     openai_api_key_str = os.getenv("TH_OPENAI_API_KEY", "dummy-key-for-testing")
@@ -83,7 +76,8 @@ def test_config() -> TransHubConfig:
 
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
-        active_engine=ENGINE_DEBUG,
+        # --- 核心修正：将字符串转换为 EngineName 枚举 ---
+        active_engine=EngineName(ENGINE_DEBUG),
         source_lang="en",
         engine_configs=engine_configs_instance,
     )
@@ -91,15 +85,9 @@ def test_config() -> TransHubConfig:
 
 @pytest_asyncio.fixture
 async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator, None]:
-    """
-    提供一个完全初始化并准备就绪的 Coordinator 实例。
-
-    此 Fixture 会自动处理数据库的创建、迁移、连接以及在测试结束后的安全关闭，
-    极大地简化了测试用例的编写。
-    """
+    """提供一个完全初始化并准备就绪的 Coordinator 实例。"""
     apply_migrations(test_config.db_path)
     handler: PersistenceHandler = DefaultPersistenceHandler(db_path=test_config.db_path)
-    # 在测试中，我们不关心速率限制，所以传入 None
     coord = Coordinator(
         config=test_config, persistence_handler=handler, rate_limiter=None
     )

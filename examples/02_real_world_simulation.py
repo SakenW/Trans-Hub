@@ -27,12 +27,14 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# --- 核心修正：导入 EngineName ---
 from trans_hub import (  # noqa: E402
     Coordinator,
     DefaultPersistenceHandler,
     TransHubConfig,
     TranslationStatus,
 )
+from trans_hub.config import EngineName  # noqa: E402
 from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
 from trans_hub.logging_config import setup_logging  # noqa: E402
 from trans_hub.types import TranslationResult  # noqa: E402
@@ -71,7 +73,8 @@ async def initialize_trans_hub() -> Coordinator:
 
     config = TransHubConfig(
         database_url=f"sqlite:///{DB_FILE_PATH.resolve()}",
-        active_engine="openai",
+        # --- 核心修正：将字符串转换为 EngineName 枚举 ---
+        active_engine=EngineName("openai"),
         source_lang="en",
     )
 
