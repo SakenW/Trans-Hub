@@ -5,7 +5,6 @@
 重构后，它负责高层工作流的编排：动态加载配置、初始化各组件、
 从持久化层获取任务、将任务批次委托给处理策略，并将结果存回持久化层。
 """
-
 import asyncio
 import json
 from collections.abc import AsyncGenerator
@@ -20,6 +19,8 @@ from trans_hub.context import ProcessingContext
 from trans_hub.engine_registry import ENGINE_REGISTRY, discover_engines
 from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.engines.meta import ENGINE_CONFIG_REGISTRY
+# --- 核心修正 1.1.1: 导入自定义异常 ---
+from trans_hub.exceptions import ConfigurationError, EngineNotFoundError
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.policies import DefaultProcessingPolicy, ProcessingPolicy
 from trans_hub.rate_limiter import RateLimiter
@@ -36,9 +37,6 @@ logger = structlog.get_logger(__name__)
 class Coordinator:
     """
     异步主协调器，是 Trans-Hub 功能的中心枢纽。
-
-    它将持久化、缓存、速率限制和翻译引擎等组件组合在一起，通过依赖注入的
-    处理策略（ProcessingPolicy）执行核心翻译任务，对外提供统一的接口。
     """
 
     def __init__(
@@ -50,12 +48,6 @@ class Coordinator:
     ) -> None:
         """
         初始化协调器实例，并动态完成引擎配置的加载和验证。
-
-        参数:
-            config: Trans-Hub 的主配置对象。
-            persistence_handler: 实现了 PersistenceHandler 协议的持久化处理器实例。
-            rate_limiter: 可选的速率限制器实例。
-            max_concurrent_requests: 可选的最大并发请求数，用于节流。
         """
         discover_engines()
 
@@ -74,15 +66,25 @@ class Coordinator:
             "协调器初始化开始...", available_engines=list(ENGINE_REGISTRY.keys())
         )
 
-        # 确保活动引擎及其配置有效
+        for engine_name, config_class in ENGINE_CONFIG_REGISTRY.items():
+            if not hasattr(self.config.engine_configs, engine_name):
+                instance = config_class()
+                setattr(self.config.engine_configs, engine_name, instance)
+
         if self.config.active_engine not in ENGINE_REGISTRY:
-            raise ValueError(f"指定的活动引擎 '{self.config.active_engine}' 不可用。")
-        self._ensure_engine_config(self.config.active_engine)
+            # --- 核心修正 1.1.1: 应用自定义异常 ---
+            raise EngineNotFoundError(
+                f"指定的活动引擎 '{self.config.active_engine}' 不可用。 "
+                f"可用引擎: {list(ENGINE_REGISTRY.keys())}"
+            )
+
         active_engine_instance = self._create_engine_instance(self.config.active_engine)
         if active_engine_instance.REQUIRES_SOURCE_LANG and not self.config.source_lang:
-            raise ValueError(f"活动引擎 '{self.config.active_engine}' 需要提供源语言。")
+            # --- 核心修正 1.1.1: 应用自定义异常 ---
+            raise ConfigurationError(
+                f"活动引擎 '{self.config.active_engine}' 需要提供源语言 (TH_SOURCE_LANG)。"
+            )
 
-        # 核心重构：创建处理上下文和策略实例
         self.processing_context = ProcessingContext(
             config=self.config,
             handler=self.handler,
@@ -93,22 +95,17 @@ class Coordinator:
 
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine)
 
-    def _ensure_engine_config(self, engine_name: str) -> None:
-        """确保指定引擎的配置对象存在于主配置中，如果不存在则使用默认值创建。"""
-        if getattr(self.config.engine_configs, engine_name, None) is None:
-            config_class = ENGINE_CONFIG_REGISTRY.get(engine_name)
-            if not config_class:
-                raise ValueError(f"引擎 '{engine_name}' 的配置模型未在元数据中注册。")
-            instance = config_class()
-            setattr(self.config.engine_configs, engine_name, instance)
-
     def _create_engine_instance(self, engine_name: str) -> BaseTranslationEngine[Any]:
         """根据引擎名称创建并返回一个翻译引擎的实例。"""
-        engine_class = ENGINE_REGISTRY[engine_name]
+        engine_class = ENGINE_REGISTRY.get(engine_name)
+        if not engine_class:
+            # --- 核心修正 1.1.1: 应用自定义异常 ---
+            raise EngineNotFoundError(f"引擎 '{engine_name}' 未在引擎注册表中找到。")
+        
         engine_config_instance = getattr(self.config.engine_configs, engine_name, None)
-
         if not engine_config_instance:
-            raise ValueError(f"未能为引擎 '{engine_name}' 创建或找到配置实例。")
+            # --- 核心修正 1.1.1: 应用自定义异常 ---
+            raise ConfigurationError(f"未能为引擎 '{engine_name}' 创建或找到配置实例。")
 
         return engine_class(config=engine_config_instance)
 
@@ -119,11 +116,9 @@ class Coordinator:
 
         logger.info("正在切换活动引擎...", new_engine=engine_name)
         if engine_name not in ENGINE_REGISTRY:
-            raise ValueError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
+            # --- 核心修正 1.1.1: 应用自定义异常 ---
+            raise EngineNotFoundError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
 
-        self._ensure_engine_config(engine_name)
-
-        # 更新配置中的活动引擎名称
         self.config.active_engine = engine_name
         logger.info(f"成功切换活动引擎至: '{self.config.active_engine}'。")
 
