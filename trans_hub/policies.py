@@ -2,7 +2,7 @@
 """
 本模块定义并实现了具体的翻译处理策略。
 
-它包含策略的接口协议（ProcessingPolicy）及其默认实现（DefaultProcessingPyollicy）。
+它包含策略的接口协议（ProcessingPolicy）及其默认实现（DefaultProcessingPolicy）。
 每个策略都封装了一套完整的业务逻辑，用于处理一批待翻译任务，并能智能适配
 不同引擎对上下文（context）的处理能力。
 """
@@ -88,30 +88,30 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         business_id_map = await self._get_business_id_map(batch, p_context)
         active_engine = p_context.active_engine
 
-        # --- 核心智能适配逻辑 ---
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
-            # 仅当引擎声明支持时，才解析上下文
             raw_context_dict = batch[0].context if batch else None
-            validated_engine_context = active_engine.validate_and_parse_context(
+            # 注意：这是一个同步方法调用
+            parsed_context_or_error = active_engine.validate_and_parse_context(
                 raw_context_dict
             )
-            if isinstance(validated_engine_context, EngineError):
+            if isinstance(parsed_context_or_error, EngineError):
                 logger.warning(
-                    "批次上下文验证失败", error=validated_engine_context.error_message
+                    "批次上下文验证失败", error=parsed_context_or_error.error_message
                 )
+                # --- 关键逻辑修正：必须在这里立即返回 ---
                 return [
                     self._build_translation_result(
                         item,
                         target_lang,
                         p_context,
                         business_id_map,
-                        error_override=validated_engine_context,
+                        error_override=parsed_context_or_error,
                     )
                     for item in batch
                 ]
+            validated_engine_context = parsed_context_or_error
         else:
-            # 对于不支持上下文的引擎，传递 None
             validated_engine_context = None
 
         items_to_process = list(batch)
@@ -162,6 +162,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             await asyncio.sleep(backoff_time)
         return final_results
 
+    # ... (其他方法保持不变) ...
     async def _process_single_translation_attempt(
         self,
         batch: list[ContentItem],
