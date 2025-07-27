@@ -1,7 +1,8 @@
-# trans_hub/logging_config.py (终极完美版)
+# trans_hub/logging_config.py
 """
-集中配置项目的日志系统。
-使用 structlog 实现结构化的、带上下文的日志记录。
+本模块负责集中配置项目的日志系统。
+
+它使用 structlog 实现结构化的、上下文感知的日志记录，支持 JSON 和控制台两种输出格式。
 """
 
 import logging
@@ -11,8 +12,6 @@ from typing import Literal, Union
 import structlog
 from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
-
-# --- 核心修正：导入 Processor 类型以进行精确注解 ---
 from structlog.typing import Processor
 
 # 使用 contextvars 来安全地在异步环境中传递上下文
@@ -25,9 +24,12 @@ def setup_logging(
     """
     配置整个应用的日志系统。
 
-    根据 `log_format` 决定使用开发环境友好的控制台格式或生产环境友好的 JSON 格式。
+    此函数应在应用启动时尽早调用。
+
+    参数:
+        log_level: 日志级别 (例如 "INFO", "DEBUG")。
+        log_format: 日志输出格式，'console' 适用于开发，'json' 适用于生产。
     """
-    # --- 核心修正：为 shared_processors 添加显式类型注解，帮助 Mypy 理解 ---
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -49,7 +51,6 @@ def setup_logging(
         cache_logger_on_first_use=True,
     )
 
-    # --- 核心修正：为 renderer 添加显式 Union 类型注解 ---
     renderer: Union[JSONRenderer, ConsoleRenderer]
     if log_format == "json":
         renderer = structlog.processors.JSONRenderer()

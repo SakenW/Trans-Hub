@@ -1,8 +1,9 @@
 # trans_hub/persistence.py
 """
-提供了 Trans-Hub 的默认持久化实现，基于 aiosqlite。
-此版本引入了统一的异步数据库锁，确保了在高并发读写场景下的数据安全。
-同时增加了用于系统自愈和强制重翻的逻辑。
+本模块提供了 Trans-Hub 的默认持久化实现，该实现基于 aiosqlite。
+
+它通过实现 `PersistenceHandler` 接口，提供了并发安全的异步数据库操作，
+并内置了系统自愈、强制重翻和垃圾回收等高级功能。
 """
 
 import asyncio
@@ -27,15 +28,26 @@ logger = structlog.get_logger(__name__)
 
 
 class DefaultPersistenceHandler(PersistenceHandler):
-    """使用 aiosqlite 实现的、高性能且并发安全的异步持久化处理器。"""
+    """
+    使用 aiosqlite 实现的、高性能且并发安全的异步持久化处理器。
+
+    通过在所有数据库I/O操作外层使用统一的 `asyncio.Lock`，确保了在高并发
+    读写场景下的数据一致性和操作原子性。
+    """
 
     def __init__(self, db_path: str):
+        """
+        初始化持久化处理器。
+
+        参数:
+            db_path: SQLite 数据库文件的路径。
+        """
         self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
-        # 任务一: 引入一个通用的数据库锁来保护所有I/O操作
         self._db_lock = asyncio.Lock()
 
     async def connect(self):
+        """建立与数据库的连接，并设置推荐的 PRAGMA 以优化性能和一致性。"""
         try:
             self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row
@@ -48,13 +60,18 @@ class DefaultPersistenceHandler(PersistenceHandler):
 
     @property
     def connection(self) -> aiosqlite.Connection:
+        """获取当前的数据库连接对象，如果未连接则抛出异常。"""
         if self._conn is None:
             raise RuntimeError("数据库未连接或已关闭。请先调用 connect()。")
         return self._conn
 
     @asynccontextmanager
     async def transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
-        # 注意：此方法本身不加锁，锁应由调用它的外部方法根据业务逻辑管理
+        """
+        提供一个带自动回滚功能的异步事务上下文管理器。
+
+        注意：此方法本身不加锁，锁应由调用它的外部方法根据业务逻辑管理。
+        """
         if self._conn is None:
             raise ConnectionError("Database not connected.")
         async with self._conn.cursor() as cursor:
@@ -69,7 +86,10 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 raise
 
     async def reset_stale_tasks(self) -> None:
-        """任务二：将所有卡在 'TRANSLATING' 状态的任务重置为 'PENDING'。"""
+        """
+        实现系统自愈机制，将所有卡在 'TRANSLATING' 状态的任务重置为 'PENDING'。
+        这通常在应用启动时调用，以清理上次异常退出的遗留任务。
+        """
         async with self._db_lock:
             async with self.transaction() as cursor:
                 await cursor.execute(
@@ -87,6 +107,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def _get_or_create_content_id(
         self, cursor: aiosqlite.Cursor, text_content: str
     ) -> int:
+        """[私有] 获取或创建一个内容的唯一ID，确保文本内容的唯一性。"""
         await cursor.execute(
             "SELECT id FROM th_content WHERE value = ?", (text_content,)
         )
@@ -111,8 +132,14 @@ class DefaultPersistenceHandler(PersistenceHandler):
         business_id: Optional[str] = None,
         context_hash: Optional[str] = None,
         context_json: Optional[str] = None,
-        force_retranslate: bool = False,  # 任务四：接收强制重翻标志
+        force_retranslate: bool = False,
     ) -> None:
+        """
+        确保翻译任务入队。支持普通入队和强制重翻。
+
+        如果 `force_retranslate` 为 True，会直接更新现有匹配任务的状态为 PENDING。
+        否则，它会使用 `INSERT OR IGNORE` 来高效地插入不存在的任务。
+        """
         async with self._db_lock:
             async with self.transaction() as cursor:
                 content_id = await self._get_or_create_content_id(cursor, text_content)
@@ -128,9 +155,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                         sql, (business_id, content_id, context_hash, now.isoformat())
                     )
 
-                # 任务四：实现强制重翻逻辑
                 if force_retranslate:
-                    # 如果强制重翻，则对所有目标语言的现有记录执行 UPDATE，将其状态重置为 PENDING
                     placeholders = ",".join("?" for _ in target_langs)
                     update_sql = f"UPDATE th_translations SET status = ?, engine_version = ? WHERE content_id = ? AND context_hash = ? AND lang_code IN ({placeholders})"
                     params = [
@@ -147,7 +172,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
                         updated_rows=cursor.rowcount,
                     )
 
-                # 插入尚不存在的翻译任务
                 insert_sql = "INSERT OR IGNORE INTO th_translations (content_id, lang_code, context_hash, status, source_lang_code, engine_version, context) VALUES (?, ?, ?, ?, ?, ?, ?)"
                 params_to_insert = [
                     (
@@ -170,6 +194,12 @@ class DefaultPersistenceHandler(PersistenceHandler):
         batch_size: int,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
+        """
+        以并发安全的方式，分批流式获取待翻译任务。
+
+        该过程是原子性的：它首先锁定一批任务，将其状态更新为 'TRANSLATING'，
+        然后读取这些任务的详细信息并返回。这可以防止多个工作进程处理相同的任务。
+        """
         status_values = tuple(s.value for s in statuses)
         processed_count = 0
 
@@ -181,7 +211,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 break
 
             batch_ids: list[int] = []
-            # 任务一：锁定写操作
             async with self._db_lock:
                 async with self.transaction() as cursor:
                     placeholders = ",".join("?" for _ in status_values)
@@ -206,7 +235,6 @@ class DefaultPersistenceHandler(PersistenceHandler):
             if not batch_ids:
                 break
 
-            # 任务一：锁定读操作
             async with self._db_lock:
                 id_placeholders_for_select = ",".join("?" for _ in batch_ids)
                 find_details_sql = f"SELECT tr.content_id, c.value, tr.context_hash, tr.context FROM th_translations tr JOIN th_content c ON tr.content_id = c.id WHERE tr.id IN ({id_placeholders_for_select})"
@@ -232,12 +260,12 @@ class DefaultPersistenceHandler(PersistenceHandler):
             processed_count += len(batch_items)
 
     async def save_translations(self, results: list[TranslationResult]) -> None:
+        """将一批翻译结果原子性地批量更新到数据库中。"""
         if not results:
             return
 
         async with self._db_lock:
             async with self.transaction() as cursor:
-                # ... (内部逻辑保持不变)
                 params_to_update = []
                 for res in results:
                     if not res.original_content:
@@ -280,6 +308,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
+        """从数据库中获取一个已完成的翻译结果。"""
         async with self._db_lock:
             context_hash = get_context_hash(context)
             sql = """
@@ -315,6 +344,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def get_business_id_for_content(
         self, content_id: int, context_hash: str
     ) -> Optional[str]:
+        """根据内容ID和上下文哈希，安全地获取关联的业务ID。"""
         async with self._db_lock:
             sql = "SELECT business_id FROM th_sources WHERE content_id = ? AND context_hash = ?"
             async with self.connection.execute(
@@ -324,6 +354,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
             return row["business_id"] if row else None
 
     async def touch_source(self, business_id: str) -> None:
+        """更新指定业务ID的 `last_seen_at` 时间戳，以防止其被垃圾回收。"""
         async with self._db_lock:
             async with self.transaction() as cursor:
                 sql = "UPDATE th_sources SET last_seen_at = ? WHERE business_id = ?"
@@ -333,9 +364,9 @@ class DefaultPersistenceHandler(PersistenceHandler):
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
     ) -> dict[str, int]:
+        """执行垃圾回收，清理过期的源记录和不再被任何记录引用的孤立内容。"""
         async with self._db_lock:
             async with self.transaction() as cursor:
-                # ... (内部逻辑保持不变)
                 if retention_days < 0:
                     raise ValueError("retention_days 必须是非负数。")
                 cutoff = (
@@ -368,6 +399,7 @@ class DefaultPersistenceHandler(PersistenceHandler):
                 return stats
 
     async def close(self) -> None:
+        """安全地关闭数据库连接。"""
         if self._conn:
             await self._conn.close()
             self._conn = None

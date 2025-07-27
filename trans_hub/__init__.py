@@ -1,5 +1,5 @@
 # trans_hub/__init__.py
-"""Trans-Hub: Your Async Localization Backend Engine."""
+"""Trans-Hub: 异步本地化后端引擎"""
 
 __version__ = "2.3.0"
 

@@ -1,7 +1,9 @@
-# trans_hub/cache.py (修正后)
+# trans_hub/cache.py
 """
-提供灵活的缓存机制，减少重复翻译请求，提高系统性能。
-支持TTL过期策略和LRU淘汰机制。.
+本模块提供灵活的内存缓存机制，用于减少重复的翻译请求。
+
+它支持基于 TTL (Time-To-Live) 的过期策略和基于 LRU (Least Recently Used)
+的淘汰机制，以优化性能和内存使用。
 """
 
 import asyncio
@@ -16,7 +18,7 @@ from trans_hub.types import TranslationRequest
 
 
 class CacheConfig(BaseModel):
-    """缓存配置模型."""
+    """缓存配置模型。"""
 
     maxsize: int = 1000
     ttl: int = 3600
@@ -24,23 +26,33 @@ class CacheConfig(BaseModel):
 
 
 class TranslationCache:
-    """翻译请求的异步安全缓存管理器."""
+    """
+    一个用于管理翻译结果的、异步安全的内存缓存。
+
+    它封装了 `cachetools` 库，并使用 `asyncio.Lock` 来确保在异步环境中的线程安全。
+    """
 
     def __init__(self, config: Optional[CacheConfig] = None):
+        """
+        初始化翻译缓存。
+
+        参数:
+            config: 缓存配置对象。如果未提供，则使用默认配置。
+        """
         self.config = config or CacheConfig()
         self.cache: Union[LRUCache, TTLCache]
         self._initialize_cache()
         self._lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:
-        """根据配置初始化缓存实例."""
+        """[私有] 根据配置初始化 `cachetools` 缓存实例。"""
         if self.config.cache_type == "ttl":
             self.cache = TTLCache(maxsize=self.config.maxsize, ttl=self.config.ttl)
         else:
             self.cache = LRUCache(maxsize=self.config.maxsize)
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
-        """为翻译请求生成唯一的缓存键."""
+        """为翻译请求生成一个唯一的、确定性的缓存键。"""
         return "|".join(
             [
                 request.source_text,
@@ -51,7 +63,7 @@ class TranslationCache:
         )
 
     async def get_cached_result(self, request: TranslationRequest) -> Optional[str]:
-        """从缓存中异步获取翻译结果."""
+        """从缓存中异步、安全地获取翻译结果。"""
         key = self.generate_cache_key(request)
         async with self._lock:
             return self.cache.get(key)
@@ -59,24 +71,24 @@ class TranslationCache:
     async def cache_translation_result(
         self, request: TranslationRequest, result: str
     ) -> None:
-        """异步地将翻译结果存入缓存."""
+        """异步、安全地将翻译结果存入缓存。"""
         key = self.generate_cache_key(request)
         async with self._lock:
             self.cache[key] = result
 
     async def clear_cache(self) -> None:
-        """异步地清空缓存."""
+        """异步、安全地清空整个缓存。"""
         async with self._lock:
             self.cache.clear()
             self._initialize_cache()
 
 
-# (已移除) 同步的 cache_translation 装饰器，因为它使用了 asyncio.run()，与纯异步架构不兼容。
-
-
-# 异步缓存装饰器 (保留供未来使用)
 def async_cache_translation(config: Optional[CacheConfig] = None):
-    """装饰器：为异步函数的结果提供缓存。."""
+    """
+    装饰器：为返回字符串的异步函数提供缓存功能。
+
+    (注意：此装饰器目前在项目中保留，以备未来使用，但未被激活。)
+    """
     cache = TranslationCache(config)
 
     def decorator(

@@ -1,5 +1,9 @@
-# trans_hub/engine_registry.py (最终优化版)
-"""负责动态发现和加载可用的翻译引擎。."""
+# trans_hub/engine_registry.py
+"""
+本模块负责动态发现和加载 `trans_hub.engines` 包下所有可用的翻译引擎。
+
+它通过自动化注册机制，简化了新引擎的集成过程。
+"""
 
 import importlib
 import pkgutil
@@ -15,7 +19,9 @@ ENGINE_REGISTRY: dict[str, type[BaseTranslationEngine]] = {}
 def discover_engines():
     """
     动态发现 `trans_hub.engines` 包下的所有引擎并尝试注册。
-    此函数是幂等的，只会执行一次。.
+
+    此函数是幂等的，即多次调用也只会执行一次引擎发现过程。
+    它会智能跳过基类、私有模块以及因缺少依赖而无法导入的模块。
     """
     if ENGINE_REGISTRY:
         return
@@ -26,7 +32,6 @@ def discover_engines():
 
     for module_info in pkgutil.iter_modules(trans_hub.engines.__path__):
         module_name = module_info.name
-        # 跳过基类模块和私有模块
         if module_name in ["base"] or module_name.startswith("_"):
             continue
 
@@ -35,28 +40,21 @@ def discover_engines():
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
 
-                # --- 核心修正：添加额外的类型检查以增强健壮性 ---
-                # 确保 attr 是一个类，而不是函数或变量
                 if not isinstance(attr, type):
                     continue
 
                 try:
-                    # 检查它是否是我们正在寻找的引擎子类
                     if (
                         issubclass(attr, BaseTranslationEngine)
                         and attr is not BaseTranslationEngine
                     ):
-                        # 约定：从类名自动推断引擎的注册名
                         engine_name = attr.__name__.replace("Engine", "").lower()
                         ENGINE_REGISTRY[engine_name] = attr
                         log.info("✅ 成功发现并注册引擎", engine_name=engine_name)
                 except TypeError:
-                    # 捕获 `issubclass` 可能对某些特殊对象抛出的 TypeError，
-                    # 确保加载过程不会被意外中断。
                     continue
 
         except ModuleNotFoundError as e:
-            # 优雅地处理缺少可选依赖的情况
             log.warning(
                 "⚠️ 跳过加载引擎，因缺少依赖",
                 engine_name=module_name,
