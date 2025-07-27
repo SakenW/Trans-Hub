@@ -1,28 +1,20 @@
-# ==============================================================================
-#  构建系统配置
-# ==============================================================================
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-
-# ==============================================================================
-#  项目元数据与依赖 (Poetry 配置)
-# ==============================================================================
 [tool.poetry]
 name = "trans-hub"
-version = "2.2.0"
+# 暂时不更新版本号，待功能完善后统一处理
+version = "2.2.0" 
 description = "一个可嵌入的、带持久化存储的智能本地化（i18n）后端引擎。"
 authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-
 homepage = "https://github.com/SakenW/trans-hub"
 repository = "https://github.com/SakenW/trans-hub"
 documentation = "https://github.com/SakenW/trans-hub/blob/main/docs/INDEX.md"
-
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -31,67 +23,67 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
 ]
 
-# --- 核心依赖 ---
+# --- 核心依赖 (保持最精简) ---
 [tool.poetry.dependencies]
 python = ">=3.9, <3.14"
 pydantic = "^2.0"
 structlog = "^23.0"
-pydantic-settings = {version = "^2.3.4", extras = ["dotenv"]}
+pydantic-settings = "^2.0"
 aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
+dependency-injector = "^4.41.0"
 
-# [核心修复] 将 extras 依赖定义为 optional，这是更健壮的方式
+# --- 可选功能依赖 ---
 translators = { version = "^6.0.1", optional = true }
 openai = { version = "^1.37.0", optional = true }
+prometheus-client = { version = "0.20.0", optional = true }
+typer = { version = "^0.12.3", extras = ["rich"], optional = true }
+fastapi = { version = "^0.111.0", optional = true }
+uvicorn = { version = "^0.30.1", extras = ["standard"], optional = true }
 
-# [核心修复] 为 doc_translator 工具添加 mistune 依赖
-mistune = "^3.0.0"
-
-# --- 可选依赖 (Extras) ---
-# 引用上面定义的 optional 依赖
-prometheus-client = "^0.22.1"
+# --- 可选依赖分组 (Extras) ---
 [tool.poetry.extras]
 translators = ["translators"]
 openai = ["openai"]
+metrics = ["prometheus-client"]
+cli = ["typer"]
+api = ["fastapi", "uvicorn"]
+all = ["translators", "openai", "prometheus-client", "typer", "fastapi", "uvicorn"]
 
-
-# ==============================================================================
-#  开发依赖
-# ==============================================================================
+# --- 开发依赖 ---
 [tool.poetry.group.dev.dependencies]
-# 代码质量
 ruff = "^0.4.0"
 mypy = "^1.5"
-
-# 测试
 pytest = "^7.4"
 pytest-cov = "^4.1"
 pytest-asyncio = "^0.21.0"
 types-cachetools = "^5.3.1"
-
-# 测试可选功能所需的依赖 (直接依赖，确保 CI 环境完整)
+# 开发环境直接安装所有可选依赖，确保测试全面
 translators = "^6.0.1"
 openai = "^1.37.0"
+prometheus-client = "0.20.0"
+typer = { version = "^0.12.3", extras = ["rich"] }
+fastapi = "^0.111.0"
+uvicorn = { version = "^0.30.1", extras = ["standard"] }
 
-
-# ==============================================================================
-#  开发工具统一配置
-# ==============================================================================
 
 [tool.ruff]
 line-length = 88
 target-version = "py39"
 
 [tool.ruff.lint]
+# --- 核心修正：恢复项目原有的、经过验证的规则集 ---
 select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4", "A"]
 ignore = [
-    "E501",
+    "E501", # Line too long, handled by formatter
+    # 忽略所有基础的 docstring 规则
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
-    "D400", "D401", "D415",
-    "D203", "D212", "D205",
+    # 忽略一些有争议的 docstring 格式规则
+    "D400", "D401", "D415", "D203", "D212", "D205",
+    # --- 核心保留：为兼容 Python 3.9，不自动转换 Optional ---
+    "UP007", 
 ]
 
 [tool.mypy]
