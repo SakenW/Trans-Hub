@@ -3,6 +3,7 @@
 本模块使用 typing.Protocol 定义了核心组件的接口协议。
 
 这些纯异步接口是依赖倒置原则（DIP）的基石，确保核心逻辑与具体实现解耦。
+此模块处于依赖链的底层，不应导入任何高层模块。
 """
 
 from collections.abc import AsyncGenerator

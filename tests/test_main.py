@@ -1,5 +1,11 @@
 # tests/test_main.py
-"""Trans-Hub 核心功能端到端测试 (v2.3.0)。"""
+"""
+Trans-Hub 核心功能的端到端测试。
+
+本测试套件旨在通过模拟真实使用场景，验证 Coordinator 与各个子系统
+（如持久化、翻译引擎、缓存等）的集成工作是否正常。
+它覆盖了从请求入队、处理、结果获取到系统维护（如垃圾回收）的完整生命周期。
+"""
 
 import asyncio
 import os
@@ -43,17 +49,24 @@ ENGINE_OPENAI = "openai"
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """在所有测试开始前运行一次，创建测试目录。"""
+    """
+    在整个测试会话开始前准备测试目录，并在会话结束后自动清理。
+    这是一个会话级别的、自动运行的 Fixture。
+    """
     TEST_DIR.mkdir(exist_ok=True)
+    logger.info("测试输出目录已创建", path=str(TEST_DIR))
     yield
     shutil.rmtree(TEST_DIR)
+    logger.info("测试输出目录已清理", path=str(TEST_DIR))
 
 
 @pytest.fixture
 def test_config() -> TransHubConfig:
     """
-    提供一个隔离的、包含了所有测试所需引擎配置的实例。
-    这使得测试不依赖于 .env 文件，行为完全可预测。
+    为每个测试用例提供一个隔离的、包含所有引擎配置的 TransHubConfig 实例。
+
+    这确保了每个测试都运行在独立的数据库上，避免了相互干扰，
+    并通过预设的引擎配置使得测试行为完全可预测，不依赖于外部 .env 文件。
     """
     db_file = f"test_{os.urandom(4).hex()}.db"
 
@@ -68,7 +81,7 @@ def test_config() -> TransHubConfig:
             openai_endpoint=HttpUrl(openai_endpoint_str),
         ),
     }
-    # 在 mypy 中，动态模型可能会引发类型错误，对于测试设置，这是可接受的
+    # 对于 Pydantic 动态模型，mypy 可能会报告类型错误，这在测试设置中是可接受的。
     engine_configs_instance = EngineConfigs(**engine_configs_data)  # type: ignore
 
     return TransHubConfig(
@@ -81,7 +94,12 @@ def test_config() -> TransHubConfig:
 
 @pytest_asyncio.fixture
 async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator, None]:
-    """提供一个完全初始化并准备就绪的 Coordinator 实例。"""
+    """
+    提供一个完全初始化并准备就绪的 Coordinator 实例。
+
+    此 Fixture 会自动处理数据库的创建、迁移、连接以及在测试结束后的安全关闭，
+    极大地简化了测试用例的编写。
+    """
     apply_migrations(test_config.db_path)
     handler: PersistenceHandler = DefaultPersistenceHandler(db_path=test_config.db_path)
     coord = Coordinator(config=test_config, persistence_handler=handler)
@@ -90,7 +108,7 @@ async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator
     await coord.close()
 
 
-# --- v2.2.0 原有测试用例 (保持不变) ---
+# --- v2.2.0 原有测试用例 ---
 
 
 @pytest.mark.asyncio
@@ -119,11 +137,11 @@ async def test_debug_engine_workflow(coordinator: Coordinator):
 @pytest.mark.skipif(
     not os.getenv("TH_OPENAI_API_KEY")
     or os.getenv("TH_OPENAI_API_KEY") == "dummy-key-for-testing",
-    reason="需要设置一个真实的 TH_OPENAI_API_KEY 环境变量",
+    reason="需要设置一个真实的 TH_OPENAI_API_KEY 环境变量以运行此测试。",
 )
 @pytest.mark.asyncio
 async def test_openai_engine_workflow(coordinator: Coordinator):
-    """测试 OpenAI 引擎的工作流（需要真实 API Key）。"""
+    """测试 OpenAI 引擎的端到端工作流（需要真实 API Key）。"""
     coordinator.switch_engine(ENGINE_OPENAI)
     text = "Star"
     target_lang = "fr"
@@ -149,7 +167,7 @@ async def test_openai_engine_workflow(coordinator: Coordinator):
 
 @pytest.mark.asyncio
 async def test_translators_engine_workflow(coordinator: Coordinator):
-    """测试 Translators 引擎的工作流。"""
+    """测试 Translators 引擎（基于 'translators' 库）的端到端工作流。"""
     coordinator.switch_engine(ENGINE_TRANSLATORS)
     text = "Moon"
     target_lang = "de"
@@ -168,7 +186,8 @@ async def test_translators_engine_workflow(coordinator: Coordinator):
 
 @pytest.mark.asyncio
 async def test_garbage_collection_workflow(coordinator: Coordinator):
-    """测试垃圾回收（GC）的逻辑。"""
+    """测试垃圾回收（GC）能否正确识别并删除过期的源记录。"""
+    # 安排：创建一条新鲜记录和一条将被标记为过期的记录
     await coordinator.request(
         target_langs=["zh-CN"], text_content="fresh item", business_id="item.fresh"
     )
@@ -177,6 +196,7 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
     )
     _ = [res async for res in coordinator.process_pending_translations("zh-CN")]
 
+    # 手动将 'item.stale' 的最后访问时间设置为2天前
     handler = coordinator.handler
     assert isinstance(handler, DefaultPersistenceHandler)
     async with aiosqlite.connect(handler.db_path) as db:
@@ -187,18 +207,24 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
         )
         await db.commit()
 
+    # 再次请求新鲜记录，模拟活跃使用
     await coordinator.request(
         target_langs=["zh-CN"], text_content="fresh item", business_id="item.fresh"
     )
 
+    # 行动：运行垃圾回收，清理1天前的数据
     report = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
+
+    # 断言：应删除1条过期记录
     assert report["deleted_sources"] == 1
 
+    # 再次空跑GC，不应再删除任何记录
     report_after = await coordinator.run_garbage_collection(
         dry_run=True, expiration_days=1
     )
     assert report_after["deleted_sources"] == 0
 
+    # 验证数据库状态，只剩下新鲜记录
     async with aiosqlite.connect(handler.db_path) as db:
         async with db.execute("SELECT business_id FROM th_sources") as cursor:
             rows = await cursor.fetchall()
@@ -211,7 +237,7 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
 
 @pytest.mark.asyncio
 async def test_force_retranslate_api(coordinator: Coordinator):
-    """测试强制重翻API (`force_retranslate=True`)。"""
+    """测试强制重翻API (`force_retranslate=True`) 是否能将已完成的任务重置为 PENDING。"""
     text = "Sun"
     target_lang = "es"
 
@@ -221,11 +247,11 @@ async def test_force_retranslate_api(coordinator: Coordinator):
 
     # 2. 确认已翻译
     result = await coordinator.get_translation(text, target_lang)
-    assert result is not None
+    assert result is not None, "首次翻译后未能获取到结果"
     assert result.status == TranslationStatus.TRANSLATED
     assert result.translated_content == f"Translated({text}) to {target_lang}"
 
-    # 3. 使用 force_retranslate 强制重新请求
+    # 3. 使用 `force_retranslate=True` 强制重新请求
     await coordinator.request(
         target_langs=[target_lang], text_content=text, force_retranslate=True
     )
@@ -239,11 +265,10 @@ async def test_force_retranslate_api(coordinator: Coordinator):
             (text, target_lang),
         ) as cursor:
             row = await cursor.fetchone()
-            # 核心修正：在使用 row 之前，断言它不为 None
             assert row is not None, "数据库中未找到强制重翻后的任务记录"
             assert row[0] == TranslationStatus.PENDING.value
 
-    # 5. 再次处理，应该能再次翻译
+    # 5. 再次处理，应该能再次翻译成功
     results_rerun = [
         res async for res in coordinator.process_pending_translations(target_lang)
     ]
@@ -253,15 +278,17 @@ async def test_force_retranslate_api(coordinator: Coordinator):
 
 @pytest.mark.asyncio
 async def test_self_healing_of_stale_tasks(test_config: TransHubConfig):
-    """测试'僵尸任务'自愈机制。"""
-    # 1. 初始化一个协调器并请求一个任务
+    """
+    测试当一个任务在 'TRANSLATING' 状态卡住时（模拟应用崩溃），
+    系统能否在下次启动时自动将其重置为 'PENDING'。
+    """
+    # 1. 启动第一个 Coordinator，请求一个任务，然后手动模拟崩溃
     apply_migrations(test_config.db_path)
-    handler = DefaultPersistenceHandler(db_path=test_config.db_path)
-    coord1 = Coordinator(config=test_config, persistence_handler=handler)
+    handler1 = DefaultPersistenceHandler(db_path=test_config.db_path)
+    coord1 = Coordinator(config=test_config, persistence_handler=handler1)
     await coord1.initialize()
     await coord1.request(target_langs=["fr"], text_content="Stale Task")
 
-    # 2. 手动将任务状态设置为 TRANSLATING 来模拟崩溃
     async with aiosqlite.connect(test_config.db_path) as db:
         await db.execute(
             "UPDATE th_translations SET status = ?",
@@ -270,16 +297,15 @@ async def test_self_healing_of_stale_tasks(test_config: TransHubConfig):
         await db.commit()
     await coord1.close()
 
-    # 3. 创建一个新的协调器实例，它的 initialize() 应该会自动修复僵尸任务
+    # 2. 启动第二个 Coordinator，它的 initialize() 应该会自动触发自愈
     handler2 = DefaultPersistenceHandler(db_path=test_config.db_path)
     coord2 = Coordinator(config=test_config, persistence_handler=handler2)
-    await coord2.initialize()  # 自愈发生在这里
+    await coord2.initialize()  # 自愈逻辑在此处执行
 
-    # 4. 验证任务状态是否已重置为 PENDING
+    # 3. 验证任务状态是否已成功重置为 PENDING
     async with aiosqlite.connect(test_config.db_path) as db:
         async with db.execute("SELECT status FROM th_translations") as cursor:
             row = await cursor.fetchone()
-            # 核心修正：在使用 row 之前，断言它不为 None
             assert row is not None, "数据库中未找到本应被自愈的任务"
             assert row[0] == TranslationStatus.PENDING.value
 
@@ -288,10 +314,10 @@ async def test_self_healing_of_stale_tasks(test_config: TransHubConfig):
 
 @pytest.mark.asyncio
 async def test_concurrent_request_throttling(test_config: TransHubConfig):
-    """测试内置的请求节流功能。"""
+    """测试当设置了 `max_concurrent_requests` 时，Coordinator 的请求节流功能是否生效。"""
     apply_migrations(test_config.db_path)
     handler = DefaultPersistenceHandler(db_path=test_config.db_path)
-    # 1. 创建一个最大并发为1的协调器
+    # 1. 创建一个最大并发为 1 的协调器
     coord = Coordinator(
         config=test_config, persistence_handler=handler, max_concurrent_requests=1
     )
@@ -299,7 +325,7 @@ async def test_concurrent_request_throttling(test_config: TransHubConfig):
 
     processing_times = []
 
-    # 替换内部方法以记录时间并模拟耗时
+    # 2. 替换内部请求方法以记录时间并模拟耗时
     original_internal_request = coord._request_internal
 
     async def mocked_internal_request(*args, **kwargs):
@@ -310,21 +336,21 @@ async def test_concurrent_request_throttling(test_config: TransHubConfig):
 
     coord._request_internal = mocked_internal_request  # type: ignore
 
-    # 2. 同时发起3个请求
+    # 3. 同时并发发起 3 个请求
     tasks = [
         coord.request(target_langs=["de"], text_content=f"text {i}") for i in range(3)
     ]
     await asyncio.gather(*tasks)
 
-    # 3. 分析时间戳，验证请求是顺序执行的
-    assert len(processing_times) == 6  # 3 starts, 3 ends
+    # 4. 分析时间戳，验证请求是顺序执行的
+    assert len(processing_times) == 6  # 3 个开始事件, 3 个结束事件
 
     starts = sorted([t for event, t in processing_times if event == "start"])
     ends = sorted([t for event, t in processing_times if event == "end"])
 
-    # 第一个任务的结束时间，应该早于第二个任务的开始时间
+    # 第一个任务的结束时间，必须早于第二个任务的开始时间
     assert ends[0] < starts[1]
-    # 第二个任务的结束时间，应该早于第三个任务的开始时间
+    # 第二个任务的结束时间，必须早于第三个任务的开始时间
     assert ends[1] < starts[2]
 
     await coord.close()
