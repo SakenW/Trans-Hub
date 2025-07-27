@@ -1,7 +1,7 @@
-# trans_hub/db/schema_manager.py (最终优化版)
+# trans_hub/db/schema_manager.py
 """
 本模块负责管理数据库的 Schema 版本。
-它提供了应用迁移脚本、检查当前版本等功能。.
+它提供了应用迁移脚本、检查当前版本等功能。
 """
 
 import sqlite3
@@ -18,7 +18,8 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 def get_current_schema_version(conn: sqlite3.Connection) -> int:
     """
     查询数据库中当前的 schema 版本。
-    返回当前 schema 版本号，如果元数据表或版本记录不存在，则返回 0。.
+
+    返回当前 schema 版本号，如果元数据表或版本记录不存在，则返回 0。
     """
     cursor = conn.cursor()
     try:
@@ -37,17 +38,12 @@ def get_current_schema_version(conn: sqlite3.Connection) -> int:
 
 
 def apply_migrations(db_path: str) -> None:
-    """连接到指定的 SQLite 数据库，并按顺序应用所有必要的迁移脚本。."""
+    """连接到指定的 SQLite 数据库，并按顺序应用所有必要的迁移脚本。"""
     logger.info("开始对数据库进行迁移...", db_path=db_path)
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            # --- 核心修正：移除 PRAGMA 设置 ---
-            # PRAGMA 指令（如 foreign_keys, journal_mode）的最佳实践是
-            # 将它们直接写入 001_initial.sql 迁移脚本中，以确保数据库文件
-            # 自身就包含了这些持久化设置。
-            # conn.execute("PRAGMA foreign_keys = ON;")
-
+        # --- 核心优化：为连接添加超时，防止进程因数据库锁而卡死 ---
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
             current_version = get_current_schema_version(conn)
             if current_version == -1:
                 logger.error("无法确定数据库版本，迁移中止。")
@@ -67,9 +63,7 @@ def apply_migrations(db_path: str) -> None:
                     logger.info("正在应用迁移脚本...", script=migration_file.name)
                     try:
                         sql_script = migration_file.read_text("utf-8")
-                        # 使用 executescript 来执行可能包含多个语句的 SQL 文件
                         conn.executescript(sql_script)
-                        # executescript 会隐式提交，但显式调用 commit 更安全
                         conn.commit()
                         logger.info("✅ 成功应用迁移", version=version)
                         applied_count += 1

@@ -2,8 +2,9 @@
 """
 本模块定义并实现了具体的翻译处理策略。
 
-它包含策略的接口协议（ProcessingPolicy）及其默认实现（DefaultProcessingPolicy）。
-每个策略都封装了一套完整的业务逻辑，用于处理一批待翻译任务。
+它包含策略的接口协议（ProcessingPolicy）及其默认实现（DefaultProcessingPyollicy）。
+每个策略都封装了一套完整的业务逻辑，用于处理一批待翻译任务，并能智能适配
+不同引擎对上下文（context）的处理能力。
 """
 
 import asyncio
@@ -87,24 +88,31 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         business_id_map = await self._get_business_id_map(batch, p_context)
         active_engine = p_context.active_engine
 
-        validated_engine_context = active_engine.validate_and_parse_context(
-            batch[0].context if batch else None
-        )
-
-        if isinstance(validated_engine_context, EngineError):
-            logger.warning(
-                "批次上下文验证失败", error=validated_engine_context.error_message
+        # --- 核心智能适配逻辑 ---
+        validated_engine_context: Union[BaseContextModel, EngineError, None]
+        if active_engine.ACCEPTS_CONTEXT:
+            # 仅当引擎声明支持时，才解析上下文
+            raw_context_dict = batch[0].context if batch else None
+            validated_engine_context = active_engine.validate_and_parse_context(
+                raw_context_dict
             )
-            return [
-                self._build_translation_result(
-                    item,
-                    target_lang,
-                    p_context,
-                    business_id_map,
-                    error_override=validated_engine_context,
+            if isinstance(validated_engine_context, EngineError):
+                logger.warning(
+                    "批次上下文验证失败", error=validated_engine_context.error_message
                 )
-                for item in batch
-            ]
+                return [
+                    self._build_translation_result(
+                        item,
+                        target_lang,
+                        p_context,
+                        business_id_map,
+                        error_override=validated_engine_context,
+                    )
+                    for item in batch
+                ]
+        else:
+            # 对于不支持上下文的引擎，传递 None
+            validated_engine_context = None
 
         items_to_process = list(batch)
         final_results: list[TranslationResult] = []
@@ -245,16 +253,13 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
         if p_context.rate_limiter:
             await p_context.rate_limiter.acquire(len(items))
-        try:
-            return await p_context.active_engine.atranslate_batch(
-                texts=[item.value for item in items],
-                target_lang=target_lang,
-                source_lang=p_context.config.source_lang,
-                context=engine_context,
-            )
-        except Exception as e:
-            logger.error("引擎调用失败", error=str(e), exc_info=True)
-            return [EngineError(error_message=str(e), is_retryable=True)] * len(items)
+
+        return await p_context.active_engine.atranslate_batch(
+            texts=[item.value for item in items],
+            target_lang=target_lang,
+            source_lang=p_context.config.source_lang,
+            context=engine_context,
+        )
 
     async def _cache_new_results(
         self,

@@ -18,13 +18,11 @@ from trans_hub.engines.base import (
 from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
-# 使用不同的变量名来避免 mypy 的 'no-redef' 错误
-# 这个变量将持有 AsyncOpenAI 类（如果可用）
 _AsyncOpenAIClient: Optional[type] = None
 try:
     from openai import (
         APIConnectionError,
-        APIError,
+        APIStatusError,
         AsyncOpenAI,
         InternalServerError,
         RateLimitError,
@@ -68,8 +66,9 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.1.0"
+    VERSION = "2.2.0"
     REQUIRES_SOURCE_LANG = True
+    ACCEPTS_CONTEXT = True  # --- 核心能力声明 ---
 
     def __init__(self, config: OpenAIEngineConfig):
         super().__init__(config)
@@ -78,8 +77,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 "要使用 OpenAIEngine, 请先安装 'openai' 库: pip install \"trans-hub[openai]\""
             )
 
-        # 为 self.client 提供类型提示
-        self.client: AsyncOpenAI = _AsyncOpenAIClient(  # type: ignore
+        self.client: AsyncOpenAI = _AsyncOpenAIClient(
             api_key=self.config.openai_api_key.get_secret_value(),
             base_url=str(self.config.openai_endpoint),
         )
@@ -95,6 +93,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
+        """[实现] 异步翻译单个文本。"""
         final_source_lang = cast(str, source_lang)
 
         prompt_template = context_config.get(
@@ -123,18 +122,21 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             translated_text = response.choices[0].message.content or ""
             if not translated_text:
                 return EngineError(
-                    error_message="API returned empty content.", is_retryable=True
+                    error_message="API 返回了空内容。", is_retryable=True
                 )
             return EngineSuccess(translated_text=translated_text.strip().strip('"'))
-        except APIError as e:
+        except APIStatusError as e:
+            # --- 核心优化：更精准的错误判断 ---
             is_retryable = isinstance(
                 e, (RateLimitError, InternalServerError, APIConnectionError)
             )
             logger.error("OpenAI API 调用出错", error=str(e), is_retryable=is_retryable)
             return EngineError(error_message=str(e), is_retryable=is_retryable)
         except Exception as e:
+            # 基类会捕获这个异常，但在这里记录更详细的日志是好的实践
             logger.error("OpenAI 引擎发生未知错误", error=str(e), exc_info=True)
-            return EngineError(error_message=str(e), is_retryable=True)
+            # 重新抛出异常，让基类的 atranslate_batch 来统一处理
+            raise e
 
 
 # 注册引擎配置

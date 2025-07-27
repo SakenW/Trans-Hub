@@ -1,4 +1,4 @@
-# trans_hub/engines/debug.py (重构后)
+# trans_hub/engines/debug.py
 """
 提供一个用于开发和测试的调试翻译引擎。
 此版本实现已高度简化，仅需实现 _atranslate_one 方法。
@@ -7,19 +7,17 @@
 from typing import Any, Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
-from trans_hub.engines.base import (
-    BaseContextModel,
-    BaseEngineConfig,
-    BaseTranslationEngine,
-)
+from trans_hub.engines.base import BaseEngineConfig, BaseTranslationEngine
 from trans_hub.engines.meta import register_engine_config
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
 class DebugEngineConfig(BaseSettings, BaseEngineConfig):
-    model_config = SettingsConfigDict(extra="ignore")
+    """Debug 引擎的配置模型。"""
+
+    # 移除了 model_config，因为 BaseSettings 默认行为就是 'ignore'
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
     fail_on_text: Optional[str] = Field(
         default=None, description="如果文本匹配此字符串，则翻译失败"
@@ -34,11 +32,12 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
     """一个简单的调试翻译引擎实现。"""
 
     CONFIG_MODEL = DebugEngineConfig
-    CONTEXT_MODEL = BaseContextModel
-    VERSION = "2.0.0"  # 版本号提升
+    VERSION = "2.1.0"
+    # ACCEPTS_CONTEXT 保持默认的 False
 
-    def __init__(self, config: DebugEngineConfig):
-        super().__init__(config)
+    # __init__ 方法可以被省略，因为基类已经提供了完美的默认实现
+    # def __init__(self, config: DebugEngineConfig):
+    #     super().__init__(config)
 
     async def _atranslate_one(
         self,
@@ -48,7 +47,7 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """[实现] 异步翻译单个文本。"""
-        # Debug 引擎的模式不受上下文影响，但可以按需添加
+        # 注意：context_config 在这里将始终为空字典，因为 ACCEPTS_CONTEXT=False
         if self.config.mode == "FAIL":
             return EngineError(
                 error_message="DebugEngine is in FAIL mode.",
