@@ -5,7 +5,7 @@ import enum
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.cache import CacheConfig
@@ -43,7 +43,6 @@ class EngineConfigs(BaseModel):
 class TransHubConfig(BaseSettings):
     """Trans-Hub 的主配置对象，聚合了所有子配置。"""
 
-    # --- 核心修正：移除 env_file，只依赖环境变量 ---
     model_config = SettingsConfigDict(env_prefix="TH_", extra="ignore")
 
     database_url: str = "sqlite:///transhub.db"
@@ -55,17 +54,6 @@ class TransHubConfig(BaseSettings):
     engine_configs: EngineConfigs = Field(default_factory=EngineConfigs)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-
-    @model_validator(mode="after")
-    def check_active_engine_config_exists(self) -> "TransHubConfig":
-        engine_name_str = self.active_engine.value
-        if (
-            not hasattr(self.engine_configs, engine_name_str)
-            or getattr(self.engine_configs, engine_name_str) is None
-        ):
-            # 在 Coordinator 中有更可靠的填充逻辑，这里的验证可以简化或作为最后的保障
-            pass
-        return self
 
     @property
     def db_path(self) -> str:

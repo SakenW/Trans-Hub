@@ -14,7 +14,7 @@ from typing import Optional, Protocol, Union
 import structlog
 
 from trans_hub.context import ProcessingContext
-from trans_hub.engines.base import BaseContextModel
+from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 from trans_hub.types import (
     ContentItem,
     EngineError,
@@ -39,6 +39,7 @@ class ProcessingPolicy(Protocol):
         batch: list[ContentItem],
         target_lang: str,
         context: ProcessingContext,
+        active_engine: BaseTranslationEngine,
     ) -> list[TranslationResult]:
         """
         处理一个批次的待翻译内容项。
@@ -47,6 +48,7 @@ class ProcessingPolicy(Protocol):
             batch: 从数据库获取的、具有相同上下文的待翻译内容项列表。
             target_lang: 目标翻译语言。
             context: 包含所有必要依赖项的处理上下文“工具箱”。
+            active_engine: 当前被激活用于处理的翻译引擎实例。
 
         返回:
             一个包含所有处理结果（成功或不可重试失败）的 `TranslationResult` 列表。
@@ -68,6 +70,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         batch: list[ContentItem],
         target_lang: str,
         context: ProcessingContext,
+        active_engine: BaseTranslationEngine,
     ) -> list[TranslationResult]:
         """对一个具有相同上下文的批次应用完整的翻译和重试逻辑。"""
         retry_policy = context.config.retry_policy
@@ -75,6 +78,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             batch,
             target_lang,
             context,
+            active_engine,
             max_retries=retry_policy.max_attempts,
             initial_backoff=retry_policy.initial_backoff,
         )
@@ -84,12 +88,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         batch: list[ContentItem],
         target_lang: str,
         p_context: ProcessingContext,
+        active_engine: BaseTranslationEngine,
         max_retries: int,
         initial_backoff: float,
     ) -> list[TranslationResult]:
         """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
         business_id_map = await self._get_business_id_map(batch, p_context)
-        active_engine = p_context.active_engine
 
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
@@ -127,6 +131,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 items_to_process,
                 target_lang,
                 p_context,
+                active_engine,
                 business_id_map,
                 validated_engine_context,
             )
@@ -145,7 +150,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     task = p_context.handler.move_to_dlq(
                         item=item,
                         error_message=error_message,
-                        engine_name=p_context.config.active_engine,
+                        engine_name=p_context.config.active_engine.value,
                         engine_version=active_engine.VERSION,
                     )
                     dlq_tasks.append(task)
@@ -169,6 +174,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         batch: list[ContentItem],
         target_lang: str,
         p_context: ProcessingContext,
+        active_engine: BaseTranslationEngine,
         business_id_map: dict[tuple[int, str], Optional[str]],
         engine_context: Optional[BaseContextModel],
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
@@ -180,7 +186,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             return cached_results, []
 
         engine_outputs = await self._translate_uncached_items(
-            uncached_items, target_lang, p_context, engine_context
+            uncached_items, target_lang, p_context, active_engine, engine_context
         )
         processed_results: list[TranslationResult] = list(cached_results)
         retryable_items: list[ContentItem] = []
@@ -250,13 +256,14 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         items: list[ContentItem],
         target_lang: str,
         p_context: ProcessingContext,
+        active_engine: BaseTranslationEngine,
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
         if p_context.rate_limiter:
             await p_context.rate_limiter.acquire(len(items))
 
-        return await p_context.active_engine.atranslate_batch(
+        return await active_engine.atranslate_batch(
             texts=[item.value for item in items],
             target_lang=target_lang,
             source_lang=p_context.config.source_lang,
@@ -298,7 +305,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         error_override: Optional[EngineError] = None,
     ) -> TranslationResult:
         """[私有] 根据不同的输入源构建一个标准的 `TranslationResult` 对象。"""
-        active_engine_name = p_context.config.active_engine
+        active_engine_name = p_context.config.active_engine.value
         biz_id = business_id_map.get((item.content_id, item.context_hash))
         final_error = error_override or (
             engine_output if isinstance(engine_output, EngineError) else None

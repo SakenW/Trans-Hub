@@ -35,7 +35,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
-    VERSION = "2.1.0"
+    VERSION = "2.2.0"  # 版本号提升，因为实现方式有较大变化
     ACCEPTS_CONTEXT = True
 
     def __init__(self, config: TranslatorsEngineConfig):
@@ -65,54 +65,6 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             logger.error("加载 'translators' 库时发生严重错误。", error=str(e))
             raise APIError(f"Translators 库初始化失败: {e}") from e
 
-    async def atranslate_batch(
-        self,
-        texts: list[str],
-        target_lang: str,
-        source_lang: Optional[str] = None,
-        context: Optional[BaseContextModel] = None,
-    ) -> list[EngineBatchItemResult]:
-        await self._ensure_initialized()
-        assert self.ts_module is not None
-
-        context_config = self._get_context_config(context)
-        provider = context_config.get("provider", self.config.provider)
-
-        # --- 核心修正 1：将 ts_module 作为参数传递给内部函数 ---
-        ts_module_local = self.ts_module
-
-        def _translate_batch_sync(ts_lib: Any) -> list[EngineBatchItemResult]:
-            results: list[EngineBatchItemResult] = []
-            for text in texts:
-                try:
-                    translated_text = str(
-                        ts_lib.translate_text(
-                            query_text=text,
-                            translator=provider,
-                            from_language=source_lang or "auto",
-                            to_language=target_lang,
-                        )
-                    )
-                    results.append(EngineSuccess(translated_text=translated_text))
-                except Exception as e:
-                    logger.warning(
-                        "Translators 引擎单条翻译出错", provider=provider, error=str(e)
-                    )
-                    results.append(
-                        EngineError(
-                            error_message=f"Translators({provider}) Error: {e}",
-                            is_retryable=True,
-                        )
-                    )
-            return results
-
-        try:
-            # --- 核心修正 2：在 to_thread 调用中传入参数 ---
-            return await asyncio.to_thread(_translate_batch_sync, ts_module_local)
-        except Exception as e:
-            logger.error("Translators 批处理线程执行失败", error=str(e), exc_info=True)
-            return [EngineError(error_message=str(e), is_retryable=True)] * len(texts)
-
     async def _atranslate_one(
         self,
         text: str,
@@ -120,9 +72,35 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        raise NotImplementedError(
-            "This method is not used when atranslate_batch is overridden."
-        )
+        """[实现] 异步翻译单个文本。"""
+        await self._ensure_initialized()
+        assert self.ts_module is not None
+
+        provider = context_config.get("provider", self.config.provider)
+
+        def _translate_sync() -> str:
+            """在线程池中执行的同步翻译函数。"""
+            return str(
+                self.ts_module.translate_text(
+                    query_text=text,
+                    translator=provider,
+                    from_language=source_lang or "auto",
+                    to_language=target_lang,
+                )
+            )
+
+        try:
+            # 将同步阻塞的调用委托给线程池执行
+            translated_text = await asyncio.to_thread(_translate_sync)
+            return EngineSuccess(translated_text=translated_text)
+        except Exception as e:
+            logger.warning(
+                "Translators 引擎单条翻译出错", provider=provider, error=str(e)
+            )
+            return EngineError(
+                error_message=f"Translators({provider}) Error: {e}",
+                is_retryable=True,  # 免费服务通常因网络问题或速率限制而出错，默认为可重试
+            )
 
 
 register_engine_config("translators", TranslatorsEngineConfig)

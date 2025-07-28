@@ -87,11 +87,15 @@ class Coordinator:
             handler=self.handler,
             cache=self.cache,
             rate_limiter=self.rate_limiter,
-            coordinator=self,
         )
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
+
+    @property
+    def active_engine(self) -> BaseTranslationEngine:
+        """动态获取当前的活动翻译引擎实例。"""
+        return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(self, engine_name: str) -> BaseTranslationEngine:
         """从缓存获取或创建并缓存一个引擎实例。"""
@@ -128,7 +132,6 @@ class Coordinator:
 
         self._get_or_create_engine_instance(engine_name)
 
-        # --- 核心修正：将字符串转换为 EngineName 枚举类型 ---
         self.config.active_engine = EngineName(engine_name)
 
         logger.info(f"成功切换活动引擎至: '{self.config.active_engine.value}'。")
@@ -164,7 +167,7 @@ class Coordinator:
         """处理指定语言的待翻译任务，并以异步生成器方式返回翻译结果。"""
         validate_lang_codes([target_lang])
 
-        active_engine = self.processing_context.active_engine
+        active_engine = self.active_engine
         engine_batch_policy = getattr(
             active_engine.config, "max_batch_size", self.config.batch_size
         )
@@ -199,7 +202,7 @@ class Coordinator:
                 )
 
                 batch_results = await self.processing_policy.process_batch(
-                    items_group, target_lang, self.processing_context
+                    items_group, target_lang, self.processing_context, active_engine
                 )
 
                 await self.handler.save_translations(batch_results)
@@ -224,7 +227,6 @@ class Coordinator:
         validate_lang_codes(target_langs)
         context_hash = get_context_hash(context)
         context_json = json.dumps(context) if context else None
-        active_engine = self.processing_context.active_engine
 
         await self.handler.ensure_pending_translations(
             text_content=text_content,
@@ -233,7 +235,7 @@ class Coordinator:
             context_hash=context_hash,
             context_json=context_json,
             source_lang=(source_lang or self.config.source_lang),
-            engine_version=active_engine.VERSION,
+            engine_version=self.active_engine.VERSION,
             force_retranslate=force_retranslate,
         )
         logger.info(

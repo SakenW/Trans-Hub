@@ -7,9 +7,7 @@
 """
 
 import asyncio
-from collections.abc import Awaitable
-from functools import wraps
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 from cachetools import LRUCache, TTLCache
 from pydantic import BaseModel
@@ -81,29 +79,3 @@ class TranslationCache:
         async with self._lock:
             self.cache.clear()
             self._initialize_cache()
-
-
-def async_cache_translation(config: Optional[CacheConfig] = None):
-    """
-    装饰器：为返回字符串的异步函数提供缓存功能。
-
-    (注意：此装饰器目前在项目中保留，以备未来使用，但未被激活。)
-    """
-    cache = TranslationCache(config)
-
-    def decorator(
-        func: Callable[[TranslationRequest], Awaitable[str]],
-    ) -> Callable[[TranslationRequest], Awaitable[str]]:
-        @wraps(func)
-        async def wrapper(request: TranslationRequest) -> str:
-            cached_result = await cache.get_cached_result(request)
-            if cached_result is not None:
-                return cached_result
-
-            result = await func(request)
-            await cache.cache_translation_result(request, result)
-            return result
-
-        return wrapper
-
-    return decorator
