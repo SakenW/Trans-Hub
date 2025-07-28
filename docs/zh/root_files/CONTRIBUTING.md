@@ -1,4 +1,271 @@
-[English](../../CONTRIBUTING.md) | **简体中文**
+# **Contribute to `Trans-Hub`**
+# **为 `Trans-Hub` 做出贡献**
+
+<div align="right">
+
+**[English](#english-version)** | **[简体中文](#简体中文版)**
+
+</div>
+
+[![Python CI/CD Pipeline](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/SakenW/trans-hub/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/SakenW/trans-hub/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/SakenW/trans-hub)
+[![PyPI version](https://badge.fury.io/py/trans-hub.svg)](https://badge.fury.io/py/trans-hub)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+我们非常欢迎并感谢您有兴趣为 `Trans-Hub` 做出贡献！无论是报告 bug、提交功能请求，还是直接贡献代码，您的每一份努力都对我们至关重要。❤️
 
 ---
 
+## **目录**
+
+- [行为准则](#行为准则)
+- [如何贡献](#如何贡献)
+- [开发规范总则](#开发规范总则)
+- [代码库结构概览](#代码库结构概览)
+- [环境设置](#环境设置)
+- [提交前的本地检查清单](#提交前的本地检查清单)
+- [提交 Pull Request](#提交-pull-request)
+- [版本号策略](#版本号策略)
+- [发布流程](#发布流程)
+- [附录：详细开发规范](#附录详细开发规范)
+  - [语言与沟通](#语言与沟通)
+  - [代码风格与质量](#代码风格与质量)
+  - [架构与设计](#架构与设计)
+  - [引擎开发规范](#引擎开发规范)
+  - [测试](#测试)
+  - [其他关键约定](#其他关键约定)
+
+---
+
+## **行为准则**
+
+为了营造一个开放、友好的社区环境，我们希望所有参与者都能遵守我们的 [**行为准则 (Code of Conduct)**](./CODE_OF_CONDUCT.md)。
+
+## **如何贡献**
+
+我们欢迎任何形式的贡献，包括但不限于：
+
+- **报告 Bug** 或 **提交功能建议** (通过 [GitHub Issues](https://github.com/SakenW/trans-hub/issues))。
+- **完善文档**：发现拼写错误或不清晰之处？提交一个 PR 来改进它！
+- **编写代码**：修复 Bug 或实现新功能。
+
+## **开发规范总则**
+
+**在开始任何代码工作之前，请务必仔细阅读本文档末尾的 [附录：详细开发规范](#附录详细开发规范)。**
+
+`Trans-Hub` 是一个对代码质量、架构清晰度和可维护性有严格要求的项目。所有贡献的代码都必须严格遵守这些规范。这确保了项目能够长期健康发展。
+
+## **代码库结构概览**
+
+为了帮助您快速熟悉项目，以下是核心目录及其中关键脚本的职责说明：
+
+- **`trans_hub/`**: **核心库代码**。项目的所有运行时逻辑都在这里。
+
+- **`tests/`**: **自动化测试**。
+
+  - 这里存放了项目的所有测试用例（使用 `pytest`）。CI/CD 流水线会自动运行此目录下的所有测试。
+    ```bash
+    # 运行完整的测试套件
+    poetry run pytest
+    ```
+  - **`tests/diag/`**: 包含一些独立的**诊断脚本**。
+    - `check_env.py`: 专门用于快速验证 `.env` 文件配置。当您遇到与 API Key 相关的配置问题时，它非常有用。
+      ```bash
+      # 运行环境检查脚本
+      poetry run python tests/diag/check_env.py
+      ```
+
+- **`docs/`**: **官方文档**。所有面向用户的指南、API 参考和架构文档都存放在这里。请先阅读 [**文档库索引 (INDEX.md)**](./docs/INDEX.md) 来了解其结构。
+
+- **`examples/`**: **“活”的示例代码**。
+
+  - `03_specific_use_case_strings_file.py` (旧名: `translate_strings_file.py`): 这是一个**端到端的、功能完善的演示**。它旨在向人类用户直观地、可运行地展示如何在一个复杂的场景中使用 `Trans-Hub` 的各项核心功能。
+    ```bash
+    # 运行复杂工作流演示
+    poetry run python examples/03_specific_use_case_strings_file.py
+    ```
+
+- **`tools/`**: **开发者工具**。
+  - **`inspect_db.py`**: 一个专业的**数据库检查命令行工具**。它能连接到任何 `Trans-Hub` 数据库文件，并以一种易于理解的方式将其内容和解读打印出来，是调试持久化问题的利器。
+    ```bash
+    # 检查示例数据库的内容
+    poetry run python tools/inspect_db.py path/to/your/database.db
+    ```
+
+## **环境设置**
+
+1.  **克隆仓库**: `git clone https://github.com/SakenW/trans-hub.git && cd trans-hub`
+2.  **安装 Poetry**: 请确保您已安装 [Poetry](https://python-poetry.org/)。
+3.  **安装所有依赖**: `poetry install --with dev --with openai`
+4.  **配置环境变量**:
+    根据 `.env.example` 模板创建您的本地 `.env` 文件，并填入必要的 API 密钥以运行完整的测试套件。
+    ```bash
+    cp .env.example .env
+    ```
+5.  **运行测试套件**: 在开始编码前，请运行 `poetry run pytest` 确保本地环境正常。
+
+## **提交前的本地检查清单**
+
+在您执行 `git commit` 之前，请务必在本地运行以下三个命令，以确保您的代码符合项目的质量标准。这可以避免在提交 Pull Request 后因为 CI/CD 检查失败而被驳回。
+
+1.  **格式化代码**: 确保所有代码风格统一。
+    ```bash
+    poetry run ruff format .
+    ```
+2.  **代码质量与风格检查**: 自动修复潜在问题。
+    ```bash
+    poetry run ruff check --fix .
+    ```
+3.  **静态类型检查**: 确保没有类型错误。
+    ```bash
+    poetry run mypy .
+    ```
+
+> **提示**: 频繁运行这些命令是个好习惯。
+
+## **提交 Pull Request**
+
+1.  完成开发和测试后，创建一个 Pull Request (PR)，目标分支为 `main`。
+2.  在 PR 的描述中，请清晰地说明您解决了什么问题或实现了什么功能。我们推荐使用项目提供的 [PR 模板](./.github/pull_request_template.md)。
+3.  请确保您的 PR 通过了我们 CI 流水线的所有自动化检查。
+4.  项目维护者会尽快审查您的代码。
+
+---
+
+## **版本号策略**
+
+本项目遵循 [**语义化版本 2.0.0 (Semantic Versioning)**](https://semver.org/lang/zh-CN/) 规范。版本号格式为 `主版本号.次版本号.修订号` (例如 `2.4.1`)，规则如下：
+
+### **主版本号 (MAJOR)**
+
+仅当您做了**不兼容的 API 修改**时增加。这通常意味着用户的代码需要修改才能适应新版本。
+
+- **适用场景**:
+  - 重命名或移除了一个公开的函数/类。
+  - 更改了函数参数，导致旧的调用方式失效。
+  - 做了不向后兼容的数据库结构变更。
+
+### **次版本号 (MINOR)**
+
+当您以**向后兼容的方式增加新功能**时增加。用户可以安全升级，并选择性地使用新功能。
+
+- **适用场景**:
+  - 增加一个新的翻译引擎。
+  - 为现有函数增加新的、可选的参数（如 `force_retranslate`）。
+  - 引入死信队列或可观测性指标等新机制。
+
+### **修订号 (PATCH)**
+
+当您做了**向后兼容的问题修正**时增加。这通常是修复 Bug 或提升性能，用户应该总是可以安全地升级。
+
+- **适用场景**:
+  - 修复了一个并发安全漏洞。
+  - 修正了垃圾回收逻辑中的一个错误。
+  - 更新了有安全漏洞的第三方依赖。
+
+---
+
+## **发布流程**
+
+> 🚨 **注意**: 此部分仅适用于项目的核心维护者。
+
+本项目遵循一套严格、详细的标准作业流程（SOP）来进行版本发布，以确保每个版本的质量和可靠性。
+
+👉 **[点击这里查看完整的发布标准作业流程 (SOP)](./RELEASE_SOP.md)**
+
+---
+
+## **附录：详细开发规范**
+
+本节是所有贡献者必须遵守的详细技术规范。
+
+### **语言与沟通**
+
+1.  **代码内语言:**
+    - **注释、文档字符串 (Docstrings)、日志信息、用户可见字符串:** **必须全部使用中文**。
+    - **变量/函数/类名等代码标识符:** **必须使用英文**，并遵循 PEP 8 命名约定。
+2.  **沟通工具语言:**
+    - **所有对话:** **默认使用中文**。
+    - **AI Prompt:** 可以使用英文。
+
+### **代码风格与质量**
+
+1.  **格式化:** 严格遵循 `PEP 8`，使用 `ruff format`，行长限制为 88 字符。
+2.  **静态检查:**
+    - **Linter:** 使用 `ruff`，配置见 `pyproject.toml`。
+    - **类型检查:** 使用 `mypy`，新代码必须有完整的类型注解。
+3.  **日志规范:**
+    - **必须使用 `structlog`**，禁止 `print()` 用于调试。
+    - 充分利用上下文绑定功能。
+    - 严格遵循日志级别语义（`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`）。`ERROR` 及以上级别必须附带 `exc_info=True`。
+4.  **文件头规范:**
+    - 所有 `.py` 文件第一行必须是标识其完整路径的注释，如 `# trans_hub/coordinator.py`。
+    - **严禁**在文件头添加 `(修正版)` 等非正式状态描述。
+    - 文档字符串（`"""..."""`）**只用于**描述模块的当前功能，**严禁**包含任何变更历史。变更记录的唯一归宿是 **Git 提交信息**和 **`CHANGELOG.md`**。
+5.  **处理 Linter 规则例外 (`# noqa`):**
+    -   **原则**: 我们力求代码 100% 符合 `ruff` 的规则。但在极少数情况下，为了实现特定功能或保持代码可读性，可以局部禁用某条规则。
+    -   **用法**: 必须使用行级注释 `# noqa: <RuleCode>`，并鼓励附上简要的原因说明。滥用 `# noqa` 是不被允许的。
+    -   **示例 1 (`E402`)**: 在工具或示例脚本中，为了确保能正确导入项目模块，我们可能需要在修改 `sys.path` 之后再进行 `import`。这会违反 `E402` 规则（模块级导入不在文件顶部）。
+        ```python
+        import sys
+        sys.path.insert(0, ...)
+        
+        # 必须在修改路径后导入，因此我们忽略 E402
+        from trans_hub import Coordinator  # noqa: E402
+        ```
+    -   **示例 2 (`N806`)**: 在使用 `pydantic.create_model` 等技术动态创建类时，我们会将返回的类赋值给一个 `PascalCase` 风格的变量。这会触发 `N806` 规则（函数内变量应为小写）。为了保持代码意图的清晰（它是一个类），我们豁免此规则。
+        ```python
+        # 变量名使用 PascalCase 是故意的，因为它是一个动态创建的类
+        DynamicClassName = create_model(...)  # noqa: N806
+        ```
+
+### **架构与设计**
+
+1.  **单一职责原则 (SRP):** 每个模块、类、函数只做一件事。
+2.  **依赖倒置原则 (DIP):** 核心逻辑依赖抽象（`Protocol`），而非具体实现。
+3.  **配置分离:** 严禁硬编码。所有配置项必须在 `config.py` 中定义，并通过 `pydantic-settings` 加载。
+4.  **纯异步优先:** 核心工作流必须异步。任何阻塞调用都**必须使用 `asyncio.to_thread`** 包装。
+5.  **核心概念的正确使用:** 贡献的代码必须正确使用 `business_id` 和 `context` 等核心概念。关于它们的使用场景和最佳实践，请参阅 [**高级用法指南**](./docs/guides/02_advanced_usage.md)。
+6.  **性能优先的数据库设计:** 所有数据库相关的代码和 Schema 变更，都必须遵循性能最佳实践。详细规范请参阅 [**数据模型与数据库设计**](./docs/architecture/02_data_model.md)。
+
+### **引擎开发规范**
+
+所有新贡献的翻译引擎都必须遵循严格的开发模式，以确保与核心系统的兼容性和可维护性。
+
+- **核心要求**: 新引擎必须继承 `BaseTranslationEngine` 并实现 `_atranslate_one` 异步方法。所有批处理和并发逻辑均由基类处理。
+- **详细指南**: 在开始开发前，请务必完整阅读并遵循 [**新引擎开发指南**](./docs/contributing/developing_engines.md) 中的每一个步骤。
+
+### **测试**
+
+1.  **全面测试:** 所有新功能或 Bug 修复都必须附带相应的单元测试或集成测试。我们鼓励使用测试驱动开发（TDD）的模式。
+2.  **测试覆盖率:** 核心业务逻辑的目标覆盖率 > 90%。
+3.  **模拟外部依赖:** 测试中必须模拟所有外部服务（如 API 调用），以确保测试的稳定性和速度。推荐使用 `unittest.mock.patch`。
+
+4.  **测试代码编写准则**:
+    -   **职责分离**: 测试代码的职责是**验证**核心代码的功能。它**不应该**包含任何用于“修复”或“变通”核心库设计缺陷的逻辑。如果测试很难写，通常意味着核心代码需要重构。
+    -   **Fixture 设计**:
+        -   **简化 Fixture**: `pytest` 的 fixture (特别是 `test_config`) 应该尽可能地**简单**，只负责提供最基本的、符合用户常规使用场景的配置。
+        -   **信赖核心逻辑**: 不要为了测试而去手动构建复杂的内部状态。应该信赖被测试组件（如 `Coordinator`）的初始化逻辑来正确地组装其依赖。
+    -   **测试应关注行为，而非实现细节**: 我们的测试应该验证“当我调用 `coordinator.switch_engine('openai')` 时，它是否能正常工作”，而不是去验证“`config.engine_configs.openai` 是否被正确创建”。后者是 `Coordinator` 的实现细节。
+    -   **处理动态模型与 MyPy 的冲突**:
+        - **情景**: `Trans-Hub` 的某些 Pydantic 模型（如 `EngineConfigs`）被设计为动态的 (`extra="allow"`)。这可能导致 `mypy` 在静态分析时，抱怨向这些模型传递了它在静态定义中看不到的字段或类型。
+        - **解决方案**: 在这种特定情况下，为了保持核心代码的纯粹性，我们允许在**测试代码**中使用 `# type: ignore` 来抑制 `mypy` 的 `[arg-type]` 或 `[call-arg]` 错误。这是在不污染核心库实现的情况下，解决静态分析器局限性的最佳实践。
+        ```python
+        # 好的实践：在测试代码中，用 type: ignore 解决动态模型问题
+        engine_configs_dict = {"dynamic_field": SomeConfig()}
+        
+        config = TransHubConfig(
+            engine_configs=engine_configs_dict,  # type: ignore[arg-type]
+        )
+        ```
+
+### **其他关键约定**
+
+1.  **异常处理:** 捕获具体的异常类型，必要时定义自定义异常。
+2.  **安全性:** 使用 `SecretStr` 处理敏感信息，定期检查依赖漏洞。
+3.  **数据库演进:** 任何 Schema 变更都**必须通过新的迁移脚本**实现。
+4.  **文档:** 除了代码内文档，还需维护 `README.md` 和 `docs/` 目录。
+
+---
+
+再次感谢您的贡献！我们期待与您共建 `Trans-Hub`。
