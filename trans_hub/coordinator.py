@@ -63,8 +63,6 @@ class Coordinator:
             "协调器初始化开始...", available_engines=list(ENGINE_REGISTRY.keys())
         )
 
-        # --- 核心修正：将引擎配置的填充逻辑提前 ---
-        # 确保在访问任何引擎配置之前，所有默认配置都已填充。
         for engine_name_str, config_class in ENGINE_CONFIG_REGISTRY.items():
             if not hasattr(self.config.engine_configs, engine_name_str):
                 logger.debug("为引擎填充默认配置", engine_name=engine_name_str)
@@ -77,7 +75,6 @@ class Coordinator:
                 f"可用引擎: {list(ENGINE_REGISTRY.keys())}"
             )
 
-        # 现在可以安全地检查和创建活动引擎实例了
         active_engine_instance = self._get_or_create_engine_instance(
             self.config.active_engine.value
         )
@@ -114,7 +111,6 @@ class Coordinator:
                 self.config.engine_configs, engine_name, None
             )
             if not engine_config_instance:
-                # 这个错误理论上不应该再发生，因为初始化时已填充
                 raise ConfigurationError(
                     f"未能为引擎 '{engine_name}' 创建或找到配置实例。"
                 )
@@ -126,7 +122,6 @@ class Coordinator:
 
         return self._engine_instances[engine_name]
 
-    # ... 其余方法保持不变 ...
     def switch_engine(self, engine_name: str) -> None:
         """在运行时切换当前的活动翻译引擎。"""
         if engine_name == self.config.active_engine.value:
@@ -155,10 +150,13 @@ class Coordinator:
         await self.handler.reset_stale_tasks()
 
         logger.info("正在初始化所有翻译引擎...")
+        # --- 核心修正：恢复正确的 asyncio.gather 写法 ---
+        # 创建所有引擎实例（如果尚未创建），并收集它们的 initialize 协程
         init_tasks = [
             self._get_or_create_engine_instance(name).initialize()
             for name in ENGINE_REGISTRY.keys()
         ]
+        # 并发执行所有初始化任务
         await asyncio.gather(*init_tasks)
 
         self.initialized = True
