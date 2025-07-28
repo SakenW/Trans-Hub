@@ -1,7 +1,7 @@
 # trans_hub/engines/openai.py
 """
 提供一个使用 OpenAI API 的翻译引擎。
-本版本经过生产级加固，包含了启动时健康检查和更精细的错误处理，
+本版本经过生产级加固, 包含了启动时健康检查和更精细的错误处理,
 并能健壮地处理CI环境中的空环境变量。
 """
 
@@ -10,7 +10,7 @@ from typing import Any, Optional, cast
 
 import httpx
 import structlog
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.engines.base import (
@@ -65,12 +65,14 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
         'Text to translate: "{text}"'
     )
 
+    # --- 核心修正：使用正确的 Pydantic API 来获取默认值 ---
     @field_validator("openai_endpoint", mode="before")
     @classmethod
-    def _validate_endpoint(cls, v: Any) -> Optional[Any]:
-        """如果环境变量为空字符串，则返回 None，以便 Pydantic 使用默认值。"""
+    def _validate_endpoint(cls, v: Any, info: ValidationInfo) -> Any:
+        """如果环境变量为空字符串, 则直接返回字段的默认值。"""
         if isinstance(v, str) and not v.strip():
-            return None
+            if info.field_name and info.field_name in cls.model_fields:
+                return cls.model_fields[info.field_name].default
         return v
 
 
@@ -79,7 +81,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.4.0"
+    VERSION = "2.4.2"  # 版本提升, 修复 mypy 错误
     REQUIRES_SOURCE_LANG = True
     ACCEPTS_CONTEXT = True
 
@@ -100,9 +102,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
         assert self.config.openai_api_key is not None
 
-        # --- 核心修正：遵循 openai v1.x+ 的最佳实践 ---
-        # 直接将 api_key 和 base_url 传递给客户端，而不是预构建 http_client。
-        # httpx.Timeout 用于更精细的超时控制。
         timeout = httpx.Timeout(30.0, connect=5.0)
         self.client: AsyncOpenAI = _AsyncOpenAIClient(
             api_key=self.config.openai_api_key.get_secret_value(),
@@ -112,10 +111,10 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         )
 
     async def initialize(self) -> None:
-        """[实现] 初始化引擎并执行健康检查，验证网络和认证。"""
+        """[实现] 初始化引擎并执行健康检查, 验证网络和认证。"""
         assert self.config.openai_api_key is not None
         if self.config.openai_api_key.get_secret_value() == "dummy-key-for-ci":
-            logger.warning("OpenAI 引擎处于CI/测试模式，跳过健康检查。")
+            logger.warning("OpenAI 引擎处于CI/测试模式, 跳过健康检查。")
             return
 
         logger.info(
@@ -152,7 +151,8 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     async def close(self) -> None:
         """[实现] 安全地关闭引擎占用的 HTTP 客户端资源。"""
-        if hasattr(self.client, "close"):
+        # --- 核心修正：is_closed 是属性, 不是方法 ---
+        if self.client.is_closed is False:
             await self.client.close()
         logger.info("OpenAI 引擎的 HTTP 客户端已关闭。")
 
@@ -163,7 +163,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """[实现] 异步翻译单个文本，包含精细的错误处理。"""
+        """[实现] 异步翻译单个文本, 包含精细的错误处理。"""
         final_source_lang = cast(str, source_lang)
         prompt_template = context_config.get(
             "prompt_template", self.config.default_prompt_template
