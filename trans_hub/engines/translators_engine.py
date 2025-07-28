@@ -35,7 +35,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
-    VERSION = "2.2.0"  # 版本号提升，因为实现方式有较大变化
+    VERSION = "2.2.0"
     ACCEPTS_CONTEXT = True
 
     def __init__(self, config: TranslatorsEngineConfig):
@@ -75,13 +75,15 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         """[实现] 异步翻译单个文本。"""
         await self._ensure_initialized()
         assert self.ts_module is not None
+        # --- 核心修正：创建一个 mypy 可以推断类型的局部变量 ---
+        ts_lib = self.ts_module
 
         provider = context_config.get("provider", self.config.provider)
 
         def _translate_sync() -> str:
             """在线程池中执行的同步翻译函数。"""
             return str(
-                self.ts_module.translate_text(
+                ts_lib.translate_text(
                     query_text=text,
                     translator=provider,
                     from_language=source_lang or "auto",
@@ -90,7 +92,6 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             )
 
         try:
-            # 将同步阻塞的调用委托给线程池执行
             translated_text = await asyncio.to_thread(_translate_sync)
             return EngineSuccess(translated_text=translated_text)
         except Exception as e:
@@ -99,7 +100,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             )
             return EngineError(
                 error_message=f"Translators({provider}) Error: {e}",
-                is_retryable=True,  # 免费服务通常因网络问题或速率限制而出错，默认为可重试
+                is_retryable=True,
             )
 
 

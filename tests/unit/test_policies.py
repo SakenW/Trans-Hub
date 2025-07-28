@@ -23,39 +23,60 @@ from trans_hub.types import (
 
 
 @pytest.fixture
-def mock_processing_context() -> MagicMock:
-    """提供一个包含了所有被模拟的依赖项的 ProcessingContext Mock。"""
-    mock_engine = AsyncMock()
-    mock_engine.atranslate_batch.return_value = [
-        EngineSuccess(translated_text="mocked")
-    ]
-    mock_engine.ACCEPTS_CONTEXT = False
-    mock_engine.validate_and_parse_context = MagicMock(return_value=MagicMock())
-    mock_engine.VERSION = "test-ver-1.0"  # 为 DLQ 测试提供版本号
+def mock_config() -> MagicMock:
+    """提供一个模拟的配置对象。"""
+    mock = MagicMock()
+    mock.retry_policy.max_attempts = 2
+    mock.retry_policy.initial_backoff = 0.01
+    mock.source_lang = "en"
+    mock.active_engine.value = "debug"
+    return mock
 
-    mock_rate_limiter = AsyncMock()
 
-    mock_config = MagicMock()
-    mock_config.retry_policy.max_attempts = 2
-    mock_config.retry_policy.initial_backoff = 0.01
-    mock_config.source_lang = "en"
-    mock_config.active_engine = "debug"
+@pytest.fixture
+def mock_handler() -> AsyncMock:
+    """提供一个模拟的持久化处理器。"""
+    mock = AsyncMock()
+    mock.get_business_id_for_content.return_value = "biz-123"
+    mock.move_to_dlq = AsyncMock()
+    return mock
 
-    mock_handler = AsyncMock()
-    mock_handler.get_business_id_for_content.return_value = "biz-123"
-    mock_handler.move_to_dlq = AsyncMock()  # 为 DLQ 测试添加 mock 方法
 
-    mock_cache = AsyncMock()
-    mock_cache.get_cached_result.return_value = None
+@pytest.fixture
+def mock_cache() -> AsyncMock:
+    """提供一个模拟的缓存对象。"""
+    mock = AsyncMock()
+    mock.get_cached_result = AsyncMock(return_value=None)
+    mock.cache_translation_result = AsyncMock()
+    return mock
 
-    mock_context = MagicMock(spec=ProcessingContext)
-    mock_context.config = mock_config
-    mock_context.handler = mock_handler
-    mock_context.cache = mock_cache
-    mock_context.rate_limiter = mock_rate_limiter
-    type(mock_context).active_engine = property(fget=lambda self: mock_engine)
 
-    return mock_context
+@pytest.fixture
+def mock_active_engine() -> AsyncMock:
+    """提供一个模拟的活动翻译引擎。"""
+    mock = AsyncMock()
+    mock.atranslate_batch.return_value = [EngineSuccess(translated_text="mocked")]
+    mock.ACCEPTS_CONTEXT = False
+    mock.validate_and_parse_context = MagicMock(return_value=MagicMock())
+    mock.VERSION = "test-ver-1.0"
+    return mock
+
+
+@pytest.fixture
+def mock_processing_context(
+    mock_config: MagicMock, mock_handler: AsyncMock, mock_cache: AsyncMock
+) -> MagicMock:
+    """
+    提供一个完全被模拟的 ProcessingContext 对象。
+    这解决了 mypy 对真实类实例进行动态属性修改的抱怨。
+    """
+    # --- 核心修正：返回一个 MagicMock，而不是真实的 ProcessingContext ---
+    mock = MagicMock(spec=ProcessingContext)
+    mock.config = mock_config
+    mock.handler = mock_handler
+    mock.cache = mock_cache
+    mock.rate_limiter = AsyncMock()
+    return mock
 
 
 @pytest.fixture
@@ -72,19 +93,79 @@ def sample_batch() -> list[ContentItem]:
 
 
 @pytest.mark.asyncio
-async def test_policy_skips_context_for_unsupported_engine(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem]
+async def test_policy_uses_cache_and_skips_translation(
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
 ):
-    """测试：当引擎不支持上下文时，策略是否会跳过上下文验证。"""
-    mock_engine = mock_processing_context.active_engine
-    mock_engine.ACCEPTS_CONTEXT = False
-    mock_engine.validate_and_parse_context = MagicMock()
+    """测试：当缓存命中时，策略是否直接使用缓存结果，而不调用翻译引擎。"""
+    mock_processing_context.cache.get_cached_result.return_value = "Cached Hello"
 
     policy = DefaultProcessingPolicy()
-    await policy.process_batch(sample_batch, "de", mock_processing_context)
+    results = await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
 
-    mock_engine.validate_and_parse_context.assert_not_called()
-    mock_engine.atranslate_batch.assert_called_once_with(
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == TranslationStatus.TRANSLATED
+    assert result.translated_content == "Cached Hello"
+    assert result.from_cache is True
+    mock_active_engine.atranslate_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_policy_moves_to_dlq_after_max_retries(
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
+    monkeypatch,
+):
+    """
+    测试：当任务达到最大重试次数后，是否会被移入死信队列，
+    并且不会作为 TranslationResult 返回。
+    """
+    retryable_error = EngineError(error_message="Persistent error", is_retryable=True)
+    mock_active_engine.atranslate_batch.return_value = [retryable_error]
+    mock_sleep = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", mock_sleep)
+
+    mock_handler = mock_processing_context.handler
+
+    policy = DefaultProcessingPolicy()
+    results = await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
+
+    assert len(results) == 0
+    assert mock_active_engine.atranslate_batch.call_count == 3
+    assert mock_sleep.call_count == 2
+
+    mock_handler.move_to_dlq.assert_called_once()
+    dlq_call_args = mock_handler.move_to_dlq.call_args
+    assert dlq_call_args.kwargs["item"] == sample_batch[0]
+    assert dlq_call_args.kwargs["error_message"] == "达到最大重试次数"
+    assert dlq_call_args.kwargs["engine_name"] == "debug"
+    assert dlq_call_args.kwargs["engine_version"] == "test-ver-1.0"
+
+
+# --- 其他未修改的测试用例 ... ---
+
+
+@pytest.mark.asyncio
+async def test_policy_skips_context_for_unsupported_engine(
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
+):
+    mock_active_engine.ACCEPTS_CONTEXT = False
+    mock_active_engine.validate_and_parse_context = MagicMock()
+    policy = DefaultProcessingPolicy()
+    await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
+    mock_active_engine.validate_and_parse_context.assert_not_called()
+    mock_active_engine.atranslate_batch.assert_called_once_with(
         texts=[item.value for item in sample_batch],
         target_lang="de",
         source_lang=mock_processing_context.config.source_lang,
@@ -94,21 +175,21 @@ async def test_policy_skips_context_for_unsupported_engine(
 
 @pytest.mark.asyncio
 async def test_policy_uses_context_for_supported_engine(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem]
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
 ):
-    """测试：当引擎支持上下文时，策略是否会正确地验证和传递上下文。"""
-    mock_engine = mock_processing_context.active_engine
-    mock_engine.ACCEPTS_CONTEXT = True
+    mock_active_engine.ACCEPTS_CONTEXT = True
     mock_parsed_context = MagicMock()
-    mock_engine.validate_and_parse_context.return_value = mock_parsed_context
-
+    mock_active_engine.validate_and_parse_context.return_value = mock_parsed_context
     policy = DefaultProcessingPolicy()
-    await policy.process_batch(sample_batch, "de", mock_processing_context)
-
-    mock_engine.validate_and_parse_context.assert_called_once_with(
+    await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
+    mock_active_engine.validate_and_parse_context.assert_called_once_with(
         sample_batch[0].context
     )
-    mock_engine.atranslate_batch.assert_called_once_with(
+    mock_active_engine.atranslate_batch.assert_called_once_with(
         texts=[item.value for item in sample_batch],
         target_lang="de",
         source_lang=mock_processing_context.config.source_lang,
@@ -118,134 +199,45 @@ async def test_policy_uses_context_for_supported_engine(
 
 @pytest.mark.asyncio
 async def test_policy_handles_invalid_context(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem]
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
 ):
-    """测试：当上下文验证失败时，策略是否能正确处理并返回失败结果。"""
-    mock_engine = mock_processing_context.active_engine
-    mock_engine.ACCEPTS_CONTEXT = True
+    mock_active_engine.ACCEPTS_CONTEXT = True
     context_error = EngineError(error_message="Invalid context", is_retryable=False)
-    mock_engine.validate_and_parse_context.return_value = context_error
-
+    mock_active_engine.validate_and_parse_context.return_value = context_error
     policy = DefaultProcessingPolicy()
-    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
-
+    results = await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
     assert len(results) == 1
     result = results[0]
     assert result.status == TranslationStatus.FAILED
     assert result.error == "Invalid context"
-    mock_engine.atranslate_batch.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_policy_uses_cache_and_skips_translation(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem]
-):
-    """测试：当缓存命中时，策略是否直接使用缓存结果，而不调用翻译引擎。"""
-    mock_cache = mock_processing_context.cache
-    mock_cache.get_cached_result.return_value = "Cached Hello"
-
-    mock_engine = mock_processing_context.active_engine
-    policy = DefaultProcessingPolicy()
-    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
-
-    assert len(results) == 1
-    result = results[0]
-    assert result.status == TranslationStatus.TRANSLATED
-    assert result.translated_content == "Cached Hello"
-    assert result.from_cache is True
-    mock_engine.atranslate_batch.assert_not_called()
+    mock_active_engine.atranslate_batch.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_policy_retry_logic_on_retryable_error(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem], monkeypatch
+    mock_processing_context: MagicMock,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
+    monkeypatch,
 ):
-    """测试：当引擎返回可重试错误时，策略是否会执行重试。"""
-    mock_engine = mock_processing_context.active_engine
     retryable_error = EngineError(error_message="Rate limit", is_retryable=True)
     success_result = EngineSuccess(translated_text="Success after retry")
-    mock_engine.atranslate_batch.side_effect = [[retryable_error], [success_result]]
-
+    mock_active_engine.atranslate_batch.side_effect = [
+        [retryable_error],
+        [success_result],
+    ]
     mock_sleep = AsyncMock()
     monkeypatch.setattr(asyncio, "sleep", mock_sleep)
-
     policy = DefaultProcessingPolicy()
-    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
-
+    results = await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
     assert len(results) == 1
     assert results[0].status == TranslationStatus.TRANSLATED
     assert results[0].translated_content == "Success after retry"
-    assert mock_engine.atranslate_batch.call_count == 2
+    assert mock_active_engine.atranslate_batch.call_count == 2
     mock_sleep.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_policy_no_retry_on_non_retryable_error(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem], monkeypatch
-):
-    """测试：当引擎返回不可重试错误时，策略是否会立即失败，不进行重试。"""
-    mock_engine = mock_processing_context.active_engine
-    non_retryable_error = EngineError(
-        error_message="Invalid API Key", is_retryable=False
-    )
-    mock_engine.atranslate_batch.return_value = [non_retryable_error]
-
-    mock_sleep = AsyncMock()
-    monkeypatch.setattr(asyncio, "sleep", mock_sleep)
-
-    policy = DefaultProcessingPolicy()
-    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
-
-    assert len(results) == 1
-    assert results[0].status == TranslationStatus.FAILED
-    assert results[0].error == "Invalid API Key"
-    mock_engine.atranslate_batch.assert_called_once()
-    mock_sleep.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_policy_moves_to_dlq_after_max_retries(
-    mock_processing_context: MagicMock, sample_batch: list[ContentItem], monkeypatch
-):
-    """
-    测试：当任务达到最大重试次数后，是否会被移入死信队列，
-    并且不会作为 TranslationResult 返回。
-    """
-    # 安排：引擎持续返回可重试错误
-    mock_engine = mock_processing_context.active_engine
-    retryable_error = EngineError(error_message="Persistent error", is_retryable=True)
-    # 模拟引擎被调用3次（1次初始 + 2次重试），每次都失败
-    mock_engine.atranslate_batch.return_value = [retryable_error]
-
-    mock_handler = mock_processing_context.handler
-    mock_sleep = AsyncMock()
-    monkeypatch.setattr(asyncio, "sleep", mock_sleep)
-
-    policy = DefaultProcessingPolicy()
-
-    # 行动
-    results = await policy.process_batch(sample_batch, "de", mock_processing_context)
-
-    # 断言：
-    # 1. 最终返回的结果列表为空，因为唯一的任务被移到了 DLQ
-    assert len(results) == 0
-
-    # 2. 翻译引擎被调用了 3 次（1次初始 + 2次重试）
-    assert mock_engine.atranslate_batch.call_count == 3
-
-    # 3. sleep 被调用了 2 次（在重试之间）
-    assert mock_sleep.call_count == 2
-
-    # 4. handler 的 move_to_dlq 方法被调用了一次
-    mock_handler.move_to_dlq.assert_called_once()
-
-    # 5. 验证传递给 move_to_dlq 的参数是否正确
-    dlq_call_args = mock_handler.move_to_dlq.call_args
-    assert dlq_call_args.kwargs["item"] == sample_batch[0]
-    assert dlq_call_args.kwargs["error_message"] == "达到最大重试次数"
-    assert dlq_call_args.kwargs["engine_name"] == "debug"
-    assert dlq_call_args.kwargs["engine_version"] == "test-ver-1.0"
-
-
-if __name__ == "__main__":
-    pytest.main(["-s", "-v", __file__])

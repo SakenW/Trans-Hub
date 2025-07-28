@@ -21,11 +21,10 @@ from dotenv import load_dotenv
 
 from trans_hub import (
     Coordinator,
+    DefaultPersistenceHandler,
     EngineName,
     TransHubConfig,
 )
-
-# --- 核心修正：移除这里的 DefaultPersistenceHandler ---
 from trans_hub.config import EngineConfigs
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngineConfig
@@ -33,20 +32,17 @@ from trans_hub.engines.openai import OpenAIEngineConfig
 from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.logging_config import setup_logging
-
-# --- 核心修正：保留这个更直接的导入路径 ---
-from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationStatus
 
-# --- 初始化与常量定义 ---
+# 初始化与常量定义
 load_dotenv()
 setup_logging(log_level="INFO", log_format="console")
 logger = structlog.get_logger(__name__)
 
 TEST_DIR = Path(__file__).parent / "test_output"
-ENGINE_DEBUG = "debug"
-ENGINE_TRANSLATORS = "translators"
-ENGINE_OPENAI = "openai"
+ENGINE_DEBUG = EngineName.DEBUG
+ENGINE_TRANSLATORS = EngineName.TRANSLATORS
+ENGINE_OPENAI = EngineName.OPENAI
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -68,7 +64,7 @@ def test_config() -> TransHubConfig:
     )
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
-        active_engine=EngineName(ENGINE_DEBUG),
+        active_engine=ENGINE_DEBUG,
         source_lang="en",
         engine_configs=engine_configs_instance,
     )
@@ -94,40 +90,33 @@ async def test_debug_engine_workflow(coordinator: Coordinator):
     text = "Hello"
     target_lang = "zh-CN"
     business_id = "test.debug.hello"
-
     await coordinator.request(
         target_langs=[target_lang], text_content=text, business_id=business_id
     )
     results = [
         res async for res in coordinator.process_pending_translations(target_lang)
     ]
-
     assert len(results) == 1
     result = results[0]
     assert result.status == TranslationStatus.TRANSLATED
     assert result.original_content == text
-
-    # --- 核心修正：在使用前断言 translated_content 不为 None，以满足 mypy ---
     assert result.translated_content is not None
     assert "Translated(Hello) to zh-CN" in result.translated_content
-
     assert result.business_id == business_id
-    assert result.engine == ENGINE_DEBUG
+    assert result.engine == ENGINE_DEBUG.value
 
 
 @pytest.mark.skipif(
-    not os.getenv("TH_OPENAI_API_KEY")
-    or os.getenv("TH_OPENAI_API_KEY") == "dummy-key-for-testing",
+    not os.getenv("TH_OPENAI_API_KEY"),
     reason="需要设置一个真实的 TH_OPENAI_API_KEY 环境变量以运行此测试。",
 )
 @pytest.mark.asyncio
 async def test_openai_engine_workflow(coordinator: Coordinator):
     """测试 OpenAI 引擎的端到端工作流（需要真实 API Key）。"""
-    coordinator.switch_engine(ENGINE_OPENAI)
+    coordinator.switch_engine(ENGINE_OPENAI.value)
     text = "Star"
     target_lang = "fr"
     context = {"system_prompt": "Translate the following celestial body."}
-
     await coordinator.request(
         target_langs=[target_lang],
         text_content=text,
@@ -137,32 +126,29 @@ async def test_openai_engine_workflow(coordinator: Coordinator):
     results = [
         res async for res in coordinator.process_pending_translations(target_lang)
     ]
-
     assert len(results) == 1
     result = results[0]
     assert result.status == TranslationStatus.TRANSLATED
     assert result.translated_content is not None
     assert "toile" in result.translated_content.lower()
-    assert result.engine == ENGINE_OPENAI
+    assert result.engine == ENGINE_OPENAI.value
 
 
 @pytest.mark.asyncio
 async def test_translators_engine_workflow(coordinator: Coordinator):
     """测试 Translators 引擎（基于 'translators' 库）的端到端工作流。"""
-    coordinator.switch_engine(ENGINE_TRANSLATORS)
+    coordinator.switch_engine(ENGINE_TRANSLATORS.value)
     text = "Moon"
     target_lang = "de"
-
     await coordinator.request(target_langs=[target_lang], text_content=text)
     results = [
         res async for res in coordinator.process_pending_translations(target_lang)
     ]
-
     assert len(results) == 1
     result = results[0]
     assert result.status == TranslationStatus.TRANSLATED
     assert result.translated_content == "Mond"
-    assert result.engine == ENGINE_TRANSLATORS
+    assert result.engine == ENGINE_TRANSLATORS.value
 
 
 @pytest.mark.asyncio
@@ -175,7 +161,6 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
         target_langs=["zh-CN"], text_content="stale item", business_id="item.stale"
     )
     _ = [res async for res in coordinator.process_pending_translations("zh-CN")]
-
     handler = coordinator.handler
     assert isinstance(handler, DefaultPersistenceHandler)
     async with aiosqlite.connect(handler.db_path) as db:
@@ -185,19 +170,21 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
             (two_days_ago, "item.stale"),
         )
         await db.commit()
-
     await coordinator.request(
         target_langs=["zh-CN"], text_content="fresh item", business_id="item.fresh"
     )
-
     report = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
     assert report["deleted_sources"] == 1
+    # --- 核心修正：修复逻辑断言 ---
+    # 因为 stale_item 对应的 th_translations 记录仍然存在，
+    # 所以 th_content 中的 "stale item" 不会被删除。
+    assert report["deleted_content"] == 0
 
+    # 再次运行，确认已无内容可删除
     report_after = await coordinator.run_garbage_collection(
         dry_run=True, expiration_days=1
     )
     assert report_after["deleted_sources"] == 0
-
     async with aiosqlite.connect(handler.db_path) as db:
         async with db.execute("SELECT business_id FROM th_sources") as cursor:
             rows = await cursor.fetchall()
@@ -210,18 +197,14 @@ async def test_force_retranslate_api(coordinator: Coordinator):
     """测试强制重翻API (`force_retranslate=True`) 是否能将已完成的任务重置为 PENDING。"""
     text = "Sun"
     target_lang = "es"
-
     await coordinator.request(target_langs=[target_lang], text_content=text)
     _ = [res async for res in coordinator.process_pending_translations(target_lang)]
-
     result = await coordinator.get_translation(text, target_lang)
     assert result is not None, "首次翻译后未能获取到结果"
     assert result.status == TranslationStatus.TRANSLATED
-
     await coordinator.request(
         target_langs=[target_lang], text_content=text, force_retranslate=True
     )
-
     handler = coordinator.handler
     assert isinstance(handler, DefaultPersistenceHandler)
     async with aiosqlite.connect(handler.db_path) as db:
@@ -232,13 +215,8 @@ async def test_force_retranslate_api(coordinator: Coordinator):
             row = await cursor.fetchone()
             assert row is not None, "数据库中未找到强制重翻后的任务记录"
             assert row[0] == TranslationStatus.PENDING.value
-
     results_rerun = [
         res async for res in coordinator.process_pending_translations(target_lang)
     ]
     assert len(results_rerun) == 1
     assert results_rerun[0].status == TranslationStatus.TRANSLATED
-
-
-if __name__ == "__main__":
-    pytest.main(["-s", "-v", __file__])
