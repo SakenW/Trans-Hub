@@ -1,8 +1,5 @@
 # trans_hub/engines/translators_engine.py
-"""
-提供一个使用 `translators` 库的免费翻译引擎。
-此版本实现了批处理性能优化，并支持通过 context 切换服务商。
-"""
+"""提供一个使用 `translators` 库的免费翻译引擎。"""
 
 import asyncio
 from typing import Any, Optional
@@ -15,12 +12,8 @@ from trans_hub.engines.base import (
     BaseTranslationEngine,
 )
 from trans_hub.engines.meta import register_engine_config
+from trans_hub.exceptions import APIError
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
-
-try:
-    import translators as ts
-except ImportError:
-    ts = None
 
 logger = structlog.get_logger(__name__)
 
@@ -43,17 +36,35 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
     VERSION = "2.1.0"
-    ACCEPTS_CONTEXT = True  # --- 核心能力声明 ---
+    ACCEPTS_CONTEXT = True
 
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
-        if ts is None:
+        self.ts_module: Optional[Any] = None
+        logger.info(
+            "Translators 引擎已配置，将在首次使用时初始化。",
+            default_provider=self.config.provider,
+        )
+
+    async def _ensure_initialized(self) -> None:
+        """确保 translators 模块被加载。"""
+        if self.ts_module:
+            return
+
+        logger.debug("正在惰性加载 'translators' 库...")
+        try:
+            import translators as ts
+
+            self.ts_module = ts
+            logger.info("'translators' 库加载成功。")
+        except ImportError as e:
             raise ImportError(
                 "要使用 TranslatorsEngine, 请先安装 'translators' 库: pip install \"trans-hub[translators]\""
-            )
-        logger.info("Translators 引擎初始化成功", default_provider=self.config.provider)
+            ) from e
+        except Exception as e:
+            logger.error("加载 'translators' 库时发生严重错误。", error=str(e))
+            raise APIError(f"Translators 库初始化失败: {e}") from e
 
-    # --- 核心优化：覆盖 atranslate_batch 以实现高效的批处理 ---
     async def atranslate_batch(
         self,
         texts: list[str],
@@ -61,21 +72,21 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         source_lang: Optional[str] = None,
         context: Optional[BaseContextModel] = None,
     ) -> list[EngineBatchItemResult]:
-        """
-        [覆盖] 高效地批量翻译文本。
+        await self._ensure_initialized()
+        assert self.ts_module is not None
 
-        将整个批次的同步翻译任务一次性提交到线程池，以减少线程切换开销。
-        """
         context_config = self._get_context_config(context)
         provider = context_config.get("provider", self.config.provider)
 
-        # 定义一个在独立线程中运行的同步辅助函数
-        def _translate_batch_sync() -> list[EngineBatchItemResult]:
+        # --- 核心修正 1：将 ts_module 作为参数传递给内部函数 ---
+        ts_module_local = self.ts_module
+
+        def _translate_batch_sync(ts_lib: Any) -> list[EngineBatchItemResult]:
             results: list[EngineBatchItemResult] = []
             for text in texts:
                 try:
                     translated_text = str(
-                        ts.translate_text(
+                        ts_lib.translate_text(
                             query_text=text,
                             translator=provider,
                             from_language=source_lang or "auto",
@@ -85,9 +96,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
                     results.append(EngineSuccess(translated_text=translated_text))
                 except Exception as e:
                     logger.warning(
-                        "Translators 引擎单条翻译出错",
-                        provider=provider,
-                        error=str(e),
+                        "Translators 引擎单条翻译出错", provider=provider, error=str(e)
                     )
                     results.append(
                         EngineError(
@@ -98,10 +107,9 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             return results
 
         try:
-            # 用一次 to_thread 调用执行整个批处理
-            return await asyncio.to_thread(_translate_batch_sync)
+            # --- 核心修正 2：在 to_thread 调用中传入参数 ---
+            return await asyncio.to_thread(_translate_batch_sync, ts_module_local)
         except Exception as e:
-            # 捕获 to_thread 本身可能抛出的异常
             logger.error("Translators 批处理线程执行失败", error=str(e), exc_info=True)
             return [EngineError(error_message=str(e), is_retryable=True)] * len(texts)
 
@@ -112,32 +120,9 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """
-        [不再使用] 由于 atranslate_batch 已被覆盖，此方法不会被调用。
-        但作为抽象方法的实现，它必须存在。
-        """
-        # 理论上这里的代码不会被执行，但我们提供一个备用实现以防万一
-        provider = context_config.get("provider", self.config.provider)
-
-        def _translate_sync() -> EngineBatchItemResult:
-            try:
-                translated_text = str(
-                    ts.translate_text(
-                        query_text=text,
-                        translator=provider,
-                        from_language=source_lang or "auto",
-                        to_language=target_lang,
-                    )
-                )
-                return EngineSuccess(translated_text=translated_text)
-            except Exception as e:
-                return EngineError(
-                    error_message=f"Translators({provider}) Error: {e}",
-                    is_retryable=True,
-                )
-
-        return await asyncio.to_thread(_translate_sync)
+        raise NotImplementedError(
+            "This method is not used when atranslate_batch is overridden."
+        )
 
 
-# 注册引擎配置
 register_engine_config("translators", TranslatorsEngineConfig)

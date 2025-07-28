@@ -18,17 +18,23 @@ import pytest
 import pytest_asyncio
 import structlog
 from dotenv import load_dotenv
-from pydantic import HttpUrl, SecretStr
 
-# --- 核心修正：导入 EngineName ---
-from trans_hub.config import EngineConfigs, EngineName, TransHubConfig
-from trans_hub.coordinator import Coordinator
+from trans_hub import (
+    Coordinator,
+    EngineName,
+    TransHubConfig,
+)
+
+# --- 核心修正：移除这里的 DefaultPersistenceHandler ---
+from trans_hub.config import EngineConfigs
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engines.debug import DebugEngineConfig
 from trans_hub.engines.openai import OpenAIEngineConfig
 from trans_hub.engines.translators_engine import TranslatorsEngineConfig
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.logging_config import setup_logging
+
+# --- 核心修正：保留这个更直接的导入路径 ---
 from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationStatus
 
@@ -43,40 +49,25 @@ ENGINE_TRANSLATORS = "translators"
 ENGINE_OPENAI = "openai"
 
 
-# --- Fixtures ---
-
-
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """在整个测试会话开始前准备测试目录，并在会话结束后自动清理。"""
     TEST_DIR.mkdir(exist_ok=True)
-    logger.info("测试输出目录已创建", path=str(TEST_DIR))
     yield
     shutil.rmtree(TEST_DIR)
-    logger.info("测试输出目录已清理", path=str(TEST_DIR))
 
 
 @pytest.fixture
 def test_config() -> TransHubConfig:
     """为每个测试用例提供一个隔离的、包含所有引擎配置的 TransHubConfig 实例。"""
     db_file = f"test_{os.urandom(4).hex()}.db"
-
-    openai_api_key_str = os.getenv("TH_OPENAI_API_KEY", "dummy-key-for-testing")
-    openai_endpoint_str = os.getenv("TH_OPENAI_ENDPOINT") or "https://api.openai.com/v1"
-
-    engine_configs_data = {
-        "debug": DebugEngineConfig(),
-        "translators": TranslatorsEngineConfig(),
-        "openai": OpenAIEngineConfig(
-            openai_api_key=SecretStr(openai_api_key_str),
-            openai_endpoint=HttpUrl(openai_endpoint_str),
-        ),
-    }
-    engine_configs_instance = EngineConfigs(**engine_configs_data)
-
+    engine_configs_instance = EngineConfigs(
+        debug=DebugEngineConfig(),
+        translators=TranslatorsEngineConfig(),
+        openai=OpenAIEngineConfig(),
+    )
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
-        # --- 核心修正：将字符串转换为 EngineName 枚举 ---
         active_engine=EngineName(ENGINE_DEBUG),
         source_lang="en",
         engine_configs=engine_configs_instance,
@@ -88,9 +79,7 @@ async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator
     """提供一个完全初始化并准备就绪的 Coordinator 实例。"""
     apply_migrations(test_config.db_path)
     handler: PersistenceHandler = DefaultPersistenceHandler(db_path=test_config.db_path)
-    coord = Coordinator(
-        config=test_config, persistence_handler=handler, rate_limiter=None
-    )
+    coord = Coordinator(config=test_config, persistence_handler=handler)
     await coord.initialize()
     yield coord
     await coord.close()

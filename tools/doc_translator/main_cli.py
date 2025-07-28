@@ -1,14 +1,12 @@
 # tools/doc_translator/main_cli.py
 """Trans-Hub 文档翻译同步工具的命令行入口。"""
 
-# --- 路径设置 ---
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# --- 导入 ---
 import asyncio  # noqa: E402
 from typing import Annotated  # noqa: E402
 
