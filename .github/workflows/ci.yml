@@ -15,7 +15,6 @@ concurrency:
 env:
   POETRY_NO_INTERACTION: 1
   POETRY_VIRTUALENVS_IN_PROJECT: "true"
-  # 我们不再需要 PIP_BREAK_SYSTEM_PACKAGES，因为虚拟环境提供了隔离
 
 jobs:
   lint:
@@ -36,7 +35,6 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
     - name: Install all dev dependencies
-      # [核心修复] 使用简化的命令，安装所有 dev 组依赖
       run: poetry install --with dev
 
     - name: Run Code Quality Checks
@@ -53,9 +51,11 @@ jobs:
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
+    # --- 核心修正：确保 secrets 的名称与 GitHub 中设置的完全一致 ---
     env:
-      TH_OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
-      TH_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TH_OPENAI_ENDPOINT: ${{ secrets.TH_OPENAI_ENDPOINT }}
+      TH_OPENAI_API_KEY: ${{ secrets.TH_OPENAI_API_KEY }}
+      TH_OPENAI_MODEL: ${{ secrets.TH_OPENAI_MODEL }}
 
     steps:
     - name: Checkout repository
@@ -73,7 +73,6 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
     - name: Install all dev dependencies
-      # [核心修复] 使用简化的命令，它已包含所有 extras
       run: poetry install --with dev
       
     - name: Run Tests with Coverage
@@ -87,11 +86,11 @@ jobs:
         fail_ci_if_error: true
         verbose: true
 
+  # 实验性测试 Job 保持不变
   test-experimental:
     needs: lint
     runs-on: ubuntu-latest
     continue-on-error: true
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -108,14 +107,11 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-v3
     - name: Install all dev dependencies
-      # [核心修复] 使用简化的命令
       run: poetry install --with dev || true
-      
     - name: Run Code Quality Checks (Python 3.13)
       run: |
         poetry run ruff check .
         poetry run ruff format --check .
         poetry run mypy .
-      
     - name: Run Tests with Pytest (Python 3.13)
       run: poetry run pytest
