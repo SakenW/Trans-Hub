@@ -65,7 +65,6 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
         'Text to translate: "{text}"'
     )
 
-    # --- 核心修正：使用正确的 Pydantic API 来获取默认值 ---
     @field_validator("openai_endpoint", mode="before")
     @classmethod
     def _validate_endpoint(cls, v: Any, info: ValidationInfo) -> Any:
@@ -81,7 +80,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.4.2"  # 版本提升, 修复 mypy 错误
+    VERSION = "2.4.4"  # 版本提升, 修复 is_closed 调用
     REQUIRES_SOURCE_LANG = True
     ACCEPTS_CONTEXT = True
 
@@ -151,10 +150,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     async def close(self) -> None:
         """[实现] 安全地关闭引擎占用的 HTTP 客户端资源。"""
-        # --- 核心修正：is_closed 是属性, 不是方法 ---
-        if self.client.is_closed is False:
-            await self.client.close()
-        logger.info("OpenAI 引擎的 HTTP 客户端已关闭。")
+        # --- 核心修正：is_closed 是一个方法, 不是属性 ---
+        if not self.client.is_closed():
+            try:
+                await self.client.close()
+                logger.info("OpenAI 引擎的 HTTP 客户端已成功关闭。")
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    logger.warning(
+                        "尝试关闭 OpenAI 客户端时事件循环已关闭, 可安全忽略。"
+                    )
+                else:
+                    raise
+        else:
+            logger.debug("OpenAI 客户端已经关闭, 无需再次操作。")
 
     async def _atranslate_one(
         self,

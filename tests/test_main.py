@@ -220,3 +220,7 @@ async def test_force_retranslate_api(coordinator: Coordinator):
     ]
     assert len(results_rerun) == 1
     assert results_rerun[0].status == TranslationStatus.TRANSLATED
+
+
+if __name__ == "__main__":
+    pytest.main(["-s", "-v", __file__])
