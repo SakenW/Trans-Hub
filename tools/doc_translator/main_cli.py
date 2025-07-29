@@ -125,6 +125,7 @@ def run_publish_pipeline(default_lang: LangCode) -> None:
     publisher.publish_root_files()
     log.info("✅ 双语根文件发布完成！")
 
+
 def start_interactive_mode() -> None:
     """启动交互式菜单模式。"""
     log.info("进入交互式模式...")
@@ -195,7 +196,7 @@ def translate_command(
     asyncio.run(
         run_translation_pipeline(
             source_lang=source_lang,
-            target_langs=target_lang,
+            target_langs=target_langs,
             default_lang=default_lang,
             force_retranslate=force_retranslate,
         )
@@ -222,7 +223,7 @@ def sync_command(
     asyncio.run(
         run_translation_pipeline(
             source_lang=source_lang,
-            target_langs=target_lang,
+            target_langs=target_langs,
             default_lang=default_lang,
             force_retranslate=force_retranslate,
         )

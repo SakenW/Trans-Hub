@@ -2,6 +2,7 @@
 """负责将已翻译的文档发布/同步到最终位置，例如项目根目录。"""
 
 from pathlib import Path
+from typing import Optional
 
 import structlog
 
@@ -19,74 +20,82 @@ class DocPublisher:
         self.docs_dir = docs_dir
         self.project_root = project_root
         self.default_lang = default_lang
-        # 发布器内部需要一个渲染器来执行双语渲染逻辑
+        # 发布器内部需要一个渲染器来执行内容生成
         self.renderer = DocRenderer(default_lang, project_root)
 
     def publish_root_files(self) -> None:
-        """扫描默认语言目录下的 root_files，并为它们生成双语版本发布到项目根目录。"""
+        """
+        扫描默认语言目录下的 root_files，并为它们生成双语版本发布到项目根目录。
+        """
         default_lang_root_files_dir = self.docs_dir / self.default_lang / "root_files"
         if not default_lang_root_files_dir.is_dir():
             log.warning(
                 "默认语言的 root_files 目录不存在，跳过发布。",
-                path=str(default_lang_root_files_dir),
+                path=str(default_lang_root_files_dir)
             )
             return
 
-        log.info("开始发布根目录文件...", source_dir=str(default_lang_root_files_dir))
+        log.info("开始发布根目录文件...", source_dir=str(default_lang_root_files_dir.relative_to(self.project_root)))
 
         for path in default_lang_root_files_dir.glob("*.md"):
-            log.debug("发现待发布的根文件", path=str(path))
+            log.debug("正在处理根文件", path=path.name)
+            
+            lang1_code, lang2_code = self.renderer.bilingual_pair
+            lang1_name = self.renderer.bilingual_display.get(lang1_code, lang1_code)
+            lang2_name = self.renderer.bilingual_display.get(lang2_code, lang2_code)
+            
+            # 确保 lang1 是我们的 default_lang，以便默认展开
+            if lang1_code != self.default_lang:
+                lang1_code, lang2_code = lang2_code, lang1_code
+                lang1_name, lang2_name = lang2_name, lang1_name
 
-            # 为了复用双语渲染逻辑，我们需要构建一个临时的 Document 对象。
-            # 注意：这里的 target_langs 是为了获取双语对的另一种语言。
-            # 例如，如果默认是 en，源是 zh，我们需要 en 和 zh 的翻译。
-            # 这是一个简化的假设，更健壮的方案可能需要更复杂的源语言发现机制。
-            # 目前，我们假设源语言是 'zh'。
-            source_lang = "zh"  # TODO: 未来可以做得更动态
-
-            # 这个 Document 只需要最基本的信息
-            doc = Document(
-                source_path=path,  # 路径是虚拟的，仅用于获取文件名
-                source_lang=source_lang,
-                target_langs=[self.default_lang],  # 包含默认语言
-                is_root_file=True,
+            # 1. 为第一种语言（默认语言）构建 Document 并获取纯净内容
+            doc_lang1 = self._build_doc_for_lang(lang1_code, path.name)
+            if not doc_lang1:
+                continue
+            content_lang1 = self.renderer.generate_single_lang_content(
+                doc_lang1, lang1_code, include_switcher=False
             )
 
-            # 我们需要解析这个文件来获取其块结构
-            # 注意：这里的解析是基于默认语言的已翻译文件
-            parse_document(doc)
-
-            # 现在，我们需要手动为每个块填充另一种语言的翻译
-            # 我们从另一种语言的对应文件中读取内容并解析
-            other_lang_code = (
-                self.renderer.bilingual_pair[1]
-                if self.default_lang == self.renderer.bilingual_pair[0]
-                else self.renderer.bilingual_pair[0]
-            )
-            other_lang_path = self.docs_dir / other_lang_code / "root_files" / path.name
-
-            if other_lang_path.exists():
-                other_lang_doc = Document(
-                    source_path=other_lang_path,
-                    source_lang=other_lang_code,
-                    target_langs=[],
+            # 2. 为第二种语言构建 Document 并获取纯净内容
+            doc_lang2 = self._build_doc_for_lang(lang2_code, path.name)
+            if not doc_lang2:
+                # 如果第二语言文件不存在，只发布第一语言的文件
+                log.warning("未找到对应的第二语言文件，将只发布单语版本。", filename=path.name, lang=lang2_code)
+                content_lang2 = ""
+            else:
+                 content_lang2 = self.renderer.generate_single_lang_content(
+                    doc_lang2, lang2_code, include_switcher=False
                 )
-                parse_document(other_lang_doc)
+            
+            # 3. 组装最终的 HTML
+            header = "<!-- This file is auto-generated. Do not edit directly. -->\n<!-- 此文件为自动生成，请勿直接编辑。 -->\n"
+            
+            if content_lang2:
+                section1 = f"<details open>\n<summary><strong>{lang1_name}</strong></summary>\n\n{content_lang1}\n</details>"
+                section2 = f"<details>\n<summary><strong>{lang2_name}</strong></summary>\n\n{content_lang2}\n</details>"
+                final_content = f"{header}\n{section1}\n\n{section2}\n"
+            else:
+                final_content = f"{header}\n{content_lang1}"
 
-                # 创建一个从 stable_id 到翻译文本的映射
-                translation_map = {
-                    block.stable_id: block.source_text
-                    for block in other_lang_doc.blocks
-                }
 
-                # 填充翻译
-                for block in doc.blocks:
-                    if block.stable_id in translation_map:
-                        block.add_translation(
-                            other_lang_code, translation_map[block.stable_id]
-                        )
-
-            # 现在 doc 对象包含了两种语言的块，可以调用双语渲染了
-            self.renderer._render_bilingual_page_collapsible(doc)
+            # 4. 写入根目录
+            root_path = self.project_root / path.name
+            log.info("同步页面级可切换双语根文件", dest=str(root_path.relative_to(self.project_root)))
+            self.renderer._write_file(root_path, final_content)
 
         log.info("根目录文件发布完成。")
+        
+    def _build_doc_for_lang(self, lang: LangCode, filename: str) -> Optional[Document]:
+        """辅助函数，为指定语言和文件名加载和解析文档。"""
+        file_path = self.docs_dir / lang / "root_files" / filename
+        if not file_path.exists():
+            log.warning(f"在发布时未找到对应的语言文件，跳过", lang=lang, filename=filename)
+            return None
+        
+        doc = Document(source_path=file_path, source_lang=lang, target_langs=[], is_root_file=True)
+        parse_document(doc)
+        # 为文档本身填充“翻译”（即原文），以便渲染器能找到内容
+        for block in doc.blocks:
+            block.add_translation(lang, block.source_text)
+        return doc

@@ -51,7 +51,7 @@ For more specific use cases (such as translating `.strings` files), please brows
 
 We have a comprehensive documentation library to help you gain a deeper understanding of all aspects of `Trans-Hub`.
 
-👉 [Click here to start exploring our documentation](./docs/en/index.md)
+👉 [Click here to start exploring our documentation](./docs/en/INDEX.md)
 
 ## **Contribution**
 
