@@ -4,8 +4,8 @@
 from hashlib import sha256
 from pathlib import Path
 
-from markdown_it import MarkdownIt
 import structlog
+from markdown_it import MarkdownIt
 
 from .models import Document, TranslatableBlock
 
@@ -50,7 +50,7 @@ def parse_document(doc: Document) -> None:
                 continue
 
             start_line, map_end_line = token.map
-            
+
             end_token_idx = i
             if token.nesting == 1:
                 nesting_level = 1
@@ -60,15 +60,15 @@ def parse_document(doc: Document) -> None:
                     if nesting_level == 0:
                         end_token_idx = j
                         break
-            
+
             # --- 核心修正 2：确保结束 token 也有 map ---
             # 有时结束 token 可能也没有 map，需要做安全检查
             end_token = tokens[end_token_idx]
             if not end_token.map:
-                 # 如果结束 token 没有 map，这是一个异常情况，我们保守地使用开始 token 的 map
-                 end_line = map_end_line
+                # 如果结束 token 没有 map，这是一个异常情况，我们保守地使用开始 token 的 map
+                end_line = map_end_line
             else:
-                 end_line = end_token.map[1]
+                end_line = end_token.map[1]
 
             block_content = "".join(lines[start_line:end_line]).strip()
 
@@ -77,11 +77,13 @@ def parse_document(doc: Document) -> None:
                 continue
 
             is_code_or_html = token.type in ("fence", "code_block", "html_block")
-            node_type = token.type.replace("_open", "") if not is_code_or_html else "block_code"
+            node_type = (
+                token.type.replace("_open", "") if not is_code_or_html else "block_code"
+            )
 
             if node_type == "hr":
-                 i = end_token_idx + 1
-                 continue
+                i = end_token_idx + 1
+                continue
 
             stable_id = sha256(block_content.encode("utf-8")).hexdigest()
             blocks.append(

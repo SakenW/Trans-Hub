@@ -77,12 +77,12 @@ async def main():
             try:
                 target_languages = ["zh-CN", "fr", "de", "ja"]
                 for lang in target_languages:
-                    log.info(f"正在检查 '{lang}' 的任务...")
+                    log.info(f"正在检查 'en' 的任务...")
                     processed_count = 0
                     async for result in coordinator.process_pending_translations(lang):
                         processed_count += 1
                     if processed_count > 0:
-                        log.info(f"本轮处理了 {processed_count} 个 '{lang}' 任务。")
+                        log.info(f"本轮处理了 {processed_count} 个 'en' 任务。")
 
                 log.info("所有语言检查完毕，Worker 将在 60 秒后再次轮询。")
                 await asyncio.sleep(60)
