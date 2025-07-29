@@ -11,6 +11,7 @@ import time
 from unittest.mock import AsyncMock
 
 import pytest
+from pytest import MonkeyPatch
 
 from trans_hub.rate_limiter import RateLimiter
 
@@ -24,14 +25,14 @@ from trans_hub.rate_limiter import RateLimiter
         (10, -1),
     ],
 )
-def test_rate_limiter_init_with_invalid_args(rate: float, capacity: float):
+def test_rate_limiter_init_with_invalid_args(rate: float, capacity: float) -> None:
     """测试 RateLimiter 初始化时，能否拒绝无效的速率或容量参数。"""
     with pytest.raises(ValueError, match="速率和容量必须为正数"):
         RateLimiter(refill_rate=rate, capacity=capacity)
 
 
 @pytest.mark.asyncio
-async def test_acquire_succeeds_immediately_when_tokens_are_sufficient():
+async def test_acquire_succeeds_immediately_when_tokens_are_sufficient() -> None:
     """测试当令牌充足时，acquire 方法会立即成功并消耗正确的令牌数。"""
     limiter = RateLimiter(refill_rate=10, capacity=10)
     assert limiter.tokens == 10
@@ -40,7 +41,9 @@ async def test_acquire_succeeds_immediately_when_tokens_are_sufficient():
 
 
 @pytest.mark.asyncio
-async def test_acquire_waits_when_tokens_are_insufficient(monkeypatch):
+async def test_acquire_waits_when_tokens_are_insufficient(
+    monkeypatch: MonkeyPatch,
+) -> None:
     """测试当令牌不足时，acquire 方法会异步等待，并且等待时间计算正确。"""
     limiter = RateLimiter(refill_rate=10, capacity=10)
     mock_sleep = AsyncMock()
@@ -49,7 +52,7 @@ async def test_acquire_waits_when_tokens_are_insufficient(monkeypatch):
     start_time = time.monotonic()
     time_sequence = [start_time, start_time, start_time + 0.5]
 
-    def monotonic_side_effect():
+    def monotonic_side_effect() -> float:
         return time_sequence.pop(0) if time_sequence else start_time + 0.5
 
     monkeypatch.setattr(time, "monotonic", monotonic_side_effect)
@@ -65,7 +68,7 @@ async def test_acquire_waits_when_tokens_are_insufficient(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refill_logic_does_not_exceed_capacity(monkeypatch):
+async def test_refill_logic_does_not_exceed_capacity(monkeypatch: MonkeyPatch) -> None:
     """测试令牌的补充逻辑是否正确，且补充后的令牌数不会超过容量上限。"""
     limiter = RateLimiter(refill_rate=10, capacity=10)
     limiter.tokens = 5
@@ -79,7 +82,7 @@ async def test_refill_logic_does_not_exceed_capacity(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_acquire_more_than_capacity_raises_error():
+async def test_acquire_more_than_capacity_raises_error() -> None:
     """测试当请求的令牌数超过桶的总容量时，应立即抛出 ValueError。"""
     limiter = RateLimiter(refill_rate=10, capacity=10)
     with pytest.raises(ValueError, match="请求的令牌数不能超过桶的容量"):

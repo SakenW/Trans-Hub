@@ -30,7 +30,7 @@ async def db_handler() -> AsyncGenerator[SQLitePersistenceHandler, None]:
 @pytest.mark.asyncio
 async def test_ensure_pending_creates_all_entities(
     db_handler: SQLitePersistenceHandler,
-):
+) -> None:
     """测试首次调用 ensure_pending_translations 能否正确创建所有相关实体。"""
     text = "Hello UUID World"
     context = {"domain": "testing"}
@@ -80,7 +80,7 @@ async def test_ensure_pending_creates_all_entities(
 
 
 @pytest.mark.asyncio
-async def test_upsert_logic_for_jobs(db_handler: SQLitePersistenceHandler):
+async def test_upsert_logic_for_jobs(db_handler: SQLitePersistenceHandler) -> None:
     """测试重复调用 ensure_pending_translations 是否只更新 jobs 的时间戳。"""
     text = "Recurring Request"
     business_id = "test.recurring"
@@ -108,7 +108,7 @@ async def test_upsert_logic_for_jobs(db_handler: SQLitePersistenceHandler):
 
 
 @pytest.mark.asyncio
-async def test_null_context_handling(db_handler: SQLitePersistenceHandler):
+async def test_null_context_handling(db_handler: SQLitePersistenceHandler) -> None:
     """测试无上下文的请求是否能正确地在 jobs 和 translations 中插入 NULL context_id。"""
     await db_handler.ensure_pending_translations(
         "Global Text", ["fr"], "en", "3.0", "global.text", get_context_hash(None)
@@ -129,7 +129,9 @@ async def test_null_context_handling(db_handler: SQLitePersistenceHandler):
 
 
 @pytest.mark.asyncio
-async def test_touch_jobs_updates_timestamp(db_handler: SQLitePersistenceHandler):
+async def test_touch_jobs_updates_timestamp(
+    db_handler: SQLitePersistenceHandler,
+) -> None:
     """测试 touch_jobs 方法能否正确更新时间戳。"""
     business_id_1 = "touch.test.1"
     business_id_2 = "touch.test.2"

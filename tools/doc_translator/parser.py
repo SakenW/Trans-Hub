@@ -34,7 +34,7 @@ class ContentExtractor(mistune.BaseRenderer):
 
     NAME = "content_extractor"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.blocks: list[TranslatableBlock] = []
         self.counter = 0
@@ -50,7 +50,7 @@ class ContentExtractor(mistune.BaseRenderer):
 
         return ""
 
-    def _recursive_render_token(self, token: dict[str, Any], state: Any):
+    def _recursive_render_token(self, token: dict[str, Any], state: Any) -> None:
         """递归地遍历 AST 树，提取所有内容块。"""
         node_type = token.get("type")
 
@@ -58,7 +58,7 @@ class ContentExtractor(mistune.BaseRenderer):
         translatable_types = ("paragraph", "heading", "list_item")
 
         if node_type in translatable_types:
-            children_list = cast(list, token.get("children", []))
+            children_list = cast(list[dict[str, Any]], token.get("children", []))
             full_text = _extract_text_from_children(children_list).strip()
 
             if (

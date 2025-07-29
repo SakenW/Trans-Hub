@@ -82,7 +82,7 @@ async def test_policy_builds_result_correctly(
     mock_processing_context: ProcessingContext,
     mock_active_engine: AsyncMock,
     sample_batch: list[ContentItem],
-):
+) -> None:
     mock_active_engine.atranslate_batch.return_value = [
         EngineSuccess(translated_text="Hallo")
     ]

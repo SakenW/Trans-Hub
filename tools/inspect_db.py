@@ -29,7 +29,7 @@ import structlog
 log = structlog.get_logger(__name__)
 
 
-async def inspect_database(db_path: str):
+async def inspect_database(db_path: str) -> None:
     """异步地连接到数据库并打印翻译内容及其解读。"""
     if not os.path.exists(db_path):
         log.error(
@@ -98,7 +98,7 @@ async def inspect_database(db_path: str):
             log.info("数据库连接已关闭。")
 
 
-def main():
+def main() -> None:
     """命令行接口的主入口点。"""
     setup_logging(log_level="INFO")
 

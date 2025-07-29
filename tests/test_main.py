@@ -7,7 +7,7 @@ v3.0 更新：适配 v3.0 UUID Schema 和兼容性更强的 Schema 初始化方�
 import os
 import shutil
 import sqlite3
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -35,7 +35,7 @@ ENGINE_OPENAI = EngineName.OPENAI
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():
+def setup_test_environment() -> Generator[None, None, None]:
     TEST_DIR.mkdir(exist_ok=True)
     yield
     shutil.rmtree(TEST_DIR)
@@ -70,7 +70,7 @@ async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator
 
 
 @pytest.mark.asyncio
-async def test_full_workflow_with_debug_engine(coordinator: Coordinator):
+async def test_full_workflow_with_debug_engine(coordinator: Coordinator) -> None:
     text = "Hello"
     target_lang = "zh-CN"
     business_id = "test.debug.hello"
@@ -92,7 +92,7 @@ async def test_full_workflow_with_debug_engine(coordinator: Coordinator):
     not os.getenv("TH_OPENAI_API_KEY"), reason="需要设置 TH_OPENAI_API_KEY"
 )
 @pytest.mark.asyncio
-async def test_openai_engine_workflow(coordinator: Coordinator):
+async def test_openai_engine_workflow(coordinator: Coordinator) -> None:
     coordinator.switch_engine(ENGINE_OPENAI.value)
     text = "Star"
     target_lang = "fr"
@@ -108,7 +108,7 @@ async def test_openai_engine_workflow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_translators_engine_workflow(coordinator: Coordinator):
+async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
     coordinator.switch_engine(ENGINE_TRANSLATORS.value)
     text = "Moon"
     target_lang = "de"
@@ -121,7 +121,7 @@ async def test_translators_engine_workflow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_garbage_collection_workflow(coordinator: Coordinator):
+async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
     """测试垃圾回收（GC）能否正确地分阶段删除过期的 job 和孤立的内容。"""
     await coordinator.request(
         target_langs=["zh-CN"], text_content="fresh item", business_id="item.fresh"
@@ -173,7 +173,7 @@ async def test_garbage_collection_workflow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_force_retranslate_api(coordinator: Coordinator):
+async def test_force_retranslate_api(coordinator: Coordinator) -> None:
     text = "Sun"
     target_lang = "es"
     await coordinator.request(target_langs=[target_lang], text_content=text)

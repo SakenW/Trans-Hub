@@ -54,7 +54,7 @@ async def get_coordinator(db_name: str = "01_basic_usage_demo.db") -> Coordinato
     return coordinator
 
 
-async def main():
+async def main() -> None:
     """程序的主异步入口。"""
     setup_logging(log_level="INFO")
     coordinator = None

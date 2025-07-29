@@ -37,7 +37,7 @@ def another_request() -> TranslationRequest:
 
 
 @pytest.mark.asyncio
-async def test_cache_set_and_get(sample_request: TranslationRequest):
+async def test_cache_set_and_get(sample_request: TranslationRequest) -> None:
     """测试基本的缓存设置和获取功能。"""
     cache = TranslationCache()
     assert await cache.get_cached_result(sample_request) is None
@@ -47,7 +47,7 @@ async def test_cache_set_and_get(sample_request: TranslationRequest):
 
 
 @pytest.mark.asyncio
-async def test_ttl_expiration(sample_request: TranslationRequest):
+async def test_ttl_expiration(sample_request: TranslationRequest) -> None:
     """测试 TTL 缓存是否会在指定时间后自动使条目失效。"""
     config = CacheConfig(maxsize=10, ttl=1, cache_type="ttl")
     cache = TranslationCache(config)
@@ -62,7 +62,7 @@ async def test_ttl_expiration(sample_request: TranslationRequest):
 @pytest.mark.asyncio
 async def test_lru_eviction(
     sample_request: TranslationRequest, another_request: TranslationRequest
-):
+) -> None:
     """测试 LRU 缓存在容量满时，是否会淘汰最近最少使用的条目。"""
     config = CacheConfig(maxsize=2, cache_type="lru")
     cache = TranslationCache(config)
@@ -84,7 +84,7 @@ async def test_lru_eviction(
 
 
 @pytest.mark.asyncio
-async def test_clear_cache(sample_request: TranslationRequest):
+async def test_clear_cache(sample_request: TranslationRequest) -> None:
     """测试 clear_cache 方法是否能清空所有缓存条目。"""
     cache = TranslationCache()
     await cache.cache_translation_result(sample_request, "Hallo")

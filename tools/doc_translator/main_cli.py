@@ -53,7 +53,7 @@ async def run_sync_pipeline(
     target_langs: list[LangCode],
     default_lang: LangCode,
     force_retranslate: bool,
-):
+) -> None:
     """执行完整的端到端同步流水线。"""
     log.info("▶️ 启动文档翻译同步流水线...")
     if not DB_FILE_PATH.exists():
@@ -122,7 +122,7 @@ def main_entrypoint(
     force_retranslate: Annotated[
         bool, typer.Option("--force", "-f", help="强制重新翻译所有内容，忽略现有缓存。")
     ] = False,
-):
+) -> None:
     """Trans-Hub 文档翻译同步工具。"""
     if ctx.invoked_subcommand is not None:
         return

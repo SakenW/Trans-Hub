@@ -92,7 +92,7 @@ class DocSynchronizer:
         """为单个文档中的所有块，从 Trans-Hub 获取已完成的翻译并填充回去。"""
         log.info("正在为文档获取翻译结果...", document=doc.source_path.name)
 
-        async def fetch_for_block(block: TranslatableBlock):
+        async def fetch_for_block(block: TranslatableBlock) -> None:
             """内部辅助函数，用于并发获取单个块的所有语言翻译。"""
             if block.node_type == "block_code":
                 # 代码块无需翻译，直接用原文填充所有目标语言

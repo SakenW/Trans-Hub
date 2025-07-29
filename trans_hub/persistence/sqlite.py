@@ -36,7 +36,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
         self._conn: Optional[aiosqlite.Connection] = None
         self._db_lock = asyncio.Lock()
 
-    async def connect(self):
+    async def connect(self) -> None:
         try:
             self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row

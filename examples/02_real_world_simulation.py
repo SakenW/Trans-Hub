@@ -42,7 +42,7 @@ SIMULATION_DURATION = 20
 log = structlog.get_logger("simulation")
 
 
-def get_article_context(category: str) -> dict:
+def get_article_context(category: str) -> dict[str, str]:
     """为特定类别的文章生成上下文。"""
     return {
         "source": "demo_workflow",
@@ -83,7 +83,7 @@ async def initialize_trans_hub() -> Optional[Coordinator]:
 
 async def content_producer(
     coordinator: Coordinator, producer_id: int, stop_event: asyncio.Event
-):
+) -> None:
     """模拟一个内容生产者（作者），随机提交新内容。"""
     plog = log.bind(component="Producer", producer_id=producer_id)
     plog.info("启动！")
@@ -139,7 +139,9 @@ async def content_producer(
     plog.info("停止。")
 
 
-async def translation_worker(coordinator: Coordinator, stop_event: asyncio.Event):
+async def translation_worker(
+    coordinator: Coordinator, stop_event: asyncio.Event
+) -> None:
     """模拟一个后台翻译工作进程。"""
     wlog = log.bind(component="Worker")
     wlog.info("启动！开始轮询待办任务...")
@@ -173,7 +175,7 @@ async def translation_worker(coordinator: Coordinator, stop_event: asyncio.Event
     wlog.info("停止。")
 
 
-async def api_server(coordinator: Coordinator, stop_event: asyncio.Event):
+async def api_server(coordinator: Coordinator, stop_event: asyncio.Event) -> None:
     """模拟一个 API 服务，随机查询翻译结果。"""
     alog = log.bind(component="API")
     alog.info("启动！开始接收模拟查询...")
@@ -207,7 +209,7 @@ async def api_server(coordinator: Coordinator, stop_event: asyncio.Event):
     alog.info("停止。")
 
 
-async def main():
+async def main() -> None:
     """主程序入口，协调所有组件的生命周期。"""
     setup_logging(log_level="INFO")
     load_dotenv()

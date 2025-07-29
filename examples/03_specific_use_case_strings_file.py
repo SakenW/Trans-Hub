@@ -12,6 +12,9 @@ import re
 import sys
 from pathlib import Path
 
+# --- 核心修正：导入所有需要的类型 ---
+from typing import Any
+
 import structlog
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -36,9 +39,12 @@ STRINGS_CONTENT = """
 """
 
 
-def generate_context_for_text(text: str) -> dict:
+def generate_context_for_text(text: str) -> dict[str, str]:
     """根据文本内容动态生成一个更精确的翻译上下文。"""
-    base_context = {"source_app": "DEVONthink Pro", "file_type": ".strings"}
+    base_context: dict[str, str] = {
+        "source_app": "DEVONthink Pro",
+        "file_type": ".strings",
+    }
     if text.endswith("…"):
         base_context["text_type"] = "menu_item"
         base_context["note"] = (
@@ -57,7 +63,7 @@ def generate_context_for_text(text: str) -> dict:
     return base_context
 
 
-async def main():
+async def main() -> None:
     """程序主入口"""
     setup_logging(log_level="INFO", log_format="console")
     log = structlog.get_logger("strings_translator")
@@ -76,7 +82,8 @@ async def main():
         await coordinator.initialize()
 
         kv_pattern = re.compile(r'"([^"]+)"\s*=\s*"([^"]+)"\s*;')
-        parsed_structure = []
+        # --- 核心修正：提供精确的类型注解 ---
+        parsed_structure: list[tuple[str, Any]] = []
         texts_to_translate: set[str] = set()
 
         log.info("▶️ 第一步：解析 .strings 文件内容...")
@@ -96,7 +103,6 @@ async def main():
 
         log.info("▶️ 第二步：向 Trans-Hub 提交翻译请求...")
         if texts_to_translate:
-            # 对于整个文件，我们使用一个统一的 business_id
             source_file_id = "devonthink_pro_services.strings"
             for text in texts_to_translate:
                 dynamic_context = generate_context_for_text(text)
@@ -104,18 +110,20 @@ async def main():
                     target_langs=["zh-CN"],
                     text_content=text,
                     source_lang="en",
-                    # 每个文本共享同一个业务ID，但通过不同的 context 来区分
                     business_id=source_file_id,
                     context=dynamic_context,
                 )
         log.info("所有翻译任务已入队。", count=len(texts_to_translate))
 
         log.info("▶️ 第三步：执行翻译流程...")
-        translation_results = {}
+        translation_results: dict[str, str] = {}
         async for result in coordinator.process_pending_translations(
             target_lang="zh-CN", limit=len(texts_to_translate)
         ):
-            if result.status == TranslationStatus.TRANSLATED:
+            if (
+                result.status == TranslationStatus.TRANSLATED
+                and result.translated_content
+            ):
                 log.info(
                     f"翻译成功: '{result.original_content}' -> '{result.translated_content}'"
                 )
@@ -129,13 +137,15 @@ async def main():
                 )
 
         log.info("▶️ 第四步：重建翻译后的文件...")
-        output_lines = []
+        output_lines: list[str] = []
         for line_type, content in parsed_structure:
             if line_type == "blank":
                 output_lines.append("")
             elif line_type == "comment":
-                output_lines.append(content)
+                # 明确断言 content 是字符串
+                output_lines.append(str(content))
             elif line_type == "kv":
+                # --- 核心修正：进行安全的解包 ---
                 key, original_value = content
                 translated_value = translation_results.get(
                     original_value, original_value

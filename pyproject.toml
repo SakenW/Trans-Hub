@@ -101,7 +101,7 @@ ignore = [
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
-strict = false
+strict = true
 show_error_codes = true
 pretty = true
 
