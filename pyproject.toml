@@ -46,7 +46,7 @@ rich = { version = ">=13.0.0", optional = true }
 fastapi = { version = ">=0.111.0", optional = true }
 uvicorn = { version = ">=0.30.1", extras = ["standard"], optional = true }
 # 文档工具
-mistune = { version = ">=3.0.2", optional = true }
+markdown-it-py = { version = ">=3.0.0", optional = true }
 
 
 # --- 可选依赖分组 (Extras) ---
@@ -56,10 +56,10 @@ openai = ["openai", "httpx"]
 metrics = ["prometheus-client"]
 cli = ["typer", "rich"]
 api = ["fastapi", "uvicorn"]
-tools = ["typer", "rich", "mistune", "openai", "httpx"]
+tools = ["typer", "rich", "markdown-it-py", "openai", "httpx"]
 all = [
     "translators", "openai", "httpx", "prometheus-client", 
-    "typer", "rich", "fastapi", "uvicorn", "mistune"
+    "typer", "rich", "fastapi", "uvicorn", "markdown-it-py"
 ]
 
 
@@ -81,7 +81,7 @@ prometheus-client = "*"
 typer = { version = "*", extras = ["rich"] }
 fastapi = "*"
 uvicorn = { version = "*", extras = ["standard"] }
-mistune = "*"
+markdown-it-py = "*"
 
 
 [tool.ruff]
@@ -108,7 +108,7 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "translators",
-    "mistune",
+    "markdown_it",
     "prometheus_client",
 ]
 ignore_missing_imports = true

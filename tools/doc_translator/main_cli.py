@@ -27,11 +27,11 @@ from trans_hub.engines.openai import OpenAIEngineConfig  # noqa: E402
 from trans_hub.engines.translators_engine import TranslatorsEngineConfig  # noqa: E402
 from trans_hub.logging_config import setup_logging  # noqa: E402
 
-from .models import LangCode  # noqa: E402
-from .parser import parse_document  # noqa: E402
-from .renderer import DocRenderer  # noqa: E402
-from .scanner import DocScanner  # noqa: E402
-from .synchronizer import DocSynchronizer  # noqa: E402
+from tools.doc_translator.models import LangCode  # noqa: E402
+from tools.doc_translator.parser import parse_document  # noqa: E402
+from tools.doc_translator.renderer import DocRenderer  # noqa: E402
+from tools.doc_translator.scanner import DocScanner  # noqa: E402
+from tools.doc_translator.synchronizer import DocSynchronizer  # noqa: E402
 
 # --- 默认配置 ---
 DOCS_DIR = PROJECT_ROOT / "docs"

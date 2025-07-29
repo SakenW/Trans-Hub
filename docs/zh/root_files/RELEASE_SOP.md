@@ -1,5 +1,3 @@
-<div align="right">[English Version](./docs/en/root_sources/RELEASE_SOP.en.md)</div>
-
 # Trans-Hub 发布标准作业流程 (SOP)
 
 > 🚨 **注意**: 此流程仅适用于项目的核心维护者。

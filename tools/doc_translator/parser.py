@@ -1,12 +1,10 @@
 # tools/doc_translator/parser.py
 """负责将 Markdown 文件内容解析为可翻译的文本块列表。"""
 
-from collections.abc import Iterable
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, cast
 
-import mistune
+from markdown_it import MarkdownIt
 import structlog
 
 from .models import Document, TranslatableBlock
@@ -14,99 +12,92 @@ from .models import Document, TranslatableBlock
 log = structlog.get_logger(__name__)
 
 
-def _extract_text_from_children(children: list[Any]) -> str:
-    """递归地、安全地从 AST 子节点中提取并拼接所有纯文本。"""
-    texts = []
-    for child in children:
-        if not isinstance(child, dict):
-            continue
-        node_type = child.get("type")
-        if node_type == "text":
-            texts.append(child.get("text", ""))
-        children_list = child.get("children")
-        if children_list and isinstance(children_list, list):
-            texts.append(_extract_text_from_children(children_list))
-    return "".join(texts)
-
-
-class ContentExtractor(mistune.BaseRenderer):
-    """一个为 mistune v3 设计的渲染器，用于从 AST 中递归提取可翻译和不可翻译的块。"""
-
-    NAME = "content_extractor"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.blocks: list[TranslatableBlock] = []
-        self.counter = 0
-
-    def __call__(self, ast: Iterable[dict[str, Any]], state: Any) -> str:
-        """Mistune v3 调用入口。"""
-        self.blocks = []
-        self.counter = 0
-
-        # 从顶层节点开始递归遍历
-        for token in ast:
-            self._recursive_render_token(token, state)
-
-        return ""
-
-    def _recursive_render_token(self, token: dict[str, Any], state: Any) -> None:
-        """递归地遍历 AST 树，提取所有内容块。"""
-        node_type = token.get("type")
-
-        # 我们关心的可翻译块类型
-        translatable_types = ("paragraph", "heading", "list_item")
-
-        if node_type in translatable_types:
-            children_list = cast(list[dict[str, Any]], token.get("children", []))
-            full_text = _extract_text_from_children(children_list).strip()
-
-            if (
-                full_text
-                and not full_text.startswith("{{")
-                and not full_text.startswith("{%")
-            ):
-                stable_id = sha256(full_text.encode("utf-8")).hexdigest()
-                self.blocks.append(
-                    TranslatableBlock(
-                        source_text=full_text, stable_id=stable_id, node_type=node_type
-                    )
-                )
-        elif node_type == "block_code":
-            self.counter += 1
-            stable_id = f"code_block_{self.counter:03d}"
-            code_text = token.get("raw", "")
-            if code_text:
-                self.blocks.append(
-                    TranslatableBlock(
-                        source_text=code_text,
-                        stable_id=stable_id,
-                        node_type=node_type,
-                    )
-                )
-
-        # --- 核心修正：递归进入子节点 ---
-        # 无论当前节点是否被处理，我们都要继续深入其子节点
-        children = token.get("children")
-        if children and isinstance(children, list):
-            for child in children:
-                if isinstance(child, dict):
-                    # 对每一个子节点，都调用这个递归函数
-                    self._recursive_render_token(child, state)
-
-
 def parse_document(doc: Document) -> None:
-    """解析一个 Document 对象中的源文件，并将解析出的块填充回 Document 对象。"""
+    """
+    解析一个 Document 对象中的源文件，并将解析出的块填充回 Document 对象。
+
+    本解析器采用“分块”策略，以确保 Markdown 结构在翻译前后保持一致：
+    1.  使用 markdown-it-py 将整个文档解析成 token 流。
+    2.  遍历 token 流，将顶层元素（如标题、段落、列表、代码块）识别为独立的块。
+    3.  利用 token 的 `map` 属性（行号范围）从原始文件中精确提取每个块的完整 Markdown 源码。
+    4.  每个块（`TranslatableBlock`）的 `source_text` 都存储着这段完整的、包含语法的源码。
+       - 对于代码块，`node_type` 设为 'block_code'，翻译时将被跳过。
+       - 对于其他文本块，其 `source_text`（例如 "### My Title" 或 "* List item"）将被直接发送给翻译引擎。
+         我们依赖翻译引擎（如 GPT-4）的能力来理解并保留这些 Markdown 语法。
+    """
     log.info("正在解析文件", path=str(doc.source_path.relative_to(Path.cwd())))
     try:
         content = doc.source_path.read_text("utf-8")
-        extractor = ContentExtractor()
-        markdown_parser = mistune.create_markdown(renderer=extractor)
-        markdown_parser(content)
+        lines = content.splitlines(keepends=True)
+        if not lines:
+            log.warning("文件内容为空，跳过解析", path=str(doc.source_path))
+            doc.blocks = []
+            return
 
-        doc.blocks = extractor.blocks
+        md = MarkdownIt()
+        tokens = md.parse(content)
+        blocks: list[TranslatableBlock] = []
 
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+
+            # --- 核心修正 1：增加防御性检查 ---
+            # 如果 token 没有 map（行号信息），或者不是 level 0 的块级 token，直接跳过。
+            # 这是处理 TypeError 的根本方法。
+            if not token.map or not token.block or token.level != 0:
+                i += 1
+                continue
+
+            start_line, map_end_line = token.map
+            
+            end_token_idx = i
+            if token.nesting == 1:
+                nesting_level = 1
+                for j in range(i + 1, len(tokens)):
+                    if tokens[j].level == token.level:
+                        nesting_level += tokens[j].nesting
+                    if nesting_level == 0:
+                        end_token_idx = j
+                        break
+            
+            # --- 核心修正 2：确保结束 token 也有 map ---
+            # 有时结束 token 可能也没有 map，需要做安全检查
+            end_token = tokens[end_token_idx]
+            if not end_token.map:
+                 # 如果结束 token 没有 map，这是一个异常情况，我们保守地使用开始 token 的 map
+                 end_line = map_end_line
+            else:
+                 end_line = end_token.map[1]
+
+            block_content = "".join(lines[start_line:end_line]).strip()
+
+            if not block_content:
+                i = end_token_idx + 1
+                continue
+
+            is_code_or_html = token.type in ("fence", "code_block", "html_block")
+            node_type = token.type.replace("_open", "") if not is_code_or_html else "block_code"
+
+            if node_type == "hr":
+                 i = end_token_idx + 1
+                 continue
+
+            stable_id = sha256(block_content.encode("utf-8")).hexdigest()
+            blocks.append(
+                TranslatableBlock(
+                    source_text=block_content,
+                    stable_id=stable_id,
+                    node_type=node_type,
+                )
+            )
+
+            i = end_token_idx + 1
+
+        doc.blocks = blocks
         log.info("解析成功", file=doc.source_path.name, block_count=len(doc.blocks))
-    except Exception as e:
-        log.error("解析 Markdown 文件失败", path=str(doc.source_path), error=e)
+
+    except Exception:
+        # 保持异常捕获，以防其他未知错误
+        log.exception("解析 Markdown 文件失败", path=str(doc.source_path))
         doc.blocks = []
