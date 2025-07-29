@@ -70,7 +70,7 @@ async def inspect_database(db_path: str):
             return
 
         for i, row in enumerate(rows):
-            print(f"--- 记录 {i+1} ---")
+            print(f"--- 记录 {i + 1} ---")
             for key in row.keys():
                 print(f"  - {key:<20}: {row[key]}")
 

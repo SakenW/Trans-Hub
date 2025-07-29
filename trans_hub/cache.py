@@ -1,10 +1,5 @@
 # trans_hub/cache.py
-"""
-本模块提供灵活的内存缓存机制，用于减少重复的翻译请求。
-
-它支持基于 TTL (Time-To-Live) 的过期策略和基于 LRU (Least Recently Used)
-的淘汰机制，以优化性能和内存使用。
-"""
+"""本模块提供灵活的内存缓存机制，用于减少重复的翻译请求。"""
 
 import asyncio
 from typing import Optional, Union
@@ -24,26 +19,15 @@ class CacheConfig(BaseModel):
 
 
 class TranslationCache:
-    """
-    一个用于管理翻译结果的、异步安全的内存缓存。
-
-    它封装了 `cachetools` 库，并使用 `asyncio.Lock` 来确保在异步环境中的线程安全。
-    """
+    """一个用于管理翻译结果的、异步安全的内存缓存。"""
 
     def __init__(self, config: Optional[CacheConfig] = None):
-        """
-        初始化翻译缓存。
-
-        参数:
-            config: 缓存配置对象。如果未提供，则使用默认配置。
-        """
         self.config = config or CacheConfig()
-        self.cache: Union[LRUCache, TTLCache]
+        self.cache: Union[LRUCache[str, str], TTLCache[str, str]]
         self._initialize_cache()
         self._lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:
-        """[私有] 根据配置初始化 `cachetools` 缓存实例。"""
         if self.config.cache_type == "ttl":
             self.cache = TTLCache(maxsize=self.config.maxsize, ttl=self.config.ttl)
         else:
