@@ -1,7 +1,7 @@
 <!-- This file is auto-generated. Do not edit directly. -->
 <!-- 此文件为自动生成，请勿直接编辑。 -->
 
-<details open>
+<details id='en-details' open ontoggle="if(this.open) document.getElementById('zh-details').open = false;">
 <summary><strong>English</strong></summary>
 
 **English** | [简体中文](../../zh/root_files/README.md)
@@ -66,7 +66,7 @@ This project uses the MIT License. See the [LICENSE.md](./LICENSE.md) file for d
 
 </details>
 
-<details>
+<details id='zh-details' ontoggle="if(this.open) document.getElementById('en-details').open = false;">
 <summary><strong>简体中文</strong></summary>
 
 # **Trans-Hub：您的异步本地化后端引擎** 🚀

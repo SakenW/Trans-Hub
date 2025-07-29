@@ -1,7 +1,7 @@
 <!-- This file is auto-generated. Do not edit directly. -->
 <!-- 此文件为自动生成，请勿直接编辑。 -->
 
-<details open>
+<details id='en-details' open ontoggle="if(this.open) document.getElementById('zh-details').open = false;">
 <summary><strong>English</strong></summary>
 
 **English** | [简体中文](../../zh/root_files/RELEASE_NOTES_DRAFT.md)
@@ -70,7 +70,7 @@ Version Highlights
 
 </details>
 
-<details>
+<details id='zh-details' ontoggle="if(this.open) document.getElementById('en-details').open = false;">
 <summary><strong>简体中文</strong></summary>
 
 ### **Trans-Hub `v3.0.0` 变更记录**
