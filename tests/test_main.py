@@ -233,5 +233,6 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
 
         await close_task
 
+
 if __name__ == "__main__":
     pytest.main(["-s", "-v", __file__])

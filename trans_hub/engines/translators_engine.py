@@ -1,6 +1,7 @@
 # trans_hub/engines/translators_engine.py
 """提供一个使用 `translators` 库的免费翻译引擎。"""
 
+# ... (imports 保持不变) ...
 import asyncio
 from typing import Any, Optional
 
@@ -19,7 +20,7 @@ logger = structlog.get_logger(__name__)
 
 
 class TranslatorsContextModel(BaseContextModel):
-    """Translators 引擎的上下文，允许动态选择服务商。"""
+    """Translators 引擎的上下文。"""
 
     provider: Optional[str] = None
 
@@ -35,22 +36,18 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     CONFIG_MODEL = TranslatorsEngineConfig
     CONTEXT_MODEL = TranslatorsContextModel
-    VERSION = "2.2.0"
+    VERSION = "2.2.1"
     ACCEPTS_CONTEXT = True
 
+    # ... (__init__, _ensure_initialized 方法保持不变) ...
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
         self.ts_module: Optional[Any] = None
-        logger.info(
-            "Translators 引擎已配置，将在首次使用时初始化。",
-            default_provider=self.config.provider,
-        )
+        logger.info("Translators 引擎已配置。", default_provider=self.config.provider)
 
     async def _ensure_initialized(self) -> None:
-        """确保 translators 模块被加载。"""
         if self.ts_module:
             return
-
         logger.debug("正在惰性加载 'translators' 库...")
         try:
             import translators as ts
@@ -59,13 +56,13 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             logger.info("'translators' 库加载成功。")
         except ImportError as e:
             raise ImportError(
-                "要使用 TranslatorsEngine, 请先安装 'translators' 库: pip install \"trans-hub[translators]\""
+                "要使用 TranslatorsEngine, 请安装 'translators' 库: pip install \"trans-hub[translators]\""
             ) from e
         except Exception as e:
-            logger.error("加载 'translators' 库时发生严重错误。", error=str(e))
             raise APIError(f"Translators 库初始化失败: {e}") from e
 
-    async def _atranslate_one(
+    # --- 核心变更：重命名方法 ---
+    async def _execute_single_translation(
         self,
         text: str,
         target_lang: str,
@@ -75,13 +72,11 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         """[实现] 异步翻译单个文本。"""
         await self._ensure_initialized()
         assert self.ts_module is not None
-        # --- 核心修正：创建一个 mypy 可以推断类型的局部变量 ---
         ts_lib = self.ts_module
 
         provider = context_config.get("provider", self.config.provider)
 
         def _translate_sync() -> str:
-            """在线程池中执行的同步翻译函数。"""
             return str(
                 ts_lib.translate_text(
                     query_text=text,
@@ -95,9 +90,6 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             translated_text = await asyncio.to_thread(_translate_sync)
             return EngineSuccess(translated_text=translated_text)
         except Exception as e:
-            logger.warning(
-                "Translators 引擎单条翻译出错", provider=provider, error=str(e)
-            )
             return EngineError(
                 error_message=f"Translators({provider}) Error: {e}",
                 is_retryable=True,

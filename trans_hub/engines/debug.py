@@ -1,8 +1,5 @@
 # trans_hub/engines/debug.py
-"""
-提供一个用于开发和测试的调试翻译引擎。
-此版本实现已高度简化，仅需实现 _atranslate_one 方法。
-"""
+"""提供一个用于开发和测试的调试翻译引擎。"""
 
 from typing import Any, Optional
 
@@ -17,15 +14,10 @@ from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 class DebugEngineConfig(BaseSettings, BaseEngineConfig):
     """Debug 引擎的配置模型。"""
 
-    # 移除了 model_config，因为 BaseSettings 默认行为就是 'ignore'
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
-    fail_on_text: Optional[str] = Field(
-        default=None, description="如果文本匹配此字符串，则翻译失败"
-    )
-    fail_is_retryable: bool = Field(default=True, description="失败是否可重试")
-    translation_map: dict[str, str] = Field(
-        default_factory=dict, description="一个原文到译文的映射"
-    )
+    fail_on_text: Optional[str] = Field(default=None)
+    fail_is_retryable: bool = Field(default=True)
+    translation_map: dict[str, str] = Field(default_factory=dict)
 
 
 class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
@@ -33,13 +25,9 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
 
     CONFIG_MODEL = DebugEngineConfig
     VERSION = "2.1.0"
-    # ACCEPTS_CONTEXT 保持默认的 False
 
-    # __init__ 方法可以被省略，因为基类已经提供了完美的默认实现
-    # def __init__(self, config: DebugEngineConfig):
-    #     super().__init__(config)
-
-    async def _atranslate_one(
+    # --- 核心变更：重命名方法 ---
+    async def _execute_single_translation(
         self,
         text: str,
         target_lang: str,
@@ -47,7 +35,6 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """[实现] 异步翻译单个文本。"""
-        # 注意：context_config 在这里将始终为空字典，因为 ACCEPTS_CONTEXT=False
         if self.config.mode == "FAIL":
             return EngineError(
                 error_message="DebugEngine is in FAIL mode.",
@@ -66,5 +53,4 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         return EngineSuccess(translated_text=translated_text)
 
 
-# 注册引擎配置
 register_engine_config("debug", DebugEngineConfig)

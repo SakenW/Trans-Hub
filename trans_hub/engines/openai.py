@@ -1,9 +1,5 @@
 # trans_hub/engines/openai.py
-"""
-提供一个使用 OpenAI API 的翻译引擎。
-本版本经过生产级加固, 包含了启动时健康检查和更精细的错误处理,
-并能健壮地处理CI环境中的空环境变量。
-"""
+"""提供一个使用 OpenAI API 的翻译引擎。"""
 
 import os
 from typing import Any, Optional, cast
@@ -24,6 +20,7 @@ from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 _AsyncOpenAIClient: Optional[type] = None
 try:
+    # --- 最终修复：导入更精确的类型 ---
     from openai import (
         APIConnectionError,
         APIStatusError,
@@ -32,6 +29,11 @@ try:
         InternalServerError,
         PermissionDeniedError,
         RateLimitError,
+    )
+    from openai.types.chat import (
+        ChatCompletionMessageParam,
+        ChatCompletionSystemMessageParam,
+        ChatCompletionUserMessageParam,
     )
 
     _AsyncOpenAIClient = AsyncOpenAI
@@ -54,7 +56,6 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     """OpenAI 引擎的配置模型。"""
 
     model_config = SettingsConfigDict(env_prefix="TH_", extra="ignore")
-
     openai_api_key: Optional[SecretStr] = None
     openai_endpoint: HttpUrl = Field(default=cast(HttpUrl, "https://api.openai.com/v1"))
     openai_model: str = "gpt-3.5-turbo"
@@ -68,7 +69,6 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     @field_validator("openai_endpoint", mode="before")
     @classmethod
     def _validate_endpoint(cls, v: Any, info: ValidationInfo) -> Any:
-        """如果环境变量为空字符串, 则直接返回字段的默认值。"""
         if isinstance(v, str) and not v.strip():
             if info.field_name and info.field_name in cls.model_fields:
                 return cls.model_fields[info.field_name].default
@@ -80,7 +80,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
     CONFIG_MODEL = OpenAIEngineConfig
     CONTEXT_MODEL = OpenAIContext
-    VERSION = "2.4.4"  # 版本提升, 修复 is_closed 调用
+    VERSION = "2.4.6"
     REQUIRES_SOURCE_LANG = True
     ACCEPTS_CONTEXT = True
 
@@ -90,7 +90,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             raise ImportError(
                 "要使用 OpenAIEngine, 请安装 'openai' 库: pip install \"trans-hub[openai]\""
             )
-
         if not self.config.openai_api_key:
             if "PYTEST_CURRENT_TEST" in os.environ or "CI" in os.environ:
                 self.config.openai_api_key = SecretStr("dummy-key-for-ci")
@@ -98,9 +97,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 raise ConfigurationError(
                     "OpenAI 引擎配置错误: 缺少 API 密钥 (TH_OPENAI_API_KEY)。"
                 )
-
         assert self.config.openai_api_key is not None
-
         timeout = httpx.Timeout(30.0, connect=5.0)
         self.client: AsyncOpenAI = _AsyncOpenAIClient(
             api_key=self.config.openai_api_key.get_secret_value(),
@@ -110,24 +107,18 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         )
 
     async def initialize(self) -> None:
-        """[实现] 初始化引擎并执行健康检查, 验证网络和认证。"""
         assert self.config.openai_api_key is not None
         if self.config.openai_api_key.get_secret_value() == "dummy-key-for-ci":
             logger.warning("OpenAI 引擎处于CI/测试模式, 跳过健康检查。")
             return
-
         logger.info(
             "OpenAI 引擎正在初始化并执行健康检查...",
             endpoint=str(self.config.openai_endpoint),
         )
         try:
             await self.client.models.list(timeout=10)
-            logger.info("✅ OpenAI 引擎健康检查通过：成功连接到 API 端点并完成认证。")
+            logger.info("✅ OpenAI 引擎健康检查通过。")
         except AuthenticationError as e:
-            logger.error(
-                "OpenAI API 认证失败！请检查您的 API Key 是否正确或已过期。",
-                exc_info=False,
-            )
             error_msg = (
                 e.body.get("message", "无详细信息")
                 if isinstance(e.body, dict)
@@ -137,20 +128,13 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 f"OpenAI API Key 无效或权限不足: {error_msg}"
             ) from e
         except APIConnectionError as e:
-            logger.error(
-                "无法连接到 OpenAI API 端点！请检查网络或 TH_OPENAI_ENDPOINT 配置。",
-                exc_info=False,
-            )
             raise ConfigurationError(
                 f"无法连接到 OpenAI 端点 '{self.config.openai_endpoint}': {e}"
             ) from e
         except Exception as e:
-            logger.error("OpenAI 引擎初始化期间发生未知错误。", exc_info=True)
             raise ConfigurationError(f"OpenAI 引擎初始化失败: {e}") from e
 
     async def close(self) -> None:
-        """[实现] 安全地关闭引擎占用的 HTTP 客户端资源。"""
-        # --- 核心修正：is_closed 是一个方法, 不是属性 ---
         if not self.client.is_closed():
             try:
                 await self.client.close()
@@ -162,17 +146,14 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     )
                 else:
                     raise
-        else:
-            logger.debug("OpenAI 客户端已经关闭, 无需再次操作。")
 
-    async def _atranslate_one(
+    async def _execute_single_translation(
         self,
         text: str,
         target_lang: str,
         source_lang: Optional[str],
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """[实现] 异步翻译单个文本, 包含精细的错误处理。"""
         final_source_lang = cast(str, source_lang)
         prompt_template = context_config.get(
             "prompt_template", self.config.default_prompt_template
@@ -180,18 +161,23 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         model = context_config.get("model", self.config.openai_model)
         temperature = context_config.get("temperature", self.config.openai_temperature)
         system_prompt = context_config.get("system_prompt")
-        messages: list[dict[str, Any]] = []
+
+        # --- 最终修复：使用精确的类型 ---
+        messages: list[ChatCompletionMessageParam] = []
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            messages.append(
+                ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+            )
+
         prompt = prompt_template.format(
             text=text, source_lang=final_source_lang, target_lang=target_lang
         )
-        messages.append({"role": "user", "content": prompt})
+        messages.append(ChatCompletionUserMessageParam(role="user", content=prompt))
 
         try:
             response = await self.client.chat.completions.create(
                 model=model,
-                messages=messages,  # type: ignore
+                messages=messages,
                 temperature=temperature,
                 max_tokens=len(text.encode("utf-8")) * 3 + 150,
             )
@@ -202,35 +188,15 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 )
             return EngineSuccess(translated_text=translated_text.strip().strip('"'))
         except (RateLimitError, InternalServerError, APIConnectionError) as e:
-            logger.warning(
-                "OpenAI API 调用遇到可重试错误",
-                error_type=type(e).__name__,
-                error=str(e),
-            )
             return EngineError(error_message=str(e), is_retryable=True)
-        except (PermissionDeniedError, AuthenticationError) as e:
-            logger.error(
-                "OpenAI API 调用遇到不可重试的权限/认证错误",
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            error_msg = (
-                e.body.get("message", str(e)) if isinstance(e.body, dict) else str(e)
-            )
-            return EngineError(error_message=error_msg, is_retryable=False)
-        except APIStatusError as e:
-            logger.error("OpenAI API 调用出错", status_code=e.status_code, error=str(e))
+        except (PermissionDeniedError, AuthenticationError, APIStatusError) as e:
             error_msg = (
                 e.body.get("message", str(e)) if isinstance(e.body, dict) else str(e)
             )
             return EngineError(
-                error_message=f"API Error (HTTP {e.status_code}): {error_msg}",
-                is_retryable=False,
+                error_message=f"API Error: {error_msg}", is_retryable=False
             )
         except Exception as e:
-            logger.error(
-                "OpenAI 引擎发生未知错误", error_type=type(e).__name__, exc_info=True
-            )
             return EngineError(error_message=f"未知引擎错误: {e}", is_retryable=True)
 
 

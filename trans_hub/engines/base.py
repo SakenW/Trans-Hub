@@ -1,30 +1,42 @@
 # trans_hub/engines/base.py
-"""本模块定义了所有翻译引擎插件必须继承的抽象基类（ABC）。"""
+"""
+本模块定义了所有翻译引擎插件必须继承的抽象基类（ABC）。
+v3.0.2.dev 更新：引入速率限制和并发控制。
+"""
 
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Generic, Optional, TypeVar, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from trans_hub.rate_limiter import RateLimiter
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 _ConfigType = TypeVar("_ConfigType", bound="BaseEngineConfig")
 
 
 class BaseContextModel(BaseModel):
+    """引擎特定上下文的基础模型。"""
+
     pass
 
 
 class BaseEngineConfig(BaseModel):
-    rpm: Optional[int] = None
-    rps: Optional[int] = None
-    max_concurrency: Optional[int] = None
+    """所有引擎配置模型的基类，提供了通用的速率与并发控制选项。"""
+
+    rpm: Optional[int] = Field(
+        default=None, description="每分钟最大请求数 (Requests Per Minute)"
+    )
+    rps: Optional[int] = Field(
+        default=None, description="每秒最大请求数 (Requests Per Second)"
+    )
+    max_concurrency: Optional[int] = Field(default=None, description="最大并发请求数")
     max_batch_size: int = 50
 
 
 class BaseTranslationEngine(ABC, Generic[_ConfigType]):
-    """翻译引擎的纯异步抽象基类。"""
+    """翻译引擎的纯异步抽象基类，内置速率限制和并发控制。"""
 
     CONFIG_MODEL: type[_ConfigType]
     CONTEXT_MODEL: type[BaseContextModel] = BaseContextModel
@@ -34,21 +46,84 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
     def __init__(self, config: _ConfigType):
         self.config = config
+        self._rate_limiter: Optional[RateLimiter] = None
+        self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
+
+        # 基于配置初始化速率限制器
+        if config.rpm:
+            self._rate_limiter = RateLimiter(
+                refill_rate=config.rpm / 60, capacity=config.rpm
+            )
+        elif config.rps:
+            self._rate_limiter = RateLimiter(
+                refill_rate=config.rps, capacity=config.rps
+            )
+
+        # 基于配置初始化并发信号量
+        if config.max_concurrency:
+            self._concurrency_semaphore = asyncio.Semaphore(config.max_concurrency)
 
     async def initialize(self) -> None:
+        """引擎的异步初始化钩子，用于设置连接池等。"""
         pass
 
     async def close(self) -> None:
+        """引擎的异步关闭钩子，用于安全释放资源。"""
         pass
 
     @abstractmethod
+    async def _execute_single_translation(
+        self,
+        text: str,
+        target_lang: str,
+        source_lang: Optional[str],
+        context_config: dict[str, Any],
+    ) -> EngineBatchItemResult:
+        """
+        [子类实现] 真正执行单次翻译的逻辑。
+
+        此方法由 `_atranslate_one` 调用，并被并发和速率控制逻辑包裹。
+
+        Args:
+            text (str): 要翻译的单个文本。
+            target_lang (str): 目标语言代码。
+            source_lang (Optional[str]): 源语言代码。
+            context_config (dict[str, Any]): 已解析和验证的上下文配置字典。
+
+        Returns:
+            EngineBatchItemResult: 单次翻译的成功或失败结果。
+
+        """
+        ...
+
     async def _atranslate_one(
         self,
         text: str,
         target_lang: str,
         source_lang: Optional[str],
         context_config: dict[str, Any],
-    ) -> EngineBatchItemResult: ...
+    ) -> EngineBatchItemResult:
+        """
+        [模板方法] 执行单次翻译，应用并发和速率限制。
+
+        这是一个 final 方法，子类不应覆盖它。
+        """
+        # 如果定义了并发信号量，则在信号量保护下执行
+        if self._concurrency_semaphore:
+            async with self._concurrency_semaphore:
+                # 如果定义了速率限制器，则在执行前获取令牌
+                if self._rate_limiter:
+                    await self._rate_limiter.acquire()
+                return await self._execute_single_translation(
+                    text, target_lang, source_lang, context_config
+                )
+        else:
+            # 如果没有并发限制，只应用速率限制
+            if self._rate_limiter:
+                await self._rate_limiter.acquire()
+            return await self._execute_single_translation(
+                text, target_lang, source_lang, context_config
+            )
 
     def _get_context_config(
         self, context: Optional[BaseContextModel]
@@ -88,6 +163,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         results: list[
             Union[EngineBatchItemResult, BaseException]
         ] = await asyncio.gather(*tasks, return_exceptions=True)
+
         final_results: list[EngineBatchItemResult] = []
         for res in results:
             if isinstance(res, (EngineSuccess, EngineError)):
