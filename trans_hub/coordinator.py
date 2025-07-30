@@ -1,5 +1,8 @@
 # trans_hub/coordinator.py
-"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
+"""
+本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
+v3.0.1.dev 更新：修复了优雅停机中的竞态条件。
+"""
 
 import asyncio
 import json
@@ -38,16 +41,6 @@ class Coordinator:
         rate_limiter: Optional[RateLimiter] = None,
         max_concurrent_requests: Optional[int] = None,
     ) -> None:
-        """
-        初始化协调器。
-
-        Args:
-            config (TransHubConfig): Trans-Hub 的主配置对象。
-            persistence_handler (PersistenceHandler): 持久化层的实现实例。
-            rate_limiter (Optional[RateLimiter]): 可选的速率限制器。
-            max_concurrent_requests (Optional[int]): 最大并发请求数。
-
-        """
         discover_engines()
         self.config = config
         self.handler = persistence_handler
@@ -58,6 +51,11 @@ class Coordinator:
         self._request_semaphore: Optional[asyncio.Semaphore] = None
         if max_concurrent_requests and max_concurrent_requests > 0:
             self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+
+        self._shutting_down = False
+        self._active_processors = 0
+        self._processor_lock = asyncio.Lock()
+        self._shutdown_complete_event = asyncio.Event()
 
         logger.info(
             "协调器已创建，等待初始化。", available_engines=list(ENGINE_REGISTRY.keys())
@@ -73,13 +71,11 @@ class Coordinator:
 
     @property
     def active_engine(self) -> BaseTranslationEngine[Any]:
-        """获取当前活动的翻译引擎实例。"""
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> BaseTranslationEngine[Any]:
-        """惰性地获取或创建引擎实例。"""
         if engine_name not in self._engine_instances:
             logger.debug("首次请求，正在创建引擎实例...", engine_name=engine_name)
             engine_class = ENGINE_REGISTRY.get(engine_name)
@@ -89,11 +85,7 @@ class Coordinator:
                 )
 
             engine_config_data = getattr(self.config.engine_configs, engine_name, None)
-            if engine_config_data is None:
-                # 如果配置中完全没有这个引擎的 section，就用默认值创建
-                engine_config_instance = engine_class.CONFIG_MODEL()
-            else:
-                engine_config_instance = engine_config_data
+            engine_config_instance = engine_config_data or engine_class.CONFIG_MODEL()
 
             self._engine_instances[engine_name] = engine_class(
                 config=engine_config_instance
@@ -102,14 +94,12 @@ class Coordinator:
         return self._engine_instances[engine_name]
 
     def switch_engine(self, engine_name: str) -> None:
-        """切换活动的翻译引擎。"""
         if engine_name == self.config.active_engine.value:
             return
 
         if engine_name not in ENGINE_REGISTRY:
             raise EngineNotFoundError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
 
-        # 在切换时触发惰性加载和验证
         new_engine_instance = self._get_or_create_engine_instance(engine_name)
         if new_engine_instance.REQUIRES_SOURCE_LANG and not self.config.source_lang:
             raise ConfigurationError(f"切换失败：引擎 '{engine_name}' 需要提供源语言。")
@@ -118,16 +108,9 @@ class Coordinator:
         logger.info("成功切换活动引擎。", new_engine=self.config.active_engine.value)
 
     async def initialize(self) -> None:
-        """
-        初始化协调器及其所有组件。
-        这将验证活动引擎的配置并连接数据库。
-        """
         if self.initialized:
             return
-
         logger.info("协调器初始化开始...")
-
-        # 核心修复：只在初始化时验证活动引擎的配置
         try:
             active_engine_instance = self.active_engine
             if (
@@ -143,28 +126,26 @@ class Coordinator:
                 engine=self.config.active_engine.value,
                 exc_info=True,
             )
-            raise e  # 重新抛出异常
-
+            raise e
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
-
-        # 核心修复：正确地 await 协程
         init_tasks = [
             instance.initialize() for instance in self._engine_instances.values()
         ]
         if init_tasks:
             await asyncio.gather(*init_tasks)
-
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
 
-    # ... (其余方法保持不变) ...
     async def process_pending_translations(
         self,
         target_lang: str,
         batch_size: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
+        if self._shutting_down:
+            return
+
         active_engine = self.active_engine
         engine_batch_policy = getattr(
             active_engine.config, "max_batch_size", self.config.batch_size
@@ -181,24 +162,71 @@ class Coordinator:
         )
 
         async for batch in content_batches:
+            if self._shutting_down:
+                logger.warning("检测到停机信号，翻译工作进程将不再处理新批次。")
+                break
+
             if not batch:
                 continue
+
             batch.sort(key=lambda item: item.context_id or "")
             for _context_id, items_group_iter in groupby(
                 batch, key=lambda item: item.context_id
             ):
                 items_group = list(items_group_iter)
-                batch_results = await self.processing_policy.process_batch(
-                    items_group, target_lang, self.processing_context, active_engine
+
+                async with self._processor_lock:
+                    self._active_processors += 1
+
+                try:
+                    batch_results = await self.processing_policy.process_batch(
+                        items_group, target_lang, self.processing_context, active_engine
+                    )
+                    await self.handler.save_translations(batch_results)
+                    for result in batch_results:
+                        if (
+                            result.status == TranslationStatus.TRANSLATED
+                            and result.business_id
+                        ):
+                            await self.touch_jobs([result.business_id])
+                        yield result
+                finally:
+                    async with self._processor_lock:
+                        self._active_processors -= 1
+                        if self._shutting_down and self._active_processors == 0:
+                            self._shutdown_complete_event.set()
+
+    async def request(
+        self,
+        target_langs: list[str],
+        text_content: str,
+        business_id: Optional[str] = None,
+        context: Optional[dict[str, Any]] = None,
+        source_lang: Optional[str] = None,
+        force_retranslate: bool = False,
+    ) -> None:
+        if self._shutting_down:
+            logger.warning("系统正在停机，已拒绝新的翻译请求。")
+            return
+        if self._request_semaphore:
+            async with self._request_semaphore:
+                await self._request_internal(
+                    target_langs,
+                    text_content,
+                    business_id,
+                    context,
+                    source_lang,
+                    force_retranslate,
                 )
-                await self.handler.save_translations(batch_results)
-                for result in batch_results:
-                    if (
-                        result.status == TranslationStatus.TRANSLATED
-                        and result.business_id
-                    ):
-                        await self.touch_jobs([result.business_id])
-                    yield result
+        else:
+            await self._request_internal(
+                target_langs,
+                text_content,
+                business_id,
+                context,
+                source_lang,
+                force_retranslate,
+            )
 
     async def _request_internal(
         self,
@@ -222,35 +250,6 @@ class Coordinator:
             force_retranslate=force_retranslate,
         )
 
-    async def request(
-        self,
-        target_langs: list[str],
-        text_content: str,
-        business_id: Optional[str] = None,
-        context: Optional[dict[str, Any]] = None,
-        source_lang: Optional[str] = None,
-        force_retranslate: bool = False,
-    ) -> None:
-        if self._request_semaphore:
-            async with self._request_semaphore:
-                await self._request_internal(
-                    target_langs,
-                    text_content,
-                    business_id,
-                    context,
-                    source_lang,
-                    force_retranslate,
-                )
-        else:
-            await self._request_internal(
-                target_langs,
-                text_content,
-                business_id,
-                context,
-                source_lang,
-                force_retranslate,
-            )
-
     async def touch_jobs(self, business_ids: list[str]) -> None:
         if not business_ids:
             return
@@ -269,7 +268,6 @@ class Coordinator:
             target_lang=target_lang,
             context_hash=context_hash,
         )
-
         cached_text = await self.cache.get_cached_result(request)
         if cached_text:
             return TranslationResult(
@@ -283,7 +281,6 @@ class Coordinator:
                 context_hash=context_hash,
                 business_id=None,
             )
-
         db_result = await self.handler.get_translation(
             text_content, target_lang, context
         )
@@ -300,11 +297,31 @@ class Coordinator:
         return await self.handler.garbage_collect(retention_days=days, dry_run=dry_run)
 
     async def close(self) -> None:
-        if self.initialized:
-            close_tasks = [
-                instance.close() for instance in self._engine_instances.values()
-            ]
-            if close_tasks:
-                await asyncio.gather(*close_tasks)
-            await self.handler.close()
-            self.initialized = False
+        if not self.initialized:
+            return
+
+        logger.info("开始优雅停机...")
+        async with self._processor_lock:
+            self._shutting_down = True
+            active_count = self._active_processors
+
+        if active_count > 0:
+            logger.info(f"等待 {active_count} 个正在进行的批次处理完成...")
+            try:
+                await asyncio.wait_for(
+                    self._shutdown_complete_event.wait(), timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                logger.error("优雅停机超时！部分任务可能未完成。")
+
+        logger.info("所有批次处理完成，正在关闭底层资源...")
+        # 先关闭引擎实例
+        close_tasks = [instance.close() for instance in self._engine_instances.values()]
+        if close_tasks:
+            await asyncio.gather(*close_tasks)
+        # 等待一小段时间确保所有异步操作完成
+        await asyncio.sleep(0.5)
+        # 最后关闭持久化处理器
+        await self.handler.close()
+        self.initialized = False
+        logger.info("优雅停机完成。")
