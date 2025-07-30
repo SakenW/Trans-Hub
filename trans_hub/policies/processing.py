@@ -1,8 +1,5 @@
-# trans_hub/policies.py
-"""
-本模块定义并实现了具体的翻译处理策略。
-v3.0 更新：适配 v3.0 Schema 和新的 ContentItem DTO，并修复了所有 mypy --strict 错误。
-"""
+# trans_hub/policies/processing.py
+"""本模块定义并实现了具体的翻译处理策略。"""
 
 import asyncio
 from typing import Any, Optional, Protocol, Union
@@ -33,7 +30,21 @@ class ProcessingPolicy(Protocol):
         target_lang: str,
         context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-    ) -> list[TranslationResult]: ...
+    ) -> list[TranslationResult]:
+        """
+        异步处理一批翻译任务。
+
+        Args:
+            batch (list[ContentItem]): 从持久化层获取的待处理内容项列表。
+            target_lang (str): 目标语言代码。
+            context (ProcessingContext): 包含所有依赖项的处理上下文。
+            active_engine (BaseTranslationEngine[Any]): 当前活动的翻译引擎实例。
+
+        Returns:
+            list[TranslationResult]: 处理后的一批翻译结果。
+
+        """
+        ...
 
 
 class DefaultProcessingPolicy(ProcessingPolicy):
@@ -255,6 +266,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
         if final_error:
             return TranslationResult(
+                translation_id=item.translation_id,
                 original_content=item.value,
                 translated_content=None,
                 target_lang=target_lang,
@@ -267,6 +279,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
         if cached_text is not None:
             return TranslationResult(
+                translation_id=item.translation_id,
                 original_content=item.value,
                 translated_content=cached_text,
                 target_lang=target_lang,
@@ -278,6 +291,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
         if isinstance(engine_output, EngineSuccess):
             return TranslationResult(
+                translation_id=item.translation_id,
                 original_content=item.value,
                 translated_content=engine_output.translated_text,
                 target_lang=target_lang,

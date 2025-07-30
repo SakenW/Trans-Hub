@@ -1,27 +1,36 @@
 # tests/unit/test_policies.py
-"""
-针对 `trans_hub.policies` 的单元测试。
-v3.0 更新：完全适配 v3.0 Schema 和新的 ContentItem DTO。
-"""
+"""测试处理策略 (Processing Policies) 的单元测试。"""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from trans_hub.config import RetryPolicyConfig, TransHubConfig
 from trans_hub.context import ProcessingContext
 from trans_hub.interfaces import PersistenceHandler
 from trans_hub.policies import DefaultProcessingPolicy
-from trans_hub.types import ContentItem, EngineSuccess, TranslationStatus
+from trans_hub.types import (
+    ContentItem,
+    EngineSuccess,
+    TranslationStatus,
+)
 
 
-# --- 核心修正：恢复所有 fixture 定义 ---
 @pytest.fixture
 def mock_config() -> MagicMock:
-    mock = MagicMock()
-    mock.retry_policy.max_attempts = 2
-    mock.retry_policy.initial_backoff = 0.01
+    """创建一个更精确的、结构完整的 TransHubConfig mock 对象。"""
+    mock = MagicMock(spec=TransHubConfig)
+
+    mock_retry_policy = MagicMock(spec=RetryPolicyConfig)
+    mock_retry_policy.max_attempts = 2
+    mock_retry_policy.initial_backoff = 0.01
+    mock.retry_policy = mock_retry_policy
+
+    mock_active_engine_enum = MagicMock()
+    mock_active_engine_enum.value = "debug"
+    mock.active_engine = mock_active_engine_enum
+
     mock.source_lang = "en"
-    mock.active_engine.value = "debug"
     return mock
 
 
@@ -59,7 +68,7 @@ def mock_processing_context(
         config=mock_config,
         handler=mock_handler,
         cache=mock_cache,
-        rate_limiter=AsyncMock(),
+        rate_limiter=None,
     )
 
 

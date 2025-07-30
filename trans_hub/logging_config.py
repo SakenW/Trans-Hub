@@ -1,83 +1,179 @@
 # trans_hub/logging_config.py
 """
-本模块负责集中配置项目的日志系统。
-
-它使用 structlog 实现结构化的、上下文感知的日志记录，支持 JSON 和控制台两种输出格式。
-此版本经过优化，可在控制台模式下启用“pretty exceptions”功能。
+本模块负责集中配置项目的日志系统，并与 Rich 库集成以提供美观的、信息块式的控制台输出。
+此版本采用自定义的智能混合渲染器，并进行了最终的美学与健壮性修复。
 """
 
 import logging
-import sys
-from typing import Literal, Union
+from collections.abc import MutableMapping  # <-- 最终修复：导入 MutableMapping
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+)
 
 import structlog
-from structlog.dev import ConsoleRenderer
-from structlog.processors import JSONRenderer
 from structlog.typing import Processor
 
-# 使用 contextvars 来安全地在异步环境中传递上下文
-structlog.contextvars.bind_contextvars(correlation_id=None)
+if TYPE_CHECKING:
+    from rich.console import Console, Group, RenderableType
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+else:
+    try:
+        from rich.console import Console, Group, RenderableType
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+    except ImportError:
+        Console, Group, Panel, Table, Text, RenderableType = (None,) * 6
+
+
+class HybridPanelRenderer:
+    """一个智能的 structlog 处理器，根据日志的重要程度选择渲染风格，并进行了美学优化。"""
+
+    def __init__(self, kv_truncate_at: int = 80):
+        self._console = Console()
+        self._kv_truncate_at = kv_truncate_at
+        self._level_styles = {
+            "INFO": ("green", "INFO     "),
+            "WARNING": ("yellow", "WARNING  "),
+            "ERROR": ("bold red", "ERROR    "),
+            "CRITICAL": ("bold magenta", "CRITICAL "),
+            "DEBUG": ("blue", "DEBUG    "),
+        }
+
+    # --- 最终修复：精确匹配 Processor 类型 ---
+    def __call__(
+        self, logger: Any, name: str, event_dict: MutableMapping[str, Any]
+    ) -> str:
+        event = str(event_dict.pop("event", "")).strip()
+        if not event:
+            return ""
+
+        timestamp = event_dict.pop("timestamp", "")
+        level = event_dict.pop("level", "info").upper()
+        logger_name = event_dict.pop("logger", "unknown")
+
+        border_style, level_text = self._level_styles.get(level, ("default", level))
+
+        if level in ("WARNING", "ERROR", "CRITICAL") or event_dict:
+            return self._render_as_panel(
+                timestamp, level_text, border_style, logger_name, event, event_dict
+            )
+        else:
+            return self._render_as_line(
+                timestamp, level_text, border_style, logger_name, event
+            )
+
+    def _render_as_panel(
+        self,
+        timestamp: str,
+        level_text: str,
+        border_style: str,
+        logger_name: str,
+        event: str,
+        kv: MutableMapping[str, Any],
+    ) -> str:
+        title = Text.from_markup(
+            f"[{border_style}]{level_text}[/] [cyan dim]({logger_name})[/]"
+        )
+        renderables: list[RenderableType] = [Text(event)]
+        if kv:
+            kv_table = Table(
+                show_header=False, show_edge=False, box=None, padding=(0, 1)
+            )
+            kv_table.add_column(style="dim", width=20)
+            kv_table.add_column(style="bright_white")
+            for key, value in sorted(kv.items()):
+                value_repr = repr(value)
+                if len(value_repr) > self._kv_truncate_at:
+                    value_repr = value_repr[: self._kv_truncate_at] + "..."
+                kv_table.add_row(f"  {key}", value_repr)
+            renderables.append(kv_table)
+
+        render_group = Group(*renderables)
+
+        with self._console.capture() as capture:
+            self._console.print(
+                Panel(
+                    render_group,
+                    title=title,
+                    border_style=border_style,
+                    subtitle=Text(str(timestamp), style="dim"),
+                    subtitle_align="right",
+                    expand=False,
+                )
+            )
+        return capture.get().rstrip()
+
+    def _render_as_line(
+        self, timestamp: str, level_text: str, style: str, logger_name: str, event: str
+    ) -> str:
+        line = Text()
+        line.append(str(timestamp), style="dim")
+        line.append(" ")
+        line.append(level_text, style=style)
+        line.append(" ")
+        line.append(event)
+        line.append(
+            " ",
+        )
+        line.append(f"({logger_name})", style="cyan dim")
+
+        with self._console.capture() as capture:
+            self._console.print(line)
+        return capture.get().rstrip()
 
 
 def setup_logging(
     log_level: str = "INFO", log_format: Literal["json", "console"] = "console"
 ) -> None:
-    """
-    配置整个应用的日志系统。
+    if log_format == "console" and Console is None:
+        raise ImportError(
+            "要使用 'console' 日志格式，请安装 'rich' 库: pip install rich"
+        )
 
-    此函数应在应用启动时尽早调用。
-
-    参数:
-        log_level: 日志级别 (例如 "INFO", "DEBUG")。
-        log_format: 日志输出格式，'console' 适用于开发，'json' 适用于生产。
-    """
-    shared_processors: list[Processor] = [
+    processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.UnicodeDecoder(),
+        structlog.processors.format_exc_info,
     ]
 
-    # --- 核心修正：首先确定最终的渲染器 ---
-    renderer: Union[JSONRenderer, ConsoleRenderer]
-    if log_format == "json":
-        # JSON 格式需要一个额外的处理器来将异常信息转换为字符串
-        shared_processors.append(structlog.processors.format_exc_info)
-        renderer = structlog.processors.JSONRenderer()
+    if log_format == "console":
+        processors.append(HybridPanelRenderer())
     else:
-        # ConsoleRenderer 可以直接处理异常信息，实现 "pretty exceptions"
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
+        processors[3] = structlog.processors.TimeStamper(fmt="iso", utc=True)
+        processors.append(structlog.processors.JSONRenderer())
 
-    # structlog 主日志记录器的配置
     structlog.configure(
-        processors=shared_processors
-        + [
-            # 这个特殊的处理器为标准库 logging 的集成做准备
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
+        processors=processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    # 标准库 logging 的配置，用于捕获来自其他库的日志
-    handler = logging.StreamHandler(sys.stdout)
-    # --- 核心修正：为 ProcessorFormatter 提供最终的渲染器 ---
-    # 这个 formatter 会将标准日志记录传递给 shared_processors，
-    # 然后由我们指定的 renderer 进行最终渲染。
-    formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_chain=shared_processors,
-        processor=renderer,
-    )
-    handler.setFormatter(formatter)
+    handler = logging.StreamHandler()
+
+    class PassthroughFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            return str(record.getMessage())
+
+    handler.setFormatter(PassthroughFormatter())
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(log_level.upper())
 
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
     s_logger = structlog.get_logger("trans_hub.logging_config")
-    s_logger.info("日志系统已配置完成。", level=log_level.upper(), format=log_format)
+    s_logger.info(
+        "日志系统已配置完成。", log_format=log_format, log_level=log_level.upper()
+    )

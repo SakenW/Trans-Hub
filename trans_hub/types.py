@@ -1,7 +1,7 @@
 # trans_hub/types.py
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
-v3.0 更新：所有实体ID已从 int 切换为 str (UUID)，并重构了 ContentItem。
+v3.0.dev 更新：为 TranslationResult 添加 translation_id 以优化持久化。
 """
 
 from enum import Enum
@@ -49,6 +49,10 @@ class TranslationRequest(BaseModel):
 class TranslationResult(BaseModel):
     """由 Coordinator 返回给最终用户的综合结果对象。"""
 
+    # --- 核心变更：添加 translation_id ---
+    translation_id: str
+    # ------------------------------------
+
     original_content: str
     translated_content: Optional[str] = None
     target_lang: str
@@ -61,6 +65,16 @@ class TranslationResult(BaseModel):
 
     @model_validator(mode="after")
     def check_consistency(self) -> "TranslationResult":
+        """
+        验证模型状态的一致性。
+
+        Returns:
+            TranslationResult: 验证后的模型实例。
+
+        Raises:
+            ValueError: 如果状态与内容不一致。
+
+        """
         if (
             self.status == TranslationStatus.TRANSLATED
             and self.translated_content is None

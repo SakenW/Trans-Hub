@@ -1,8 +1,5 @@
 # trans_hub/coordinator.py
-"""
-本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
-v3.0 更新：适配 v3.0 Schema 和新的持久化层接口。
-"""
+"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
 
 import asyncio
 import json
@@ -12,22 +9,21 @@ from typing import Any, Optional
 
 import structlog
 
-from trans_hub.cache import TranslationCache
-from trans_hub.config import EngineName, TransHubConfig
-from trans_hub.context import ProcessingContext
-from trans_hub.engine_registry import ENGINE_REGISTRY, discover_engines
-from trans_hub.engines.base import BaseTranslationEngine
-from trans_hub.engines.meta import ENGINE_CONFIG_REGISTRY
-from trans_hub.exceptions import ConfigurationError, EngineNotFoundError
-from trans_hub.interfaces import PersistenceHandler
-from trans_hub.policies import DefaultProcessingPolicy, ProcessingPolicy
-from trans_hub.rate_limiter import RateLimiter
-from trans_hub.types import (
+from .cache import TranslationCache
+from .config import EngineName, TransHubConfig
+from .context import ProcessingContext
+from .engine_registry import ENGINE_REGISTRY, discover_engines
+from .engines.base import BaseTranslationEngine
+from .exceptions import ConfigurationError, EngineNotFoundError
+from .interfaces import PersistenceHandler
+from .policies import DefaultProcessingPolicy, ProcessingPolicy
+from .rate_limiter import RateLimiter
+from .types import (
     TranslationRequest,
     TranslationResult,
     TranslationStatus,
 )
-from trans_hub.utils import get_context_hash
+from .utils import get_context_hash
 
 logger = structlog.get_logger(__name__)
 
@@ -42,6 +38,16 @@ class Coordinator:
         rate_limiter: Optional[RateLimiter] = None,
         max_concurrent_requests: Optional[int] = None,
     ) -> None:
+        """
+        初始化协调器。
+
+        Args:
+            config (TransHubConfig): Trans-Hub 的主配置对象。
+            persistence_handler (PersistenceHandler): 持久化层的实现实例。
+            rate_limiter (Optional[RateLimiter]): 可选的速率限制器。
+            max_concurrent_requests (Optional[int]): 最大并发请求数。
+
+        """
         discover_engines()
         self.config = config
         self.handler = persistence_handler
@@ -52,27 +58,11 @@ class Coordinator:
         self._request_semaphore: Optional[asyncio.Semaphore] = None
         if max_concurrent_requests and max_concurrent_requests > 0:
             self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+
         logger.info(
-            "协调器初始化开始...", available_engines=list(ENGINE_REGISTRY.keys())
+            "协调器已创建，等待初始化。", available_engines=list(ENGINE_REGISTRY.keys())
         )
-        for engine_name_str, config_class in ENGINE_CONFIG_REGISTRY.items():
-            if (
-                not hasattr(self.config.engine_configs, engine_name_str)
-                or getattr(self.config.engine_configs, engine_name_str) is None
-            ):
-                instance = config_class()
-                setattr(self.config.engine_configs, engine_name_str, instance)
-        if self.config.active_engine.value not in ENGINE_REGISTRY:
-            raise EngineNotFoundError(
-                f"指定的活动引擎 '{self.config.active_engine.value}' 不可用。"
-            )
-        active_engine_instance = self._get_or_create_engine_instance(
-            self.config.active_engine.value
-        )
-        if active_engine_instance.REQUIRES_SOURCE_LANG and not self.config.source_lang:
-            raise ConfigurationError(
-                f"活动引擎 '{self.config.active_engine.value}' 需要提供源语言。"
-            )
+
         self.processing_context = ProcessingContext(
             config=self.config,
             handler=self.handler,
@@ -80,55 +70,95 @@ class Coordinator:
             rate_limiter=self.rate_limiter,
         )
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
-        logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
 
     @property
     def active_engine(self) -> BaseTranslationEngine[Any]:
+        """获取当前活动的翻译引擎实例。"""
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> BaseTranslationEngine[Any]:
+        """惰性地获取或创建引擎实例。"""
         if engine_name not in self._engine_instances:
+            logger.debug("首次请求，正在创建引擎实例...", engine_name=engine_name)
             engine_class = ENGINE_REGISTRY.get(engine_name)
             if not engine_class:
                 raise EngineNotFoundError(
                     f"引擎 '{engine_name}' 未在引擎注册表中找到。"
                 )
-            engine_config_instance = getattr(
-                self.config.engine_configs, engine_name, None
-            )
-            if not engine_config_instance:
-                raise ConfigurationError(
-                    f"未能为引擎 '{engine_name}' 创建或找到配置实例。"
-                )
+
+            engine_config_data = getattr(self.config.engine_configs, engine_name, None)
+            if engine_config_data is None:
+                # 如果配置中完全没有这个引擎的 section，就用默认值创建
+                engine_config_instance = engine_class.CONFIG_MODEL()
+            else:
+                engine_config_instance = engine_config_data
+
             self._engine_instances[engine_name] = engine_class(
                 config=engine_config_instance
             )
+            logger.info("引擎实例创建成功。", engine_name=engine_name)
         return self._engine_instances[engine_name]
 
     def switch_engine(self, engine_name: str) -> None:
+        """切换活动的翻译引擎。"""
         if engine_name == self.config.active_engine.value:
             return
-        logger.info("正在切换活动引擎...", new_engine=engine_name)
+
         if engine_name not in ENGINE_REGISTRY:
             raise EngineNotFoundError(f"尝试切换至一个不可用的引擎: '{engine_name}'")
-        self._get_or_create_engine_instance(engine_name)
+
+        # 在切换时触发惰性加载和验证
+        new_engine_instance = self._get_or_create_engine_instance(engine_name)
+        if new_engine_instance.REQUIRES_SOURCE_LANG and not self.config.source_lang:
+            raise ConfigurationError(f"切换失败：引擎 '{engine_name}' 需要提供源语言。")
+
         self.config.active_engine = EngineName(engine_name)
-        logger.info(f"成功切换活动引擎至: '{self.config.active_engine.value}'。")
+        logger.info("成功切换活动引擎。", new_engine=self.config.active_engine.value)
 
     async def initialize(self) -> None:
+        """
+        初始化协调器及其所有组件。
+        这将验证活动引擎的配置并连接数据库。
+        """
         if self.initialized:
             return
+
+        logger.info("协调器初始化开始...")
+
+        # 核心修复：只在初始化时验证活动引擎的配置
+        try:
+            active_engine_instance = self.active_engine
+            if (
+                active_engine_instance.REQUIRES_SOURCE_LANG
+                and not self.config.source_lang
+            ):
+                raise ConfigurationError(
+                    f"活动引擎 '{self.config.active_engine.value}' 需要提供源语言。"
+                )
+        except Exception as e:
+            logger.error(
+                "初始化活动引擎时失败。",
+                engine=self.config.active_engine.value,
+                exc_info=True,
+            )
+            raise e  # 重新抛出异常
+
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
-        init_tasks = [
-            self._get_or_create_engine_instance(name).initialize()
-            for name in ENGINE_REGISTRY.keys()
-        ]
-        await asyncio.gather(*init_tasks)
-        self.initialized = True
 
+        # 核心修复：正确地 await 协程
+        init_tasks = [
+            instance.initialize() for instance in self._engine_instances.values()
+        ]
+        if init_tasks:
+            await asyncio.gather(*init_tasks)
+
+        self.initialized = True
+        logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
+
+    # ... (其余方法保持不变) ...
     async def process_pending_translations(
         self,
         target_lang: str,
@@ -142,12 +172,14 @@ class Coordinator:
         final_batch_size = min(
             batch_size or self.config.batch_size, engine_batch_policy
         )
+
         content_batches = self.handler.stream_translatable_items(
             lang_code=target_lang,
             statuses=[TranslationStatus.PENDING, TranslationStatus.FAILED],
             batch_size=final_batch_size,
             limit=limit,
         )
+
         async for batch in content_batches:
             if not batch:
                 continue
@@ -178,7 +210,7 @@ class Coordinator:
         force_retranslate: bool,
     ) -> None:
         context_hash = get_context_hash(context)
-        context_json = json.dumps(context) if context else None
+        context_json = json.dumps(context, ensure_ascii=False) if context else None
         await self.handler.ensure_pending_translations(
             text_content=text_content,
             target_langs=target_langs,
@@ -220,7 +252,6 @@ class Coordinator:
             )
 
     async def touch_jobs(self, business_ids: list[str]) -> None:
-        """轻量级地“报活”一批业务ID，以防止其被垃圾回收。"""
         if not business_ids:
             return
         await self.handler.touch_jobs(business_ids)
@@ -238,9 +269,11 @@ class Coordinator:
             target_lang=target_lang,
             context_hash=context_hash,
         )
+
         cached_text = await self.cache.get_cached_result(request)
         if cached_text:
             return TranslationResult(
+                translation_id="from-mem-cache",
                 original_content=text_content,
                 translated_content=cached_text,
                 target_lang=target_lang,
@@ -250,6 +283,7 @@ class Coordinator:
                 context_hash=context_hash,
                 business_id=None,
             )
+
         db_result = await self.handler.get_translation(
             text_content, target_lang, context
         )
@@ -270,6 +304,7 @@ class Coordinator:
             close_tasks = [
                 instance.close() for instance in self._engine_instances.values()
             ]
-            await asyncio.gather(*close_tasks)
+            if close_tasks:
+                await asyncio.gather(*close_tasks)
             await self.handler.close()
             self.initialized = False
