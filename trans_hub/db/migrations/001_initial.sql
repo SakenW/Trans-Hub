@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS th_meta (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO th_meta (key, value) VALUES ('schema_version', '3');
+INSERT OR IGNORE INTO th_meta (key, value) VALUES ('schema_version', '1');
 
 -- 2. 上下文表
 CREATE TABLE IF NOT EXISTS th_contexts (
