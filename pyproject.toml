@@ -24,6 +24,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+[tool.poetry.scripts]
+trans-hub = "trans_hub.cli:app"
+
 # --- 核心依赖 (保持最精简) ---
 [tool.poetry.dependencies]
 python = ">=3.9, <3.14"
@@ -55,12 +58,12 @@ questionary = "^2.1.0"
 translators = ["translators"]
 openai = ["openai", "httpx"]
 metrics = ["prometheus-client"]
-cli = ["typer", "rich"]
+cli = ["typer", "rich", "questionary"]
 api = ["fastapi", "uvicorn"]
-tools = ["typer", "rich", "markdown-it-py", "openai", "httpx"]
+tools = ["typer", "rich", "markdown-it-py", "openai", "httpx", "questionary"]
 all = [
     "translators", "openai", "httpx", "prometheus-client", 
-    "typer", "rich", "fastapi", "uvicorn", "markdown-it-py"
+    "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary"
 ]
 
 

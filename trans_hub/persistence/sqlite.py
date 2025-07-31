@@ -30,7 +30,8 @@ logger = structlog.get_logger(__name__)
 
 
 class SQLitePersistenceHandler(PersistenceHandler):
-    # ... (所有其他方法都保持不变，我将只粘贴 garbage_collect 和它之前的方法以确认上下文) ...
+    # ... (所有其他方法都保持不变，我将只粘贴 garbage_collect 和它之前的方法
+    # 以确认 上下文) ...
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
@@ -117,7 +118,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 else:
                     context_id = str(uuid.uuid4())
                     await cursor.execute(
-                        "INSERT INTO th_contexts (id, context_hash, value) VALUES (?, ?, ?)",
+                        "INSERT INTO th_contexts (id, context_hash, value) "
+                        "VALUES (?, ?, ?)",
                         (context_id, context_hash, context_json),
                     )
 
@@ -141,7 +143,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     )
                 else:
                     await cursor.execute(
-                        "INSERT INTO th_jobs (id, business_id, content_id, context_id, last_requested_at) VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO th_jobs (id, business_id, content_id, context_id, "
+                        "last_requested_at) VALUES (?, ?, ?, ?, ?)",
                         (
                             str(uuid.uuid4()),
                             business_id,
@@ -152,7 +155,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     )
 
             if force_retranslate:
-                update_sql = "UPDATE th_translations SET status = ?, engine_version = ?, error = NULL WHERE content_id = ? {} AND lang_code IN ({})".format(
+                update_sql = (
+                    "UPDATE th_translations SET status = ?, engine_version = ?, "
+                    "error = NULL "
+                    "WHERE content_id = ? {} AND lang_code IN ({})"
+                ).format(
                     "AND context_id = ?" if context_id else "AND context_id IS NULL",
                     ",".join("?" * len(target_langs)),
                 )
@@ -166,7 +173,12 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 update_params.extend(target_langs)
                 await cursor.execute(update_sql, update_params)
 
-            insert_sql = "INSERT OR IGNORE INTO th_translations (id, content_id, context_id, lang_code, status, source_lang_code, engine_version) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            insert_sql = (
+                "INSERT OR IGNORE INTO th_translations "
+                "(id, content_id, context_id, lang_code, status, "
+                "source_lang_code, engine_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
             params_to_insert = [
                 (
                     str(uuid.uuid4()),
@@ -201,7 +213,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
             batch_ids: list[str] = []
             async with self._transaction() as cursor:
                 placeholders = ",".join("?" for _ in status_values)
-                find_ids_sql = f"SELECT id FROM th_translations WHERE lang_code = ? AND status IN ({placeholders}) ORDER BY last_updated_at ASC LIMIT ?"
+                find_ids_sql = (
+                    f"SELECT id FROM th_translations "
+                    f"WHERE lang_code = ? AND status IN ({placeholders}) "
+                    f"ORDER BY last_updated_at ASC LIMIT ?"
+                )
                 params = [lang_code] + list(status_values) + [current_batch_size]
                 await cursor.execute(find_ids_sql, params)
                 batch_rows_ids = await cursor.fetchall()
@@ -209,7 +225,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     break
                 batch_ids = [row["id"] for row in batch_rows_ids]
                 id_placeholders = ",".join("?" for _ in batch_ids)
-                update_sql = f"UPDATE th_translations SET status = ?, last_updated_at = ? WHERE id IN ({id_placeholders})"
+                update_sql = (
+                    f"UPDATE th_translations SET status = ?, "
+                    f"last_updated_at = ? WHERE id IN ({id_placeholders})"
+                )
                 now_iso = datetime.now(timezone.utc).isoformat()
                 await cursor.execute(
                     update_sql,
@@ -218,12 +237,15 @@ class SQLitePersistenceHandler(PersistenceHandler):
             id_placeholders_for_select = ",".join("?" for _ in batch_ids)
             find_details_sql = f"""
                 SELECT
-                    tr.id as translation_id, j.business_id, tr.content_id, tr.context_id,
+                    tr.id as translation_id, j.business_id,
+                    tr.content_id, tr.context_id,
                     c.value, ctx.value as context
                 FROM th_translations tr
                 JOIN th_content c ON tr.content_id = c.id
                 LEFT JOIN th_contexts ctx ON tr.context_id = ctx.id
-                LEFT JOIN th_jobs j ON tr.content_id = j.content_id AND COALESCE(tr.context_id, '') = COALESCE(j.context_id, '')
+                LEFT JOIN th_jobs j ON
+                    tr.content_id = j.content_id AND
+                    COALESCE(tr.context_id, '') = COALESCE(j.context_id, '')
                 WHERE tr.id IN ({id_placeholders_for_select})
                 GROUP BY tr.id
             """
@@ -248,7 +270,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def save_translations(self, results: list[TranslationResult]) -> None:
         if not results:
             return
-        params_to_update = [
+        params_to_update: list[dict[str, Any]] = [
             {
                 "id": res.translation_id,
                 "status": res.status.value,
@@ -328,10 +350,15 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def get_business_id_for_job(
         self, content_id: str, context_id: Optional[str]
     ) -> Optional[str]:
-        sql = "SELECT business_id FROM th_jobs WHERE content_id = ? AND COALESCE(context_id, '') = COALESCE(?, '') ORDER BY last_requested_at DESC LIMIT 1"
+        sql = (
+            "SELECT business_id FROM th_jobs "
+            "WHERE content_id = ? AND "
+            "COALESCE(context_id, '') = COALESCE(?, '') "
+            "ORDER BY last_requested_at DESC LIMIT 1"
+        )
         async with self.connection.execute(sql, (content_id, context_id)) as cursor:
             row = await cursor.fetchone()
-        return row["business_id"] if row else None
+        return cast(Optional[str], row["business_id"] if row else None)
 
     async def touch_jobs(self, business_ids: list[str]) -> None:
         if not business_ids:
@@ -339,7 +366,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as cursor:
             placeholders = ",".join("?" for _ in business_ids)
             now_iso = datetime.now(timezone.utc).isoformat()
-            sql = f"UPDATE th_jobs SET last_requested_at = ? WHERE business_id IN ({placeholders})"
+            sql = (
+                f"UPDATE th_jobs SET last_requested_at = ? "
+                f"WHERE business_id IN ({placeholders})"
+            )
             await cursor.execute(sql, [now_iso] + business_ids)
 
     async def garbage_collect(
@@ -358,7 +388,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 "SELECT id FROM th_jobs WHERE last_requested_at < ?",
                 (cutoff_iso,),
             )
-            expired_job_ids = [row[0] for row in await cursor.fetchall()]
+            expired_job_ids = [cast(str, row[0]) for row in await cursor.fetchall()]
             stats["deleted_jobs"] = len(expired_job_ids)
             if not dry_run and expired_job_ids:
                 placeholders = ",".join("?" * len(expired_job_ids))
@@ -367,10 +397,14 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
 
             await cursor.execute("""
-                SELECT c.id FROM th_content c WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
+                SELECT c.id FROM th_content c
+                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                AND NOT EXISTS (
+                    SELECT 1 FROM th_translations t
+                    WHERE t.content_id = c.id
+                )
             """)
-            orphan_content_ids = [row[0] for row in await cursor.fetchall()]
+            orphan_content_ids = [cast(str, row[0]) for row in await cursor.fetchall()]
             stats["deleted_content"] = len(orphan_content_ids)
             if not dry_run and orphan_content_ids:
                 placeholders = ",".join("?" * len(orphan_content_ids))
@@ -380,10 +414,14 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
 
             await cursor.execute("""
-                SELECT ctx.id FROM th_contexts ctx WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.context_id = ctx.id)
-                AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
+                SELECT ctx.id FROM th_contexts ctx
+                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.context_id = ctx.id)
+                AND NOT EXISTS (
+                    SELECT 1 FROM th_translations t
+                    WHERE t.context_id = ctx.id
+                )
             """)
-            orphan_context_ids = [row[0] for row in await cursor.fetchall()]
+            orphan_context_ids = [cast(str, row[0]) for row in await cursor.fetchall()]
             stats["deleted_contexts"] = len(orphan_context_ids)
             if not dry_run and orphan_context_ids:
                 placeholders = ",".join("?" * len(orphan_context_ids))
@@ -427,7 +465,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
             await cursor.execute(
                 """
                 INSERT INTO th_dead_letter_queue
-                (original_content, source_lang_code, target_lang_code, context_hash, context_json, engine_name, engine_version, last_error_message)
+                (
+                    original_content, source_lang_code, target_lang_code, context_hash,
+                    context_json, engine_name, engine_version, last_error_message
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,

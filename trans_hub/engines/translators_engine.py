@@ -56,7 +56,8 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
             logger.info("'translators' 库加载成功。")
         except ImportError as e:
             raise ImportError(
-                "要使用 TranslatorsEngine, 请安装 'translators' 库: pip install \"trans-hub[translators]\""
+                "要使用 TranslatorsEngine, 请安装 'translators' 库: "
+                'pip install "trans-hub[translators]"'
             ) from e
         except Exception as e:
             raise APIError(f"Translators 库初始化失败: {e}") from e

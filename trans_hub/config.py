@@ -61,6 +61,8 @@ class TransHubConfig(BaseSettings):
         if parsed_url.scheme != "sqlite":
             raise ValueError("目前只支持 'sqlite' 数据库 URL。")
         path = parsed_url.netloc or parsed_url.path
-        if path.startswith("/") and ":" in path:
+        # 对于相对路径 (sqlite:///transhub.db)，去掉开头的斜杠
+        if path.startswith("/") and ":" not in path:
             return path[1:]
+        # 对于绝对路径 (sqlite:////absolute/path.db 或 sqlite://localhost/path.db)
         return path

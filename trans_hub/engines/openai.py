@@ -62,7 +62,8 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     openai_temperature: float = 0.1
     default_prompt_template: str = (
         "Translate the following text from {source_lang} to {target_lang}. "
-        "Return only the translated text, without any additional explanations or quotes.\n\n"
+        "Return only the translated text, without any additional explanations "
+        "or quotes.\n\n"
         'Text to translate: "{text}"'
     )
 
@@ -88,7 +89,8 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         super().__init__(config)
         if _AsyncOpenAIClient is None:
             raise ImportError(
-                "要使用 OpenAIEngine, 请安装 'openai' 库: pip install \"trans-hub[openai]\""
+                "要使用 OpenAIEngine, 请安装 'openai' 库: "
+                'pip install "trans-hub[openai]"'
             )
         if not self.config.openai_api_key:
             if "PYTEST_CURRENT_TEST" in os.environ or "CI" in os.environ:
