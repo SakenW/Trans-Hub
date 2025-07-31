@@ -135,12 +135,27 @@ class DatabaseInspector:
         main_table.add_row("原文:", f"'{row['original_content']}'")
         if row["translation_content"]:
             main_table.add_row("译文:", f"'{row['translation_content']}'")
+        # 格式化时间戳以匹配日志系统中的格式
+        from datetime import datetime
+        
+        def format_timestamp(ts_str: str) -> str:
+            try:
+                # 尝试解析 ISO 格式的时间戳
+                dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                # 转换为本地时间并格式化
+                return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                # 如果解析失败，返回原始字符串
+                return ts_str
+        
+        formatted_updated_at = format_timestamp(row['last_updated_at'])
         meta_text = Text.from_markup(
-            f"[dim]引擎:[/] {row['engine']} (v{row['engine_version']})  [dim]更新于:[/] {row['last_updated_at']}"
+            f"[dim]引擎:[/] {row['engine']} (v{row['engine_version']})  [dim]更新于:[/] {formatted_updated_at}"
         )
         if row["business_id"]:
+            formatted_requested_at = format_timestamp(row['last_requested_at'])
             meta_text.append(
-                f"\n[dim]业务 ID:[/] [cyan]{row['business_id']}[/cyan]  [dim]最后请求于:[/] {row['last_requested_at']}"
+                f"\n[dim]业务 ID:[/] [cyan]{row['business_id']}[/cyan]  [dim]最后请求于:[/] {formatted_requested_at}"
             )
         context_panel: Optional[Panel] = None
         if row["context_json"]:
