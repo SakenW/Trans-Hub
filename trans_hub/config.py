@@ -43,7 +43,9 @@ class EngineConfigs(BaseModel):
 class TransHubConfig(BaseSettings):
     """Trans-Hub 的主配置对象，聚合了所有子配置。"""
 
-    model_config = SettingsConfigDict(env_prefix="TH_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="TH_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     database_url: str = "sqlite:///transhub.db"
     active_engine: EngineName = EngineName.TRANSLATORS

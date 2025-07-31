@@ -121,6 +121,15 @@ class DatabaseInspector:
 
     def _build_single_record_panel(self, index: int, row: aiosqlite.Row) -> Panel:
         """为单条记录构建一个包含所有信息的、结构化的 Rich Panel。"""
+        # 状态符号映射
+        status_symbols = {
+            "TRANSLATED": "✔",
+            "APPROVED": "✔",
+            "PENDING": "⏳",
+            "TRANSLATING": "⏳",
+            "FAILED": "✖",
+        }
+        # 状态颜色映射
         status_colors = {
             "TRANSLATED": "green",
             "APPROVED": "bright_green",
@@ -128,74 +137,121 @@ class DatabaseInspector:
             "TRANSLATING": "cyan",
             "FAILED": "red",
         }
+        
+        status_symbol = status_symbols.get(row["status"], "?" )
         status_color = status_colors.get(row["status"], "default")
-        main_table = Table(box=None, show_header=False, padding=(0, 1))
-        main_table.add_column(style="dim", width=12)
-        main_table.add_column(style="bold")
-        main_table.add_row("原文:", f"'{row['original_content']}'")
+        
+        # 主要内容表格 (原文/译文)
+        content_table = Table(box=None, show_header=False, padding=(0, 1))
+        content_table.add_column(style="dim", width=12)
+        content_table.add_column()
+        
+        # 原文和译文使用青色显示
+        content_table.add_row("原文:", f"[cyan]{row['original_content']}[/cyan]")
         if row["translation_content"]:
-            main_table.add_row("译文:", f"'{row['translation_content']}'")
-        # 格式化时间戳以匹配日志系统中的格式
+            content_table.add_row("译文:", f"[cyan]{row['translation_content']}[/cyan]")
+        
+        # 元数据表格
+        meta_table = Table(show_header=False, box=None, padding=(0, 1))
+        meta_table.add_column(style="dim", width=12)
+        meta_table.add_column()
+        
+        # 业务ID使用蓝色显示
+        if row["business_id"]:
+            meta_table.add_row("业务 :", f"[blue]{row['business_id']}[/blue]")
+        
+        # 时间格式化函数
         from datetime import datetime
         
         def format_timestamp(ts_str: str) -> str:
             try:
-                # 尝试解析 ISO 格式的时间戳
                 dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                # 转换为本地时间并格式化
                 return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
             except ValueError:
-                # 如果解析失败，返回原始字符串
                 return ts_str
         
-        # 使用表格来确保对齐，改善输出格式
-        meta_table = Table(show_header=False, box=None, padding=(0, 1))
-        meta_table.add_column(style="dim", width=12)
-        meta_table.add_column(style="default")
-        
+        # 时间信息
         formatted_updated_at = format_timestamp(row['last_updated_at'])
-        meta_table.add_row("引擎:", f"{row['engine']} (v{row['engine_version']})")
-        meta_table.add_row("更新于:", formatted_updated_at)
+        meta_table.add_row("时间 :", formatted_updated_at)
         
-        if row["business_id"]:
-            formatted_requested_at = format_timestamp(row['last_requested_at'])
-            meta_table.add_row("业务 ID:", f"[cyan]{row['business_id']}[/cyan]")
-            meta_table.add_row("最后请求于:", formatted_requested_at)
+        # 引擎信息，版本号使用灰色显示
+        meta_table.add_row("引擎 :", f"{row['engine']} [dim](v{row['engine_version']})[/dim]")
         
-        # 将表格转换为可渲染对象
-        meta_text = meta_table
+        # 使用 Group 组织内容
+        renderables: list[RenderableType] = [content_table, meta_table]
+        
+        # 上下文面板 (如果存在)
         context_panel: Optional[Panel] = None
         if row["context_json"]:
             try:
                 parsed_context = json.loads(row["context_json"])
                 context_str = json.dumps(parsed_context, indent=2, ensure_ascii=False)
-                syntax = Syntax(context_str, "json", theme="monokai", line_numbers=True)
+                syntax = Syntax(context_str, "json", theme="monokai", line_numbers=False)
                 context_panel = Panel(
                     syntax,
-                    title="[dim]关联上下文[/dim]",
-                    border_style="blue",
+                    title="[dim]▼ 关联上下文[/dim]",
+                    border_style="dim",
                     title_align="left",
+                    padding=(0, 1),
                 )
+                renderables.append(context_panel)
             except json.JSONDecodeError:
                 context_panel = Panel(
                     row["context_json"],
-                    title="[dim]关联上下文 (原始文本)[/dim]",
+                    title="[dim]▼ 关联上下文 (原始文本)[/dim]",
                     border_style="red",
                     title_align="left",
+                    padding=(0, 1),
                 )
-
-        # --- 核心修复：过滤掉 None 值，确保类型安全 ---
-        render_group_items: list[RenderableType] = [
-            item for item in [main_table, meta_text, context_panel] if item is not None
+                renderables.append(context_panel)
+        
+        # 原文和译文框线面板
+        original_panel = Panel(
+            f"[cyan]{row['original_content']}[/cyan]",
+            title="[dim]原文[/dim]",
+            border_style="dim",
+            title_align="left",
+            padding=(0, 1),
+        )
+        
+        translation_panel = None
+        if row["translation_content"]:
+            translation_panel = Panel(
+                f"[cyan]{row['translation_content']}[/cyan]",
+                title="[dim]译文[/dim]",
+                border_style="dim",
+                title_align="left",
+                padding=(0, 1),
+            )
+        
+        # 构建最终显示组
+        final_renderables: list[RenderableType] = [
+            Text.from_markup(f"[green]{status_symbol} 记录 #{index}[/green] [dim]|[/dim] 状态: [{status_color}]{row['status']}[/{status_color}] [dim]|[/dim] 目标: [magenta]{row['lang_code']}[/magenta]"),
+            Text(""),  # 空行
+            Text.from_markup(f"[yellow]ID :[/yellow] [blue]{row['translation_id']}[/blue]"),
         ]
-        render_group = Group(*render_group_items)
-
+        
+        if row["business_id"]:
+            final_renderables.append(Text.from_markup(f"[yellow]业务 :[/yellow] [blue]{row['business_id']}[/blue]"))
+        
+        final_renderables.extend([
+            Text.from_markup(f"[yellow]时间 :[/yellow] {formatted_updated_at}"),
+            Text.from_markup(f"[yellow]引擎 :[/yellow] {row['engine']} [dim](v{row['engine_version']})[/dim]"),
+            Text(""),  # 空行
+            original_panel,
+        ])
+        
+        if translation_panel:
+            final_renderables.append(translation_panel)
+        
+        if context_panel:
+            final_renderables.append(Text(""))  # 空行
+            final_renderables.append(context_panel)
+        
+        render_group = Group(*final_renderables)
+        
         return Panel(
             render_group,
-            title=f"[bold]记录 #{index}[/bold] (ID: {row['translation_id']})",
-            subtitle=Text.from_markup(
-                f"状态: [{status_color}]{row['status']}[/{status_color}] | 目标: [magenta]{row['lang_code']}[/magenta]"
-            ),
             border_style="bright_blue",
             padding=(1, 2),
         )

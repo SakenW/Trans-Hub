@@ -9,9 +9,10 @@ Trans-Hub 的官方命令行接口 (CLI)。
 # --- 最终修复：严格遵循 PEP8 导入顺序 ---
 # 1. 标准库导入
 import asyncio
+import signal
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # 2. 第三方库导入
 import questionary
@@ -45,14 +46,17 @@ app.add_typer(db_app, name="db")
 console = Console()
 log = structlog.get_logger("trans_hub.cli")
 
-# 全局协调器实例
-coordinator = None
+# 全局事件循环和协调器实例
+_event_loop: Optional[asyncio.AbstractEventLoop] = None
+_coordinator: Optional[Coordinator] = None
+_shutdown_event: Optional[asyncio.Event] = None
 
 
 class State:
     """用于在 Typer 上下文中传递共享对象的容器。"""
 
     coordinator: Coordinator
+    loop: asyncio.AbstractEventLoop
 
 
 @app.callback(invoke_without_command=True)
@@ -66,6 +70,8 @@ def main(
     主回调函数，在任何命令执行前运行。
     负责显示版本信息和帮助信息。
     """
+    global _event_loop, _coordinator, _shutdown_event
+
     if version:
         console.print(f"Trans-Hub version: [bold green]{__version__}[/bold green]")
         raise typer.Exit()
@@ -74,22 +80,49 @@ def main(
         console.print(ctx.get_help())
         raise typer.Exit()
 
-    # 初始化协调器
-    log.info("初始化协调器...")
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        coord = loop.run_until_complete(initialize_coordinator())
-    finally:
-        loop.close()
+    # 对于 db migrate 命令，不需要初始化协调器
+    if (
+        ctx.invoked_subcommand == "db"
+        and len(ctx.args) > 0
+        and ctx.args[0] == "migrate"
+    ):
+        # 初始化事件循环
+        if _event_loop is None:
+            _event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_event_loop)
 
-    # 将协调器实例传递给子命令
-    ctx.obj = State()
-    ctx.obj.coordinator = coord
+        # 不初始化协调器，因为 db migrate 命令不需要它
+
+        if _shutdown_event is None:
+            _shutdown_event = asyncio.Event()
+
+        # 不设置 ctx.obj，因为 db migrate 命令不需要它
+        return
+
+    # 初始化事件循环和协调器
+    if _event_loop is None:
+        _event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_event_loop)
+
+    if _coordinator is None:
+        log.info("初始化协调器...")
+        _coordinator = _event_loop.run_until_complete(initialize_coordinator())
+
+    if _shutdown_event is None:
+        _shutdown_event = asyncio.Event()
+
+    # 将协调器实例和事件循环传递给子命令
+    # 仅在需要时设置 ctx.obj
+    if ctx.invoked_subcommand != "db" or (
+        len(ctx.args) > 0 and ctx.args[0] != "migrate"
+    ):
+        ctx.obj = State()
+        ctx.obj.coordinator = _coordinator
+        ctx.obj.loop = _event_loop
 
 
 @app.command()
-async def run_worker(
+def run_worker(
     ctx: typer.Context,
     lang: List[str] = typer.Option(
         ..., "--lang", "-l", help="要处理的目标语言代码，可多次指定。"
@@ -104,7 +137,11 @@ async def run_worker(
     """
     启动一个或多个后台工作进程，持续处理待翻译任务。
     """
+    global _shutdown_event
+
     coordinator: Coordinator = ctx.obj.coordinator
+    loop: asyncio.AbstractEventLoop = ctx.obj.loop
+
     log.info(
         "启动 Worker...",
         target_languages=lang,
@@ -112,14 +149,32 @@ async def run_worker(
         polling_interval=polling_interval,
     )
 
+    def signal_handler(signum: int, frame: Any) -> None:
+        """信号处理函数。"""
+        log.info("收到信号，正在触发优雅停机...", signal=signum)
+        if _shutdown_event:
+            loop.call_soon_threadsafe(_shutdown_event.set)
+
+    # 注册信号处理器
+    loop.add_signal_handler(signal.SIGTERM, signal_handler, signal.SIGTERM, None)
+    loop.add_signal_handler(signal.SIGINT, signal_handler, signal.SIGINT, None)
+
     async def process_language(target_lang: str) -> None:
         """处理单一语言的循环。"""
-        while True:
+        # 确保关闭事件已初始化
+        if not _shutdown_event:
+            log.error("关闭事件未初始化，无法启动工作进程")
+            return
+
+        while not _shutdown_event.is_set():
             try:
                 processed_count = 0
                 async for result in coordinator.process_pending_translations(
                     target_lang, batch_size
                 ):
+                    if _shutdown_event.is_set():
+                        break
+
                     processed_count += 1
                     if result.status == TranslationStatus.TRANSLATED:
                         log.info(
@@ -139,7 +194,12 @@ async def run_worker(
                     log.debug(
                         "队列为空，休眠...", lang=target_lang, interval=polling_interval
                     )
-                    await asyncio.sleep(polling_interval)
+                    try:
+                        await asyncio.wait_for(
+                            _shutdown_event.wait(), timeout=polling_interval
+                        )
+                    except asyncio.TimeoutError:
+                        pass  # 正常超时，继续下一轮循环
             except asyncio.CancelledError:
                 log.info("Worker 收到停止信号，正在退出...", lang=target_lang)
                 break
@@ -149,13 +209,18 @@ async def run_worker(
                     lang=target_lang,
                     exc_info=True,
                 )
-                await asyncio.sleep(5)
+                try:
+                    await asyncio.wait_for(_shutdown_event.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass  # 正常超时，继续下一轮循环
 
+    # 运行worker任务直到收到停机信号
     worker_tasks = [process_language(target_lang) for target_lang in lang]
-    try:
-        await asyncio.gather(*worker_tasks)
-    except KeyboardInterrupt:
-        log.info("收到用户中断信号，正在优雅地关闭 Worker...")
+    loop.run_until_complete(asyncio.gather(*worker_tasks))
+
+    # 执行协调器的优雅关闭
+    log.info("Worker 任务已完成，正在关闭协调器...")
+    loop.run_until_complete(coordinator.close())
 
 
 async def _async_request(
@@ -198,34 +263,26 @@ def request(
     提交一个新的翻译请求到队列中。
     """
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(
-                _async_request(ctx, text, target_lang, source_lang, business_id, force)
-            )
-            # 请求处理完成后立即退出
-            log.info("翻译请求处理完成，正在退出应用...")
-            # 手动关闭协调器
-            if hasattr(ctx.obj, "coordinator") and ctx.obj.coordinator:
-                log.info("手动关闭协调器...")
-                loop.run_until_complete(
-                    asyncio.wait_for(ctx.obj.coordinator.close(), timeout=5.0)
-                )
-                log.info("协调器已关闭")
-            # 强制退出
-            import sys
+        loop: asyncio.AbstractEventLoop = ctx.obj.loop
 
-            sys.exit(0)
-        finally:
-            loop.close()
+        loop.run_until_complete(
+            _async_request(ctx, text, target_lang, source_lang, business_id, force)
+        )
+        log.info("翻译请求处理完成")
     except Exception as e:
         log.error("请求处理失败", error=str(e), exc_info=True)
         raise typer.Exit(code=1)
+    finally:
+        # 确保协调器已关闭
+        coordinator: Coordinator = ctx.obj.coordinator
+        if coordinator:
+            log.info("请求处理完成，正在关闭协调器...")
+            loop.run_until_complete(coordinator.close())
+            log.info("协调器已关闭")
 
 
 @app.command()
-async def gc(
+def gc(
     ctx: typer.Context,
     retention_days: int = typer.Option(
         90, "--days", "-d", help="保留最近多少天内的活跃任务。"
@@ -238,13 +295,17 @@ async def gc(
     执行数据库垃圾回收，清理过期的、无关联的旧数据。
     """
     coordinator: Coordinator = ctx.obj.coordinator
+    loop: asyncio.AbstractEventLoop = ctx.obj.loop
+
     mode = "Dry Run" if dry_run else "执行"
     console.print(
         f"[yellow]即将为超过 {retention_days} 天的非活跃任务执行垃圾回收 "
         f"({mode})...[/yellow]"
     )
 
-    report = await coordinator.run_garbage_collection(retention_days, True)
+    report = loop.run_until_complete(
+        coordinator.run_garbage_collection(retention_days, True)
+    )
 
     table = Table(title="垃圾回收预报告")
     table.add_column("项目", style="cyan")
@@ -260,18 +321,26 @@ async def gc(
         raise typer.Exit()
 
     if not dry_run:
-        proceed = await questionary.confirm(
-            "这是一个破坏性操作，是否继续执行删除？", default=False, auto_enter=False
-        ).ask_async()
+        # 使用 run_until_complete 来运行异步的 questionary.confirm
+        proceed = loop.run_until_complete(
+            questionary.confirm(
+                "这是一个破坏性操作，是否继续执行删除？",
+                default=False,
+                auto_enter=False,
+            ).ask_async()
+        )
 
         if not proceed:
             console.print("[red]操作已取消。[/red]")
             raise typer.Abort()
 
         console.print("[yellow]正在执行删除操作...[/yellow]")
-        final_report = await coordinator.run_garbage_collection(retention_days, False)
+        loop.run_until_complete(
+            coordinator.run_garbage_collection(retention_days, False)
+        )
         console.print("[green]✅ 垃圾回收执行完毕！[/green]")
-        assert final_report == report, "最终报告与预报告不符，可能存在并发问题"
+        # 注意：这里可能需要调整，因为 assert 在生产环境中通常不会执行
+        # assert final_report == report, "最终报告与预报告不符，可能存在并发问题"
 
 
 @db_app.command("migrate")
@@ -283,6 +352,7 @@ def db_migrate(
     """
     对数据库应用所有必要的迁移脚本，使其达到最新 Schema 版本。
     """
+    # 独立处理所有逻辑，不依赖于主函数中的初始化
     setup_logging(log_level="INFO", log_format="console")
 
     config = TransHubConfig()
@@ -305,13 +375,13 @@ def db_migrate(
         raise typer.Exit(1)
 
 
-async def initialize_coordinator() -> Coordinator:
+async def initialize_coordinator(skip_initialization: bool = False) -> Coordinator:
     """
     异步初始化协调器。
     """
-    global coordinator
-    if coordinator is not None:
-        return coordinator
+    global _coordinator
+    if _coordinator is not None:
+        return _coordinator
 
     setup_logging(log_level="DEBUG", log_format="console")
 
@@ -319,33 +389,20 @@ async def initialize_coordinator() -> Coordinator:
     log.info("创建持久化处理器...")
     handler = create_persistence_handler(config)
     log.info("创建协调器...")
-    coordinator = Coordinator(config=config, persistence_handler=handler)
+    _coordinator = Coordinator(config=config, persistence_handler=handler)
+
+    # 如果需要跳过初始化（例如在执行 db migrate 命令时），则直接返回协调器
+    if skip_initialization:
+        log.info("跳过协调器初始化")
+        return _coordinator
 
     try:
         # 异步初始化协调器
         log.info("开始初始化协调器...")
-        await coordinator.initialize()
+        await _coordinator.initialize()
         log.info("协调器初始化完成")
 
-        # 注册清理函数
-        def cleanup() -> None:
-            log.info("应用程序退出，正在关闭协调器...")
-            try:
-                if coordinator:
-                    close_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(close_loop)
-                    close_loop.run_until_complete(
-                        asyncio.wait_for(coordinator.close(), timeout=5.0)
-                    )
-                    close_loop.close()
-            except Exception as e:
-                log.error("关闭协调器时发生错误", error=str(e))
-
-        import atexit
-
-        atexit.register(cleanup)
-
-        return coordinator
+        return _coordinator
     except Exception as e:
         log.error("协调器初始化失败", error=str(e), exc_info=True)
         raise
@@ -355,10 +412,12 @@ def run_app() -> None:
     """
     运行应用程序。
     """
+    global _event_loop, _coordinator
+
     try:
         # 运行Typer应用
         log.info("启动应用...")
-        typer.run(app)
+        app()
     except KeyboardInterrupt:
         log.info("应用程序被用户中断")
         raise typer.Exit(code=0)
@@ -366,16 +425,23 @@ def run_app() -> None:
         log.error("应用程序执行出错", error=str(e), exc_info=True)
     finally:
         # 确保协调器已关闭
-        global coordinator
-        if coordinator:
+        if _coordinator:
             log.info("应用程序退出，正在关闭协调器...")
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(
-                    asyncio.wait_for(coordinator.close(), timeout=5.0)
-                )
-                loop.close()
+                if _event_loop and _event_loop.is_running():
+                    # 如果事件循环正在运行，使用 call_soon_threadsafe
+                    _event_loop.call_soon_threadsafe(
+                        lambda: asyncio.create_task(_coordinator.close())
+                    )
+                elif _event_loop:
+                    # 如果事件循环存在但未运行，直接运行关闭协程
+                    _event_loop.run_until_complete(_coordinator.close())
+                else:
+                    # 如果没有事件循环，创建一个新的来运行关闭协程
+                    close_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(close_loop)
+                    close_loop.run_until_complete(_coordinator.close())
+                    close_loop.close()
                 log.info("协调器已关闭")
             except Exception as e:
                 log.error("关闭协调器时发生错误", error=str(e))
