@@ -148,15 +148,22 @@ class DatabaseInspector:
                 # 如果解析失败，返回原始字符串
                 return ts_str
         
+        # 使用表格来确保对齐，改善输出格式
+        meta_table = Table(show_header=False, box=None, padding=(0, 1))
+        meta_table.add_column(style="dim", width=12)
+        meta_table.add_column(style="default")
+        
         formatted_updated_at = format_timestamp(row['last_updated_at'])
-        meta_text = Text.from_markup(
-            f"[dim]引擎:[/] {row['engine']} (v{row['engine_version']})  [dim]更新于:[/] {formatted_updated_at}"
-        )
+        meta_table.add_row("引擎:", f"{row['engine']} (v{row['engine_version']})")
+        meta_table.add_row("更新于:", formatted_updated_at)
+        
         if row["business_id"]:
             formatted_requested_at = format_timestamp(row['last_requested_at'])
-            meta_text.append(
-                f"\n[dim]业务 ID:[/] [cyan]{row['business_id']}[/cyan]  [dim]最后请求于:[/] {formatted_requested_at}"
-            )
+            meta_table.add_row("业务 ID:", f"[cyan]{row['business_id']}[/cyan]")
+            meta_table.add_row("最后请求于:", formatted_requested_at)
+        
+        # 将表格转换为可渲染对象
+        meta_text = meta_table
         context_panel: Optional[Panel] = None
         if row["context_json"]:
             try:
