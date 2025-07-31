@@ -44,11 +44,13 @@ httpx = { version = ">=0.28.1", optional = true }
 # 指标
 prometheus-client = { version = ">=0.20.0", optional = true }
 # 应用层 (CLI, API)
+
 typer = { version = ">=0.12.3", optional = true }
 rich = { version = ">=13.0.0", optional = true }
 fastapi = { version = ">=0.111.0", optional = true }
 uvicorn = { version = ">=0.30.1", extras = ["standard"], optional = true }
 # 文档工具
+docutils = { version = "<0.21", optional = true }  # 修复 RTD 构建问题
 markdown-it-py = { version = ">=3.0.0", optional = true }
 
 
@@ -63,8 +65,19 @@ api = ["fastapi", "uvicorn"]
 tools = ["typer", "rich", "markdown-it-py", "openai", "httpx", "questionary"]
 all = [
     "translators", "openai", "httpx", "prometheus-client", 
-    "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary"
+    "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary",
+    "sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints", "docutils"
 ]
+
+# --- 依赖组 ---
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+sphinx = "*"
+sphinx-rtd-theme = "*"
+sphinx-autodoc-typehints = "*"
+docutils = "<0.21"
 
 
 # --- 开发依赖 ---
