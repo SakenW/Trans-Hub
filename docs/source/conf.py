@@ -30,7 +30,7 @@ extensions = [
     "sphinx-prompt",  # 支持命令行提示符
     "sphinx_tabs.tabs",  # 添加标签页功能
     "sphinxcontrib.mermaid",  # 支持 Mermaid 图表
-    "sphinx-intl",  # 支持国际化
+    "sphinx_intl",  # 支持国际化
 ]
 # 自动为章节生成标签的配置
 autosectionlabel_prefix_document = True

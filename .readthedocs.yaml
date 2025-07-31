@@ -19,8 +19,8 @@ python:
     - method: "poetry"
       path: .
 
-# 可选：开启构建日志中文支持（推荐）
-# See: https://docs.readthedocs.io/en/stable/guides/build-customization.html#enabling-unicode-output
+  # 可选：开启构建日志中文支持（推荐）
+  # See: https://docs.readthedocs.io/en/stable/guides/build-customization.html#enabling-unicode-output
   jobs:
     pre_build:
       - echo "📚 正在构建 Trans-Hub 文档..."
