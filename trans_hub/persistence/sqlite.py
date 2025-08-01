@@ -360,10 +360,14 @@ class SQLitePersistenceHandler(PersistenceHandler):
             row = await cursor.fetchone()
         return cast(Optional[str], row["business_id"] if row else None)
 
-    async def touch_jobs(self, business_ids: list[str]) -> None:
+    async def touch_jobs(
+        self, business_ids: list[str], cursor: Optional[aiosqlite.Cursor] = None
+    ) -> None:
         if not business_ids:
             return
-        async with self._transaction() as cursor:
+
+        # 如果提供了游标，则在现有事务中执行
+        if cursor is not None:
             placeholders = ",".join("?" for _ in business_ids)
             now_iso = datetime.now(timezone.utc).isoformat()
             sql = (
@@ -371,6 +375,16 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 f"WHERE business_id IN ({placeholders})"
             )
             await cursor.execute(sql, [now_iso] + business_ids)
+        else:
+            # 否则创建新事务
+            async with self._transaction() as tx_cursor:
+                placeholders = ",".join("?" for _ in business_ids)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                sql = (
+                    f"UPDATE th_jobs SET last_requested_at = ? "
+                    f"WHERE business_id IN ({placeholders})"
+                )
+                await tx_cursor.execute(sql, [now_iso] + business_ids)
 
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
