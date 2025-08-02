@@ -33,17 +33,46 @@ class SQLitePersistenceHandler(PersistenceHandler):
     # ... (所有其他方法都保持不变，我将只粘贴 garbage_collect 和它之前的方法
     # 以确认 上下文) ...
     def __init__(self, db_path: str):
-        self.db_path = db_path
+        # 处理数据库URL，提取正确的文件路径
+        if db_path.startswith("sqlite:///"):
+            self.db_path = db_path[10:]
+        elif db_path.startswith("sqlite://"):
+            self.db_path = db_path[9:]
+        else:
+            self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
 
     async def connect(self) -> None:
         try:
-            self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
+            # 打印完整的数据库路径和权限信息
+            import os
+            from pathlib import Path
+
+            logger.info("尝试连接 SQLite 数据库", db_path=self.db_path)
+
+            # 检查路径是否存在
+            db_path = Path(self.db_path)
+            if db_path != Path(":memory:"):
+                logger.info(f"数据库文件路径: {db_path.absolute()}")
+
+                # 检查目录是否存在
+                parent_dir = db_path.parent
+                logger.info(f"数据库目录: {parent_dir.absolute()}")
+
+                if parent_dir.exists():
+                    logger.info(
+                        f"目录存在，权限: {oct(os.stat(parent_dir).st_mode)[-3:]}"
+                    )
+                else:
+                    logger.info("目录不存在")
+
+            # 尝试连接
+            self._conn = await aiosqlite.connect(self.db_path)
             self._conn.row_factory = aiosqlite.Row
             logger.info("SQLite 数据库连接已建立", db_path=self.db_path)
         except aiosqlite.Error as e:
-            logger.error("连接 SQLite 数据库失败", exc_info=True)
-            raise DatabaseError("数据库连接失败") from e
+            logger.error(f"连接 SQLite 数据库失败: {str(e)}", exc_info=True)
+            raise DatabaseError(f"数据库连接失败: {str(e)}") from e
 
     async def close(self) -> None:
         if self._conn:

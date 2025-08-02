@@ -10,6 +10,7 @@ import json
 import re
 from typing import Any, Optional
 
+from trans_hub.config import TransHubConfig
 from trans_hub.types import GLOBAL_CONTEXT_SENTINEL
 
 
@@ -54,3 +55,14 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
     for code in lang_codes:
         if not lang_code_pattern.match(code):
             raise ValueError(f"提供的语言代码 '{code}' 格式无效。")
+
+
+def get_database_url() -> str:
+    """
+    从配置中获取数据库 URL。
+
+    返回:
+        数据库 URL 字符串。
+    """
+    config = TransHubConfig()
+    return config.database_url

@@ -55,7 +55,7 @@ markdown-it-py = { version = ">=3.0.0", optional = true }
 
 
 # --- 可选依赖分组 (Extras) ---
-questionary = "^2.1.0"
+questionary = "2.1.0"
 [tool.poetry.extras]
 translators = ["translators"]
 openai = ["openai", "httpx"]
@@ -138,4 +138,4 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
+asyncio_mode = "strict"

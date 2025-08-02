@@ -15,6 +15,7 @@ import structlog
 from .cache import TranslationCache
 from .config import EngineName, TransHubConfig
 from .context import ProcessingContext
+from .db.schema_manager import apply_migrations
 from .engine_registry import ENGINE_REGISTRY, discover_engines
 from .engines.base import BaseTranslationEngine
 from .exceptions import ConfigurationError, EngineNotFoundError
@@ -295,6 +296,41 @@ class Coordinator:
     ) -> dict[str, int]:
         days = expiration_days or self.config.gc_retention_days
         return await self.handler.garbage_collect(retention_days=days, dry_run=dry_run)
+
+    async def run_migrations(
+        self, database_url: Optional[str] = None
+    ) -> dict[str, Any]:
+        """
+        运行数据库迁移
+
+        Args:
+            database_url: 数据库连接URL，如果为None则使用配置中的值
+
+        Returns:
+            包含迁移结果的字典
+        """
+        logger.info("开始执行数据库迁移...")
+        try:
+            # 确保协调器已初始化
+            if not self.initialized:
+                await self.initialize()
+
+            # 直接调用apply_migrations函数
+            db_url = database_url or self.config.database_url
+            # 提取SQLite路径
+            if db_url.startswith("sqlite:///"):
+                db_path = db_url[10:]
+            else:
+                db_path = db_url
+            apply_migrations(db_path)
+            logger.info("数据库迁移完成。")
+            return {
+                "status": "success",
+                "message": "Database migrations applied successfully",
+            }
+        except Exception:
+            logger.error("数据库迁移失败！", exc_info=True)
+            raise
 
     async def close(self) -> None:
         if not self.initialized:
