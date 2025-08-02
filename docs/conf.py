@@ -38,13 +38,11 @@ extensions = [
     "sphinx.ext.ifconfig",
     "sphinx.ext.githubpages",
     "sphinx_rtd_theme",
-    "sphinx_copybutton",
     "sphinx_design",
     "sphinx_togglebutton",
     "sphinx_tabs.tabs",
     "sphinxcontrib.mermaid",
-    "sphinx_intl",
-    # sphinx-prompt 必须在 sphinx_copybutton 之后加载
+    "myst_parser",  # 添加对Markdown的支持
     "sphinx-prompt",
 ]
 
@@ -88,12 +86,14 @@ html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"] # 确保 docs/_static 目录存在
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-source_suffix = ".rst"
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+}
 
 # HTML 主题选项
 html_theme_options = {
     "logo_only": False,
-    "display_version": True,
     "prev_next_buttons_location": "bottom",
     "style_external_links": False,
     "style_nav_header_background": "#2c3e50",
