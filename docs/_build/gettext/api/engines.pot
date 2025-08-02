@@ -1,0 +1,148 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Saken
+# This file is distributed under the same license as the trans-hub package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: trans-hub \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-08-03 02:38+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../api/engines.rst:4
+msgid "翻译引擎 (Engines)"
+msgstr ""
+
+#: ../../api/engines.rst:6
+msgid "本部分包含翻译引擎的基类以及所有内置的引擎实现。"
+msgstr ""
+
+#: ../../api/engines.rst:9
+msgid "引擎基类"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base:1
+msgid "本模块定义了所有翻译引擎插件必须继承的抽象基类（ABC）。 v3.0.2.dev 更新：引入速率限制和并发控制。"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseContextModel:1
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseEngineConfig:1
+msgid "基类：:py:class:`~pydantic.main.BaseModel`"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseContextModel:1
+msgid "引擎特定上下文的基础模型。"
+msgstr ""
+
+#: ../../docstring of trans_hub.engines.base.BaseContextModel.model_config:1
+#: ../../docstring of trans_hub.engines.base.BaseEngineConfig.model_config:1
+#: ../../docstring of trans_hub.engines.debug.DebugEngineConfig.model_config:1
+#: ../../docstring of trans_hub.engines.openai.OpenAIContext.model_config:1
+#: ../../docstring of trans_hub.engines.openai.OpenAIEngineConfig.model_config:1
+#: ../../docstring of trans_hub.engines.translators_engine.TranslatorsContextModel.model_config:1
+#: ../../docstring of trans_hub.engines.translators_engine.TranslatorsEngineConfig.model_config:1
+msgid "Configuration for the model, should be a dictionary conforming to [`ConfigDict`][pydantic.config.ConfigDict]."
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseEngineConfig:1
+msgid "所有引擎配置模型的基类，提供了通用的速率与并发控制选项。"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseTranslationEngine:1
+msgid "基类：:py:class:`~abc.ABC`, :py:class:`~typing.Generic`\\ [:py:obj:`~trans_hub.engines.base._ConfigType`]"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseTranslationEngine:1
+msgid "翻译引擎的纯异步抽象基类，内置速率限制和并发控制。"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseTranslationEngine.initialize:1
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngine.initialize:1
+msgid "引擎的异步初始化钩子，用于设置连接池等。"
+msgstr ""
+
+#: ../../../trans_hub/engines/base.py:docstring of trans_hub.engines.base.BaseTranslationEngine.close:1
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngine.close:1
+msgid "引擎的异步关闭钩子，用于安全释放资源。"
+msgstr ""
+
+#: ../../api/engines.rst:16
+msgid "内置引擎"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine:1
+msgid "提供一个使用 `translators` 库的免费翻译引擎。"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIContext:1
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsContextModel:1
+msgid "基类：:py:class:`~trans_hub.engines.base.BaseContextModel`"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsContextModel:1
+msgid "Translators 引擎的上下文。"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsEngineConfig:1
+msgid "基类：:py:class:`~trans_hub.engines.base.BaseEngineConfig`"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsEngineConfig:1
+msgid "Translators 引擎的配置。"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsEngine:1
+msgid "基类：:py:class:`~trans_hub.engines.base.BaseTranslationEngine`\\ [:py:class:`~trans_hub.engines.translators_engine.TranslatorsEngineConfig`]"
+msgstr ""
+
+#: ../../../trans_hub/engines/translators_engine.py:docstring of trans_hub.engines.translators_engine.TranslatorsEngine:1
+msgid "一个使用 `translators` 库的纯异步引擎。"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai:1
+msgid "提供一个使用 OpenAI API 的翻译引擎。"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIContext:1
+msgid "OpenAI 引擎的上下文模型。"
+msgstr ""
+
+#: ../../../trans_hub/engines/debug.py:docstring of trans_hub.engines.debug.DebugEngineConfig:1
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngineConfig:1
+msgid "基类：:py:class:`~pydantic_settings.main.BaseSettings`, :py:class:`~trans_hub.engines.base.BaseEngineConfig`"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngineConfig:1
+msgid "OpenAI 引擎的配置模型。"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngine:1
+msgid "基类：:py:class:`~trans_hub.engines.base.BaseTranslationEngine`\\ [:py:class:`~trans_hub.engines.openai.OpenAIEngineConfig`]"
+msgstr ""
+
+#: ../../../trans_hub/engines/openai.py:docstring of trans_hub.engines.openai.OpenAIEngine:1
+msgid "使用 OpenAI API 的翻译引擎实现（生产级）。"
+msgstr ""
+
+#: ../../../trans_hub/engines/debug.py:docstring of trans_hub.engines.debug:1
+msgid "提供一个用于开发和测试的调试翻译引擎。"
+msgstr ""
+
+#: ../../../trans_hub/engines/debug.py:docstring of trans_hub.engines.debug.DebugEngineConfig:1
+msgid "Debug 引擎的配置模型。"
+msgstr ""
+
+#: ../../../trans_hub/engines/debug.py:docstring of trans_hub.engines.debug.DebugEngine:1
+msgid "基类：:py:class:`~trans_hub.engines.base.BaseTranslationEngine`\\ [:py:class:`~trans_hub.engines.debug.DebugEngineConfig`]"
+msgstr ""
+
+#: ../../../trans_hub/engines/debug.py:docstring of trans_hub.engines.debug.DebugEngine:1
+msgid "一个简单的调试翻译引擎实现。"
+msgstr ""

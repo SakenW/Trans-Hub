@@ -85,6 +85,7 @@ sphinx-prompt = { version = "^1.8.0", python = ">=3.10" }
 sphinx-tabs = "^3.4.7"
 sphinxcontrib-mermaid = "^1.0.0"
 myst_parser = "^2.0.0"
+sphinx-intl = "^2.3.1"
 
 
 # --- 开发依赖 ---

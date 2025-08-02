@@ -37,13 +37,7 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx.ext.ifconfig",
     "sphinx.ext.githubpages",
-    "sphinx_rtd_theme",
-    "sphinx_design",
-    "sphinx_togglebutton",
-    "sphinx_tabs.tabs",
-    "sphinxcontrib.mermaid",
     "myst_parser",  # 添加对Markdown的支持
-    "sphinx-prompt",
 ]
 
 

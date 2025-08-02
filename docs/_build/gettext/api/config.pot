@@ -1,0 +1,114 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Saken
+# This file is distributed under the same license as the trans-hub package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: trans-hub \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-08-03 02:38+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../api/config.rst:4
+msgid "配置模型 (Config)"
+msgstr ""
+
+#: ../../api/config.rst:8
+msgid "本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。"
+msgstr ""
+
+#: ../../api/config.rst:11
+msgid "主要配置"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.TransHubConfig:1
+msgid "基类：:py:class:`~pydantic_settings.main.BaseSettings`"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.TransHubConfig:1
+msgid "Trans-Hub 的主配置对象，聚合了所有子配置。"
+msgstr ""
+
+#: ../../docstring of trans_hub.config.EngineConfigs.model_config:1
+#: ../../docstring of trans_hub.config.LoggingConfig.model_config:1
+#: ../../docstring of trans_hub.config.RetryPolicyConfig.model_config:1
+#: ../../docstring of trans_hub.config.TransHubConfig.model_config:1
+msgid "Configuration for the model, should be a dictionary conforming to [`ConfigDict`][pydantic.config.ConfigDict]."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.__init__:1
+msgid "Create a new model by parsing and validating input data from keyword arguments."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.__init__:3
+msgid "Raises [`ValidationError`][pydantic_core.ValidationError] if the input data cannot be validated to form a valid model."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.__init__:6
+msgid "`self` is explicitly positional-only to allow `self` as a field name."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:1
+msgid "Define the sources and their order for loading the settings values."
+msgstr ""
+
+#: ../../api/config.rst:0
+msgid "参数"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:3
+msgid "The Settings class."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:4
+msgid "The `InitSettingsSource` instance."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:5
+msgid "The `EnvSettingsSource` instance."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:6
+msgid "The `DotEnvSettingsSource` instance."
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:7
+msgid "The `SecretsSettingsSource` instance."
+msgstr ""
+
+#: ../../api/config.rst:0
+msgid "返回"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of pydantic_settings.main.BaseSettings.settings_customise_sources:9
+msgid "A tuple containing the sources and their order for loading the settings values."
+msgstr ""
+
+#: ../../api/config.rst:20
+msgid "引擎名称枚举"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.EngineName:1
+msgid "基类：:py:class:`str`, :py:class:`~enum.Enum`"
+msgstr ""
+
+#: ../../api/config.rst:27
+msgid "引擎配置集合"
+msgstr ""
+
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.EngineConfigs:1
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.LoggingConfig:1
+#: ../../../trans_hub/config.py:docstring of trans_hub.config.RetryPolicyConfig:1
+msgid "基类：:py:class:`~pydantic.main.BaseModel`"
+msgstr ""
+
+#: ../../api/config.rst:35
+msgid "其他配置模型"
+msgstr ""

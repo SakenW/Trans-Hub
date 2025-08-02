@@ -1,0 +1,67 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Saken
+# This file is distributed under the same license as the trans-hub package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: trans-hub \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-08-03 02:38+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../api/persistence.rst:4
+msgid "持久化层 (Persistence)"
+msgstr ""
+
+#: ../../api/persistence.rst:6
+msgid "本部分定义了持久化层的接口协议，并展示了默认的 SQLite 实现。"
+msgstr ""
+
+#: ../../api/persistence.rst:9
+msgid "持久化接口"
+msgstr ""
+
+#: ../../../trans_hub/interfaces.py:docstring of trans_hub.interfaces:1
+msgid "本模块使用 typing.Protocol 定义了核心组件的接口协议。 v3.0 更新：ID类型已从 int 切换为 str (UUID)，并增加了 touch_jobs 方法。"
+msgstr ""
+
+#: ../../../trans_hub/interfaces.py:docstring of trans_hub.interfaces.PersistenceHandler:1
+#: ../../../trans_hub/persistence/__init__.py:docstring of trans_hub.interfaces.PersistenceHandler:1
+msgid "基类：:py:class:`~typing.Protocol`"
+msgstr ""
+
+#: ../../../trans_hub/interfaces.py:docstring of trans_hub.interfaces.PersistenceHandler:1
+#: ../../../trans_hub/persistence/__init__.py:docstring of trans_hub.interfaces.PersistenceHandler:1
+msgid "定义了持久化处理器的纯异步接口协议。"
+msgstr ""
+
+#: ../../api/persistence.rst:15
+msgid "SQLite 实现"
+msgstr ""
+
+#: ../../../trans_hub/persistence/sqlite.py:docstring of trans_hub.persistence.sqlite:1
+msgid "提供了基于 aiosqlite 的持久化实现。 此版本修复了 UPSERT 逻辑，以兼容 SQLite 的 ON CONFLICT 限制，并补全了导入。"
+msgstr ""
+
+#: ../../../trans_hub/persistence/sqlite.py:docstring of trans_hub.persistence.sqlite.SQLitePersistenceHandler:1
+msgid "基类：:py:class:`~trans_hub.interfaces.PersistenceHandler`"
+msgstr ""
+
+#: ../../api/persistence.rst:22
+msgid "工厂函数"
+msgstr ""
+
+#: ../../../trans_hub/persistence/__init__.py:docstring of trans_hub.persistence:1
+msgid "本模块作为持久化层的公共入口，导出核心组件。"
+msgstr ""
+
+#: ../../../trans_hub/persistence/__init__.py:docstring of trans_hub.persistence.create_persistence_handler:1
+msgid "根据配置创建并返回一个具体的持久化处理器实例。"
+msgstr ""
