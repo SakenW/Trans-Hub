@@ -7,13 +7,15 @@
 
 import asyncio
 from typing import Generator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
 from trans_hub.cli.gc.main import gc
 from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
+from trans_hub.config import TransHubConfig
+import typer
 
 
 @pytest.fixture
@@ -21,6 +23,12 @@ def mock_coordinator() -> MagicMock:
     """创建一个模拟的协调器对象。"""
     coordinator = MagicMock(spec=Coordinator)
     coordinator.run_garbage_collection = AsyncMock()
+    async def _close_stub() -> None:
+        pass
+
+    close_coro = _close_stub()
+    coordinator.close.return_value = close_coro
+    coordinator.close_coro = close_coro
     return coordinator
 
 
@@ -47,7 +55,11 @@ def test_gc_dry_run(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令的干运行模式。"""
+
     # 准备测试数据
+
+    # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = True
 
@@ -62,11 +74,15 @@ def test_gc_dry_run(
     mock_coordinator.run_garbage_collection.assert_called_once_with(
         retention_days, True
     )
-    mock_event_loop.run_until_complete.assert_called_once()
+    assert mock_event_loop.run_until_complete.call_count == 2
     mock_console_print.assert_called()
 
     # 验证没有执行实际删除
     assert mock_coordinator.run_garbage_collection.call_count == 1
+    mock_coordinator.close.assert_called_once()
+    assert mock_event_loop.run_until_complete.call_args_list[-1] == call(
+        mock_coordinator.close_coro
+    )
 
 
 @patch("trans_hub.cli.gc.main.console.print")
@@ -77,7 +93,11 @@ def test_gc_real_run_confirmed(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户确认）。"""
+
     # 准备测试数据
+
+    # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
@@ -104,8 +124,14 @@ def test_gc_real_run_confirmed(
     mock_coordinator.run_garbage_collection.assert_any_call(retention_days, True)
     mock_coordinator.run_garbage_collection.assert_any_call(retention_days, False)
     # 确保 run_until_complete 被调用了至少三次（一次用于预报告，一次用于questionary.confirm，一次用于实际删除）
-    assert mock_event_loop.run_until_complete.call_count >= 3, f"预期至少调用3次，实际调用{mock_event_loop.run_until_complete.call_count}次"
+    assert (
+        mock_event_loop.run_until_complete.call_count >= 4
+    ), f"预期至少调用4次，实际调用{mock_event_loop.run_until_complete.call_count}次"
     mock_questionary_confirm.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    assert mock_event_loop.run_until_complete.call_args_list[-1] == call(
+        mock_coordinator.close_coro
+    )
 
 
 @patch("trans_hub.cli.gc.main.console.print")
@@ -116,7 +142,11 @@ def test_gc_real_run_cancelled(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户取消）。"""
+
     # 准备测试数据
+
+    # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
@@ -143,8 +173,14 @@ def test_gc_real_run_cancelled(
         retention_days, True
     )
     # 确保 run_until_complete 被调用了至少两次（一次用于预报告，一次用于questionary.confirm）
-    assert mock_event_loop.run_until_complete.call_count >= 2, f"预期至少调用2次，实际调用{mock_event_loop.run_until_complete.call_count}次"
+    assert (
+        mock_event_loop.run_until_complete.call_count >= 3
+    ), f"预期至少调用3次，实际调用{mock_event_loop.run_until_complete.call_count}次"
     mock_questionary_confirm.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    assert mock_event_loop.run_until_complete.call_args_list[-1] == call(
+        mock_coordinator.close_coro
+    )
 
 
 @patch("trans_hub.cli.gc.main.console.print")
@@ -154,7 +190,11 @@ def test_gc_no_data_to_clean(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令在没有数据可清理时的行为。"""
+
     # 准备测试数据
+
+    # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
@@ -170,4 +210,54 @@ def test_gc_no_data_to_clean(
         retention_days, True
     )
     # 验证没有显示确认对话框
+
+    assert "数据库很干净，无需进行垃圾回收" in str(
+        mock_console_print.call_args_list
+    )
+    mock_coordinator.close.assert_called_once()
+    assert mock_event_loop.run_until_complete.call_args_list[-1] == call(
+        mock_coordinator.close_coro
+    )
+
     assert "数据库很干净，无需进行垃圾回收" in str(mock_console_print.call_args_list)
+
+
+
+@patch("trans_hub.cli.gc_command")
+@patch("trans_hub.cli._initialize_coordinator")
+def test_cli_gc_closes_loop(
+    mock_init: MagicMock, mock_gc_command: MagicMock
+) -> None:
+    """确保 CLI gc 命令退出时会关闭事件循环。"""
+    mock_coordinator = MagicMock(spec=Coordinator)
+    mock_coordinator.close = AsyncMock()
+    mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    mock_loop.run_until_complete = MagicMock()
+    mock_loop.close = MagicMock()
+    mock_init.return_value = (mock_coordinator, mock_loop)
+
+    from trans_hub.cli import gc as cli_gc
+
+    cli_gc(retention_days=1, dry_run=True)
+
+    mock_gc_command.assert_called_once_with(mock_coordinator, mock_loop, 1, True)
+    mock_loop.run_until_complete.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    mock_loop.close.assert_called_once()
+
+@patch("trans_hub.cli.gc.main.console.print")
+def test_gc_handles_errors(
+    mock_console_print: MagicMock,
+    mock_coordinator: MagicMock,
+    mock_event_loop: MagicMock,
+
+    """当垃圾回收发生异常时应优雅退出。"""
+    retention_days = TransHubConfig().gc_retention_days
+    mock_coordinator.run_garbage_collection.side_effect = Exception("boom")
+
+    with pytest.raises(typer.Exit):
+        gc(mock_coordinator, mock_event_loop, retention_days, True)
+
+    mock_console_print.assert_called()
+
+

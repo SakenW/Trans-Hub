@@ -14,6 +14,11 @@ from typer.testing import CliRunner
 
 from trans_hub.cli import app
 
+from trans_hub.exceptions import ConfigurationError
+
+from trans_hub import __version__
+
+
 
 @pytest.fixture
 def runner() -> CliRunner:
@@ -22,41 +27,22 @@ def runner() -> CliRunner:
 
 
 @pytest.mark.parametrize(
-    "version_flag, expected_output, expected_exit_code",
-    [
-        (True, "Trans-Hub CLI Version 1.0.0", 0),
-        (False, "帮助信息", 0),
-    ],
+    "show_version",
+    [True, False],
 )
-def test_main_command(
-    version_flag: bool,
-    expected_output: str,
-    expected_exit_code: int,
-    runner: CliRunner,
-) -> None:
+def test_main_command(show_version: bool, runner: CliRunner) -> None:
     """测试 main 命令的基本功能。"""
-    # 准备命令参数
-    args = ["--version"] if version_flag else []
+    args = ["--version"] if show_version else []
 
-    # 运行命令
     result = runner.invoke(app, args)
 
-    # 验证退出码
-    assert result.exit_code == expected_exit_code
+    assert result.exit_code == 0
 
-    # 验证输出
-    if version_flag:
-        # 忽略ANSI颜色代码进行验证
-        assert "Version" in result.output, \
-            f"版本信息未在输出中找到: {result.output}"
-        assert "1.0" in result.output, \
-            f"版本号未在输出中找到: {result.output}"
+    if show_version:
+        assert __version__ in result.output
     else:
-        # 帮助信息可能以不同格式呈现
-        assert len(result.output) > 0, \
-            "帮助信息输出为空"
-        assert "usage" in result.output.lower() or "使用" in result.output, \
-            f"帮助信息未在输出中找到: {result.output}"
+        assert len(result.output) > 0
+        assert "usage" in result.output.lower() or "使用" in result.output
 
 
 def test_command_decorator_applied() -> None:
@@ -98,3 +84,27 @@ def test_command_requires_coordinator(command_name: str, runner: CliRunner) -> N
 
     # 注意：我们不再验证协调器初始化，因为不同命令可能有不同的实现方式
     # 专注于验证命令失败的结果
+
+
+def test_non_sqlite_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """当配置为非SQLite数据库时，CLI应抛出ConfigurationError。"""
+    from trans_hub import cli as cli_module
+
+    # 重置全局状态
+    cli_module._coordinator = None
+    if cli_module._loop is not None:
+        cli_module._loop.close()
+    cli_module._loop = None
+
+    # 设置不受支持的数据库URL
+    monkeypatch.setenv("TH_DATABASE_URL", "postgresql://localhost/testdb")
+
+    with pytest.raises(ConfigurationError):
+        cli_module._initialize_coordinator(skip_init=True)
+
+    # 清理全局状态
+    if cli_module._loop is not None:
+        cli_module._loop.close()
+    cli_module._loop = None
+    cli_module._coordinator = None
+
