@@ -207,12 +207,6 @@ async def test_run_worker_processing(
     # 验证任务处理
     # 验证方法被调用
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
-    # 移除严格的调用次数断言，因为run_worker可能会多次调用该方法
-    # mock_coordinator.process_pending_translations.assert_called_once()
-    # 如果需要验证参数，可以使用
-    # args, kwargs = mock_coordinator.process_pending_translations.call_args
-    # assert args[0] == "en"
-    # assert args[1] == batch_size
 
 
 @pytest.mark.asyncio
@@ -451,6 +445,36 @@ async def test_process_pending_translations_called(
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
 
 
+@pytest.mark.asyncio
+async def test_cleanup_cancels_pending_tasks() -> None:
+    """确保清理逻辑能够取消未完成的任务。"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    coordinator = MagicMock(spec=Coordinator)
+    coordinator.process_pending_translations = AsyncMock()
+    coordinator.close = AsyncMock()
+
+    shutdown_event = asyncio.Event()
+
+    async def long_running() -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            pass
+
+    pending_task = loop.create_task(long_running())
+
+    # 触发立即关闭以运行清理逻辑
+    loop.call_soon(shutdown_event.set)
+
+    run_worker(coordinator, loop, shutdown_event, [])
+
+    assert pending_task.cancelled(), "未完成的任务应被取消"
+
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+=======
 def test_worker_requires_langs(runner: CliRunner) -> None:
     """未提供语言列表时命令应失败。"""
     result = runner.invoke(app, ["worker"])
@@ -461,3 +485,4 @@ def test_worker_invalid_langs(runner: CliRunner) -> None:
     """无效语言代码应导致命令失败。"""
     result = runner.invoke(app, ["worker", "--lang", "invalid"])
     assert result.exit_code != 0
+
