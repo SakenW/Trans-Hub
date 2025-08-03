@@ -58,6 +58,15 @@ def run_app(coordinator: Coordinator, loop: asyncio.AbstractEventLoop) -> NoRetu
             log.info("应用退出，正在关闭协调器...")
             loop.run_until_complete(coordinator.close())
             log.info("协调器已关闭")
+        loop.close()
+        # 重置全局状态，允许后续命令重新初始化
+        try:
+            import trans_hub.cli as cli_main
+
+            cli_main._coordinator = None
+            cli_main._loop = None
+        except Exception:
+            pass
         # 确保函数永远不会返回
         raise RuntimeError("This function should never return")
 

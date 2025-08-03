@@ -44,7 +44,11 @@ def _initialize_coordinator() -> tuple[Coordinator, asyncio.AbstractEventLoop]:
     """初始化协调器和事件循环并执行初始化。"""
     global _coordinator, _loop
 
-    if _coordinator is not None and _loop is not None:
+    if (
+        _coordinator is not None
+        and _loop is not None
+        and _coordinator.initialized
+    ):
         return _coordinator, _loop
 
     # 创建新的事件循环
