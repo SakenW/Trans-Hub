@@ -16,7 +16,11 @@ from trans_hub.cli.request.main import request as request_command
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
+
+from trans_hub.utils import validate_lang_codes
+
 from trans_hub.logging_config import setup_logging
+
 
 log = structlog.get_logger("trans_hub.cli")
 console = Console()
@@ -131,6 +135,9 @@ def worker(
     """
     启动Trans-Hub Worker进程，处理待翻译任务。
     """
+    # 校验语言代码
+    validate_lang_codes(langs)
+
     # 创建关闭事件
     shutdown_event = asyncio.Event()
     run_worker(coordinator, loop, shutdown_event, langs, batch_size, poll_interval)
@@ -156,6 +163,9 @@ def request(
     """
     提交一个新的翻译请求到队列中。
     """
+    # 校验目标语言代码
+    validate_lang_codes(target_lang)
+
     request_command(
         coordinator, loop, text, target_lang, source_lang, business_id, force
     )
