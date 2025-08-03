@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 
 from trans_hub.coordinator import Coordinator
+from trans_hub.cli import _with_coordinator
 
 log = structlog.get_logger("trans_hub.cli.app")
 console = Console()
@@ -59,3 +60,13 @@ def run_app(coordinator: Coordinator, loop: asyncio.AbstractEventLoop) -> NoRetu
             log.info("协调器已关闭")
         # 确保函数永远不会返回
         raise RuntimeError("This function should never return")
+
+
+@app.command("run")
+@_with_coordinator
+def run(
+    coordinator: Coordinator,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """启动 Trans-Hub 主应用循环。"""
+    run_app(coordinator, loop)

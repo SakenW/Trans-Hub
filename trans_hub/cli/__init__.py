@@ -11,7 +11,6 @@ import structlog
 import typer
 from rich.console import Console
 
-from trans_hub.cli.app.main import app as app_app
 from trans_hub.cli.gc.main import gc as gc_command
 from trans_hub.cli.request.main import request as request_command
 from trans_hub.cli.worker.main import run_worker
@@ -24,9 +23,6 @@ console = Console()
 
 # 创建Typer应用实例
 app = typer.Typer(help="Trans-Hub 命令行工具")
-
-# 添加子命令
-app.add_typer(app_app, name="app", help="应用主入口")
 
 # 全局状态管理
 # 注意：这里简化了状态管理，实际项目中可能需要更复杂的机制
@@ -103,6 +99,12 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
                 _loop = None
 
     return wrapper
+
+
+from trans_hub.cli.app.main import app as app_app
+
+# 添加子命令
+app.add_typer(app_app, name="app", help="应用主入口")
 
 
 @app.command()
