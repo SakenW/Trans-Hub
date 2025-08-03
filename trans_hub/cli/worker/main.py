@@ -163,3 +163,12 @@ def run_worker(
         log.info("协调器已成功关闭")
     except Exception as e:
         log.error(f"关闭协调器时发生异常: {e}", exc_info=True)
+    finally:
+        loop.close()
+        try:
+            import trans_hub.cli as cli_main
+
+            cli_main._coordinator = None
+            cli_main._loop = None
+        except Exception:
+            pass
