@@ -171,3 +171,22 @@ def test_gc_no_data_to_clean(
     )
     # 验证没有显示确认对话框
     assert "数据库很干净，无需进行垃圾回收" in str(mock_console_print.call_args_list)
+
+
+@patch("trans_hub.cli.gc.main.log")
+@patch("trans_hub.cli.gc.main.console.print")
+def test_gc_exception(
+    mock_console_print: MagicMock,
+    mock_log: MagicMock,
+    mock_coordinator: MagicMock,
+    mock_event_loop: MagicMock,
+) -> None:
+    """当垃圾回收过程中出现异常时，CLI 应能优雅退出。"""
+    mock_coordinator.run_garbage_collection.side_effect = RuntimeError("boom")
+
+    with pytest.raises(SystemExit) as exc:
+        gc(mock_coordinator, mock_event_loop, 90, False)
+
+    assert exc.value.code != 0
+    mock_log.exception.assert_called_once()
+    assert "垃圾回收失败" in str(mock_console_print.call_args_list)
