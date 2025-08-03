@@ -11,6 +11,7 @@ import structlog
 import typer
 from rich.console import Console
 
+from trans_hub import __version__
 from trans_hub.cli.app.main import app as app_app
 from trans_hub.cli.gc.main import gc as gc_command
 from trans_hub.cli.request.main import request as request_command
@@ -179,7 +180,7 @@ def main(
     Trans-Hub 命令行工具主入口。
     """
     if version:
-        console.print("Trans-Hub CLI Version 1.0.0")
+        console.print(__version__)
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         # 没有指定子命令时显示帮助信息

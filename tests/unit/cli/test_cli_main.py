@@ -12,6 +12,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from trans_hub import __version__
 from trans_hub.cli import app
 
 
@@ -22,15 +23,14 @@ def runner() -> CliRunner:
 
 
 @pytest.mark.parametrize(
-    "version_flag, expected_output, expected_exit_code",
+    "version_flag, expected_exit_code",
     [
-        (True, "Trans-Hub CLI Version 1.0.0", 0),
-        (False, "帮助信息", 0),
+        (True, 0),
+        (False, 0),
     ],
 )
 def test_main_command(
     version_flag: bool,
-    expected_output: str,
     expected_exit_code: int,
     runner: CliRunner,
 ) -> None:
@@ -46,10 +46,7 @@ def test_main_command(
 
     # 验证输出
     if version_flag:
-        # 忽略ANSI颜色代码进行验证
-        assert "Version" in result.output, \
-            f"版本信息未在输出中找到: {result.output}"
-        assert "1.0" in result.output, \
+        assert result.stdout.strip() == __version__, \
             f"版本号未在输出中找到: {result.output}"
     else:
         # 帮助信息可能以不同格式呈现
@@ -57,6 +54,14 @@ def test_main_command(
             "帮助信息输出为空"
         assert "usage" in result.output.lower() or "使用" in result.output, \
             f"帮助信息未在输出中找到: {result.output}"
+
+
+def test_cli_version_matches_package_version(runner: CliRunner) -> None:
+    """回归测试：验证 --version 输出与包版本一致。"""
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == __version__, \
+        f"CLI 版本输出与包版本不一致: {result.output}"
 
 
 def test_command_decorator_applied() -> None:
