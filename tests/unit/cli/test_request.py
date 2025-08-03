@@ -136,10 +136,36 @@ async def test_request_success(
     )
 
 
+
+@patch("trans_hub.cli.request_command")
+@patch("trans_hub.cli._initialize_coordinator")
+def test_cli_request_closes_loop(
+    mock_init: MagicMock, mock_request_cmd: MagicMock
+) -> None:
+    """确保 CLI request 命令退出时会关闭事件循环。"""
+    mock_coordinator = MagicMock(spec=Coordinator)
+    mock_coordinator.close = AsyncMock()
+    mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    mock_loop.run_until_complete = MagicMock()
+    mock_loop.close = MagicMock()
+    mock_init.return_value = (mock_coordinator, mock_loop)
+
+    from trans_hub.cli import request as cli_request
+
+    cli_request(text="hello", target_lang=["zh"])
+
+    mock_request_cmd.assert_called_once_with(
+        mock_coordinator, mock_loop, "hello", ["zh"], None, None, False
+    )
+    mock_loop.run_until_complete.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    mock_loop.close.assert_called_once()
+
 def test_request_invalid_langs(runner: CliRunner) -> None:
     """无效语言代码应导致命令失败。"""
     result = runner.invoke(app, ["request", "hello", "--target", "invalid"])
     assert result.exit_code != 0
+
 
 
 @patch("asyncio.new_event_loop")

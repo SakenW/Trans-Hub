@@ -206,6 +206,29 @@ def test_gc_no_data_to_clean(
     assert "数据库很干净，无需进行垃圾回收" in str(mock_console_print.call_args_list)
 
 
+
+@patch("trans_hub.cli.gc_command")
+@patch("trans_hub.cli._initialize_coordinator")
+def test_cli_gc_closes_loop(
+    mock_init: MagicMock, mock_gc_command: MagicMock
+) -> None:
+    """确保 CLI gc 命令退出时会关闭事件循环。"""
+    mock_coordinator = MagicMock(spec=Coordinator)
+    mock_coordinator.close = AsyncMock()
+    mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    mock_loop.run_until_complete = MagicMock()
+    mock_loop.close = MagicMock()
+    mock_init.return_value = (mock_coordinator, mock_loop)
+
+    from trans_hub.cli import gc as cli_gc
+
+    cli_gc(retention_days=1, dry_run=True)
+
+    mock_gc_command.assert_called_once_with(mock_coordinator, mock_loop, 1, True)
+    mock_loop.run_until_complete.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    mock_loop.close.assert_called_once()
+
 @patch("trans_hub.cli.gc.main.console.print")
 def test_gc_handles_errors(
     mock_console_print: MagicMock,
@@ -220,4 +243,5 @@ def test_gc_handles_errors(
         gc(mock_coordinator, mock_event_loop, retention_days, True)
 
     mock_console_print.assert_called()
+
 

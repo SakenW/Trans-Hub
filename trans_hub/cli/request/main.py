@@ -59,6 +59,7 @@ def request(
     except Exception as e:
         log.error("请求处理失败", error=str(e), exc_info=True)
         raise SystemExit(1)
+
     finally:
         # 确保协调器已关闭
         if coordinator:
@@ -74,3 +75,4 @@ def request(
                 cli_main._loop = None
             except Exception:
                 pass
+

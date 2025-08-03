@@ -114,6 +114,17 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
             console.print(f"[red]❌ 命令执行失败: {e}[/red]")
             raise typer.Exit(1)
         finally:
+
+            global _coordinator, _loop
+            try:
+                if coordinator and loop:
+                    loop.run_until_complete(coordinator.close())
+            finally:
+                if loop:
+                    loop.close()
+            _coordinator = None
+            _loop = None
+
             if has_error:
                 if coordinator and loop:
                     try:
@@ -122,6 +133,7 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
                         loop.close()
                 _coordinator = None
                 _loop = None
+
 
     return wrapper
 

@@ -187,12 +187,8 @@ async def test_run_worker_initialization(
     # 验证初始化
     # 检查信号处理器是否被调用
     assert mock_event_loop.add_signal_handler.call_count >= 2, f"信号处理器调用次数不足: {mock_event_loop.add_signal_handler.call_count}"
-    
-    # 检查协调器是否被关闭
-    if mock_coordinator.close.call_count == 0:
-        print("警告: coordinator.close 未被调用")
-    else:
-        assert mock_coordinator.close.call_count == 1, f"coordinator.close 调用次数不正确: {mock_coordinator.close.call_count}"
+    # run_worker 不再负责关闭协调器
+    assert mock_coordinator.close.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -515,6 +511,29 @@ async def test_process_pending_translations_called(
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
 
 
+
+@patch("trans_hub.cli.run_worker")
+@patch("trans_hub.cli._initialize_coordinator")
+def test_cli_worker_closes_loop(
+    mock_init: MagicMock, mock_run_worker: MagicMock
+) -> None:
+    """确保 CLI worker 命令退出时会关闭事件循环。"""
+    mock_coordinator = MagicMock(spec=Coordinator)
+    mock_coordinator.close = AsyncMock()
+    mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    mock_loop.run_until_complete = MagicMock()
+    mock_loop.close = MagicMock()
+    mock_init.return_value = (mock_coordinator, mock_loop)
+
+    from trans_hub.cli import worker as cli_worker
+
+    cli_worker()
+
+    mock_run_worker.assert_called_once()
+    mock_loop.run_until_complete.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    mock_loop.close.assert_called_once()
+
 @pytest.mark.asyncio
 
 async def test_run_worker_signal_handler_fallback(
@@ -574,5 +593,6 @@ def test_worker_invalid_langs(runner: CliRunner) -> None:
     """无效语言代码应导致命令失败。"""
     result = runner.invoke(app, ["worker", "--lang", "invalid"])
     assert result.exit_code != 0
+
 
 

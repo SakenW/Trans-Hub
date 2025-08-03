@@ -161,6 +161,7 @@ def run_worker(
 
     loop.run_until_complete(cancel_pending_tasks())
 
+
     # 执行协调器的优雅关闭
     log.info("Worker 任务已完成，正在关闭协调器...")
     try:
