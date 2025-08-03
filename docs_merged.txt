@@ -19,6 +19,7 @@
     ├── RELEASE_NOTES.md
     ├── build_docs.sh
         ├── guides/
+            ├── testing_strategy.rst
             ├── multilingual_support.rst
             ├── creating_an_engine.rst
             ├── advanced_usage.rst
@@ -121,11 +122,10 @@ API 参考
 ========
 
 .. autoclass:: Coordinator
-   :members:
+   :members: __init__, initialize, close, switch_engine, request, process_pending_translations, get_translation, run_garbage_collection, touch_jobs
    :undoc-members: false
    :show-inheritance:
    :member-order: bysource
-   :exclude-members: run_migrations, run_garbage_collection, touch_jobs
 
    .. rubric:: __init__ 方法说明
 
@@ -138,72 +138,6 @@ API 参考
    1.  **L1 缓存**: 首先检查高速的**内存缓存** (使用 `cachetools`)。
    2.  **L2 缓存**: 如果内存缓存未命中，则查询**持久化存储** (数据库)。
    3.  **回填机制**: 如果从数据库中找到结果，它会自动将其**回填**到内存缓存中，以加速后续对相同内容的查询。
-
-完整使用示例
-============
-
-下面的示例展示了一个典型的“请求-处理-查询”完整生命周期。
-
-.. code-block:: python
-   :caption: main.py - 模拟应用主逻辑和后台 Worker
-
-   import asyncio
-   from trans_hub import Coordinator, TransHubConfig, TranslationStatus
-   from trans_hub.persistence import create_persistence_handler
-   from trans_hub.db.schema_manager import apply_migrations
-
-   async def main():
-       # 1. 初始化
-       print("--- 1. 初始化组件 ---")
-       config = TransHubConfig(database_url="sqlite:///./test_doc_usage.db")
-       apply_migrations(config.db_path) # 确保数据库 Schema 是最新的
-       
-       handler = create_persistence_handler(config)
-       coordinator = Coordinator(config, handler)
-       await coordinator.initialize()
-
-       # 2. 客户端发起翻译请求 (快速完成)
-       print("\n--- 2. 登记翻译任务 ---")
-       text_to_translate = "Hello, world!"
-       await coordinator.request(
-           text_content=text_to_translate,
-           target_langs=["zh-CN", "ja", "fr"],
-           business_id="doc-example-001"
-       )
-       print(f"✅ 任务 '{text_to_translate}' 已成功登记。")
-
-       # 3. 后台 Worker 处理中文翻译任务
-       print("\n--- 3. 后台 Worker 开始处理中文任务 ---")
-       async for result in coordinator.process_pending_translations("zh-CN"):
-           if result.status == TranslationStatus.TRANSLATED:
-               print(f"  - 翻译成功: '{result.original_content}' -> '{result.translated_content}'")
-           else:
-               print(f"  - 翻译失败: '{result.original_content}', 错误: {result.error}")
-       print("✅ 中文任务处理完成。")
-       
-       # 4. 客户端查询已完成的翻译
-       print("\n--- 4. 客户端查询结果 ---")
-       # 第一次查询 (可能走数据库)
-       zh_result = await coordinator.get_translation(text_to_translate, "zh-CN")
-       if zh_result:
-           print(f"  - 查询到中文翻译: {zh_result.translated_content}")
-
-       # 第二次查询 (大概率走内存缓存)
-       zh_result_cached = await coordinator.get_translation(text_to_translate, "zh-CN")
-       if zh_result_cached:
-           print(f"  - 再次查询到中文翻译 (可能来自缓存): {zh_result_cached.translated_content}")
-
-       # 查询一个尚未被处理的语言
-       fr_result = await coordinator.get_translation(text_to_translate, "fr")
-       print(f"  - 查询法文翻译结果: {fr_result}") # 预期为 None
-
-       # 5. 清理
-       await coordinator.close()
-       # 在实际应用中，您可能需要手动清理数据库文件
-       # import os; os.remove(config.db_path)
-
-   if __name__ == "__main__":
-       asyncio.run(main())
 ================================================================================
 文件: api/engines.rst
 .. # docs/api/engines.rst
@@ -613,55 +547,52 @@ API 参考
 基本用法
 --------
 
-所有命令都通过 `trans-hub` 入口点执行。您可以通过 `--help` 选项查看所有可用的命令和子命令。
+所有命令都通过 `trans-hub` 入口点执行，并采用“命令组”结构。您可以通过 `--help` 选项查看所有可用的命令组。
 
 .. code-block:: shell
-   
 
    trans-hub --help
 
 .. note::
    在本文档中，我们将使用 ``trans-hub`` 作为命令的入口。根据您的安装方式，您可能需要使用 ``poetry run trans-hub``。
 
-核心命令
+命令组
 --------
 
-### `run-worker`
+### `worker`
+
+用于管理后台 Worker 进程的命令组。
+
+**`worker start`**
 
 启动一个或多个后台工作进程，持续处理指定语言的待翻译任务。这是 `Trans-Hub` 的核心服务命令。
 
 .. code-block:: shell
 
-
-   trans-hub run-worker --lang <LANG_CODE> [OPTIONS]
+   trans-hub worker start --lang <LANG_CODE> [OPTIONS]
 
 **关键选项**:
 
 - ``--lang, -l TEXT``: **[必需]** 要处理的目标语言代码。此选项可多次指定以同时处理多种语言。 (例如: ``--lang en --lang zh-CN``)
-- ``--batch-size, -b INTEGER``: 每个批次处理的任务数量。 (默认: 50)
-- ``--interval, -i INTEGER``: 当任务队列为空时，轮询数据库的间隔时间（秒）。 (默认: 5)
 
 **示例**:
 
 .. code-block:: shell
    :caption: 启动一个处理中文和日文翻译的 Worker
 
-
-   trans-hub run-worker --lang zh-CN --lang ja
-
-.. code-block:: shell
-   :caption: 启动一个高吞吐量的英文 Worker
-
-   trans-hub run-worker --lang en --batch-size 100 --interval 2
+   trans-hub worker start --lang zh-CN --lang ja
 
 ### `request`
+
+用于提交新翻译任务的命令组。
+
+**`request new`**
 
 提交一个新的翻译请求到队列中，供后台 Worker 处理。
 
 .. code-block:: shell
 
-
-   trans-hub request [OPTIONS] <TEXT_TO_TRANSLATE>
+   trans-hub request new [OPTIONS] <TEXT_TO_TRANSLATE>
 
 **参数**:
 
@@ -669,65 +600,64 @@ API 参考
 
 **关键选项**:
 
-- ``--target, -t TEXT``: **[必需]** 目标语言代码。此选项可多次指定以请求多种语言的翻译。 (例如: ``--target en --target fr``)
+- ``--target, -t TEXT``: **[必需]** 目标语言代码。此选项可多次指定。 (例如: ``--target en --target fr``)
 - ``--source, -s TEXT``: (可选) 源语言代码。如果未提供，将使用全局配置中的值。
 - ``--id TEXT``: (可选) 用于追踪的业务 ID。
-- ``--force``: (可选) 强制重新翻译，即使已有缓存或已完成的翻译。
+- ``--force, -f``: (可选) 强制重新翻译，即使已有缓存或已完成的翻译。
 
 **示例**:
 
 .. code-block:: shell
    :caption: 将 "你好" 翻译成英文和法文
 
-   trans-hub request --target en --target fr "你好"
+   trans-hub request new --target en --target fr "你好"
 
 .. code-block:: shell
    :caption: 强制重新翻译一个带有业务 ID 的术语
 
-   trans-hub request --target ja --id "term.login" --force "ログイン"
+   trans-hub request new --target ja --id "term.login" --force "登录"
 
 ### `gc`
+
+用于数据库垃圾回收的命令组。
+
+**`gc run`**
 
 执行数据库垃圾回收，清理过期的、无关联的旧数据。
 
 .. code-block:: shell
 
-   trans-hub gc [OPTIONS]
+   trans-hub gc run [OPTIONS]
 
 **关键选项**:
 
 - ``--days, -d INTEGER``: 保留最近多少天内的活跃任务。 (默认: 90)
-- ``--dry-run``: (可选) 只显示将被删除的条目数量，不实际执行删除操作。这是一个进行破坏性操作前非常有用的安全检查。
+- ``--yes, -y``: (可选) 自动确认，跳过交互式提示直接执行删除。在脚本或 CI 环境中非常有用。
 
 **示例**:
 
 .. code-block:: shell
-   :caption: 预览将要被清理的数据
+   :caption: 预览将要被清理的数据 (默认行为)
 
-   trans-hub gc --dry-run --days 30
+   trans-hub gc run --days 30
+   # (程序会显示预演报告并请求用户确认)
 
 .. code-block:: shell
-   :caption: 实际执行清理操作
+   :caption: 在脚本中自动执行清理操作
 
-   trans-hub gc --days 30
-   # (程序会请求用户确认)
+   trans-hub gc run --days 30 --yes
 
-数据库管理 (`db`)
------------------
+### `db`
 
-这是一个子命令组，用于所有与数据库直接相关的维护任务。
+用于所有与数据库直接相关的维护任务的命令组。
 
-### `db migrate`
+**`db migrate`**
 
 对数据库应用所有必要的迁移脚本，使其达到最新的 Schema 版本。这是初始化新数据库或升级 `Trans-Hub` 版本后的**必要步骤**。
 
 .. code-block:: shell
 
-   trans-hub db migrate [OPTIONS]
-
-**关键选项**:
-
-- ``--db-url TEXT``: (可选) 覆盖配置中定义的数据库 URL。这在临时操作不同数据库时非常有用。
+   trans-hub db migrate
 
 **示例**:
 
@@ -735,11 +665,6 @@ API 参考
    :caption: 对默认数据库执行迁移
 
    trans-hub db migrate
-
-.. code-block:: shell
-   :caption: 对一个指定的数据库文件执行迁移
-
-   trans-hub db migrate --db-url "sqlite:///./backup.db"
 ================================================================================
 文件: configuration.rst
 .. # docs/configuration.rst
@@ -895,7 +820,6 @@ API 参考
 
 .. code-block:: shell
    :caption: 使用 Poetry 安装 (推荐)
-   
 
    # 安装核心库、CLI 工具和免费的 `translators` 引擎
    poetry add "trans-hub[cli,translators]"
@@ -910,7 +834,6 @@ API 参考
 安装完成后，您可以通过 `--version` 标志来验证 `trans-hub` CLI 是否可用。
 
 .. code-block:: shell
-
 
    trans-hub --version
 
@@ -956,9 +879,9 @@ API 参考
 现在，让我们向系统提交一个翻译任务。我们将把 "Hello, world!" 翻译成中文和日文。
 
 .. code-block:: shell
-   :caption: 使用 request 命令提交任务
+   :caption: 使用 request new 命令提交任务
 
-   trans-hub request --target zh-CN --target ja "Hello, world!"
+   trans-hub request new --target zh-CN --target ja "Hello, world!"
 
 执行后，您会看到一条确认消息。这个任务现在已经被登记在数据库中，状态为 `PENDING`。
 
@@ -972,24 +895,14 @@ API 参考
 .. code-block:: shell
    :caption: 在新终端中启动 Worker
 
-   trans-hub run-worker --lang zh-CN --lang ja
+   trans-hub worker start --lang zh-CN --lang ja
 
 启动后，您将看到 Worker 开始轮询数据库，发现并处理待办任务。由于我们将日志级别设为 `DEBUG`，您会看到详细的日志输出，包括翻译成功或失败的信息。
-
-.. note::
-
-   以下是 Worker 运行示例图片，但该图片当前缺失。
-
-   .. 暂时注释掉缺失的图片引用
-   .. 
-   .. .. image:: /_static/worker_running_demo.gif
-   ..    :alt: Worker 运行示例
-   ..    :align: center
 
 成功了！
 --------
 
-恭喜您！您已经成功地完成了 `Trans-Hub` 的一次完整工作流。您刚刚体验了 `Trans-Hub` 设计的核心：**通过 `request` 命令将任务登记与耗时的翻译处理解耦，并由独立的 `run-worker` 进程在后台完成实际工作。**
+恭喜您！您已经成功地完成了 `Trans-Hub` 的一次完整工作流。您刚刚体验了 `Trans-Hub` 设计的核心：**通过 `request new` 命令将任务登记与耗时的翻译处理解耦，并由独立的 `worker start` 进程在后台完成实际工作。**
 
 下一步
 ------
@@ -1335,7 +1248,7 @@ Trans-Hub 架构概述
 为 Trans-Hub 开发新引擎
 =====================================
 
-欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的纯异步、动态发现和自我注册的架构，这个过程比你想象的要简单得多。
+欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的纯异步、动态发现的架构，这个过程比你想象的要简单得多。
 
 在开始之前，我们假设你已经对 `Trans-Hub` 的 :doc:`核心架构 <architecture>` 有了基本的了解。
 
@@ -1352,15 +1265,14 @@ Trans-Hub 架构概述
 引擎**不需要**关心：
 
 - **批处理和并发**: ``BaseTranslationEngine`` 会自动处理。
-- **配置加载与发现**: ``TransHubConfig`` 和注册表会自动处理。
 - **数据库、缓存、重试、速率限制**: 这些都由 ``Coordinator`` 处理。
 
 核心模式：只实现 `_execute_single_translation`
 --------------------------------------------------------------------
 
-这是为 `Trans-Hub` v3.0+ 开发引擎的**唯一核心要求**。你的引擎主类必须继承 ``BaseTranslationEngine``，但你**唯一**需要重写的方法就是 ``_execute_single_translation``。基类已经为你处理了所有外围的批处理和控制逻辑。
+这是为 `Trans-Hub` 开发引擎的**唯一核心要求**。你的引擎主类必须继承 ``BaseTranslationEngine``，但你**唯一**需要重写的方法就是 ``_execute_single_translation``。基类已经为你处理了所有外围的批处理和控制逻辑。
 
-开发流程：三步完成
+开发流程：两步完成
 --------------------
 
 假设我们要创建一个对接 “Awesome Translate” 服务的引擎。
@@ -1375,20 +1287,18 @@ Trans-Hub 架构概述
 
 打开 ``awesome_engine.py`` 文件，并遵循以下结构编写代码。这是构建一个新引擎的“黄金模板”。
 
-1.  **导入**: 导入所有必要的模块，包括 ``BaseTranslationEngine`` 和 ``register_engine_config`` 函数。
+1.  **导入**: 导入所有必要的模块，包括 ``BaseTranslationEngine``。
 2.  **定义配置模型 (`...Config`)**: 创建一个继承自 ``BaseEngineConfig`` 的 Pydantic 模型。
 3.  **定义引擎主类 (`...Engine`)**: 创建一个继承自 ``BaseTranslationEngine`` 的主类，并实现 ``_execute_single_translation`` 方法。
-4.  **自我注册**: 在**文件末尾**，调用 ``register_engine_config`` 函数，将你的引擎名和配置类关联起来。
 
 第三步：完成
 ^^^^^^^^^^^^
 
 完成了！你**不需要**再修改任何其他文件。
 
-- ``engine_registry.py`` 会在你下次运行程序时**自动发现**你的 ``AwesomeEngine`` 类。
-- `Coordinator` 会通过元数据注册表**自动发现**你的 ``AwesomeEngineConfig`` 类。
+:class:`~trans_hub.coordinator.Coordinator` 在初始化时会自动触发引擎发现逻辑。当您的应用实例化 `Coordinator` 时，它就会扫描 `engines` 目录并自动加载、注册您的新引擎。
 
-当用户在 ``TransHubConfig`` 中设置 ``active_engine="awesome"`` 时，整个系统会自动协同工作。
+当用户在 :class:`~trans_hub.config.TransHubConfig` 中设置 ``active_engine="awesome"`` 时，整个系统会自动协同工作。
 
 异步适配：处理同步库
 --------------------
@@ -1457,15 +1367,16 @@ Trans-Hub 架构概述
 
 .. code-block:: python
    :caption: trans_hub/engines/awesome_engine.py (完整示例)
-   :emphasize-lines: 15, 29, 44
+   :emphasize-lines: 12, 26
 
    import asyncio
    from typing import Any, Optional
 
-   from pydantic_settings import BaseSettings
-
-   from trans_hub.engines.base import BaseEngineConfig, BaseContextModel, BaseTranslationEngine
-   from trans_hub.engines.meta import register_engine_config
+   from trans_hub.engines.base import (
+       BaseContextModel,
+       BaseEngineConfig,
+       BaseTranslationEngine,
+   )
    from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
    # 假设有一个名为 'awesome_sdk' 的同步第三方库
@@ -1474,12 +1385,11 @@ Trans-Hub 架构概述
    except ImportError:
        awesome_sdk = None
 
-
    # --- 1. 定义配置模型 ---
-   class AwesomeEngineConfig(BaseSettings, BaseEngineConfig):
-       # BaseSettings 会自动从 .env 和环境变量加载 (前缀: TH_)
+   class AwesomeEngineConfig(BaseEngineConfig):
+       # pydantic-settings 会自动从 .env 和环境变量加载
+       # (需以 TH_ENGINE_CONFIGS__AWESOME__... 为前缀)
        awesome_api_key: str
-
 
    # --- 2. 定义引擎主类 ---
    class AwesomeEngine(BaseTranslationEngine[AwesomeEngineConfig]):
@@ -1495,7 +1405,9 @@ Trans-Hub 架构概述
        def _translate_sync(self, text: str, target_lang: str) -> EngineBatchItemResult:
            """[私有] 这是一个执行阻塞 I/O 的同步方法。"""
            try:
-               translated_text = self.client.translate(text=text, target_language=target_lang)
+               translated_text = self.client.translate(
+                   text=text, target_language=target_lang
+               )
                return EngineSuccess(translated_text=translated_text)
            except awesome_sdk.AuthError as e:
                return EngineError(error_message=f"认证错误: {e}", is_retryable=False)
@@ -1511,33 +1423,6 @@ Trans-Hub 架构概述
        ) -> EngineBatchItemResult:
            """[实现] 通过 asyncio.to_thread 包装同步调用。"""
            return await asyncio.to_thread(self._translate_sync, text, target_lang)
-
-
-   # --- 3. 自我注册 ---
-   # 将引擎名 "awesome" 与其配置模型 AwesomeEngineConfig 关联起来
-   register_engine_config("awesome", AwesomeEngineConfig)
-
-编写测试：验证你的引擎
-----------------------------------------
-
-为你的引擎编写异步测试是至关重要的。最好的方法是编写一个集成测试，验证 `Coordinator` 能否成功使用你的新引擎。
-
-.. code-block:: python
-   :caption: tests/engines/test_awesome_engine.py (集成测试骨架)
-
-   import pytest
-   from unittest.mock import patch, MagicMock
-   from trans_hub import Coordinator, TransHubConfig
-   # ...
-
-   @pytest.mark.asyncio
-   async def test_coordinator_with_awesome_engine():
-       # 1. 使用 monkeypatch 模拟 awesome_sdk 客户端
-       # 2. 创建一个激活了 AwesomeEngine 的 TransHubConfig
-       # 3. 初始化 Coordinator
-       # 4. 调用 coordinator.request() 和 coordinator.process_pending_translations()
-       # 5. 断言翻译结果是否符合预期
-       pass
 ================================================================================
 文件: guides/data_model.rst
 .. # docs/guides/data_model.rst
@@ -1852,7 +1737,7 @@ Schema 详解
    # 关键：确保使用您安装了 trans-hub 的虚拟环境中的可执行文件
    # 如果使用 Poetry，路径可能类似 /home/myapp_user/.cache/pypoetry/virtualenvs/.../bin/trans-hub
    # 如果使用 venv，路径可能类似 /opt/my_app/trans-hub/.venv/bin/trans-hub
-   ExecStart=/path/to/your/virtualenv/bin/trans-hub run-worker --lang en --lang zh-CN
+   ExecStart=/path/to/your/virtualenv/bin/trans-hub worker start --lang en --lang zh-CN
 
    # 从部署目录加载 .env 文件
    EnvironmentFile=/opt/my_app/trans-hub/.env
@@ -2010,6 +1895,119 @@ Schema 详解
 - **提交完整性**: 在提交代码时，请同时提交您修改过的 `.po` 文件。
 - **定期同步**: 定期运行 `make gettext` 和 `make update-po-<lang>`，以确保您的翻译文件与最新的中文原文保持同步。
 ================================================================================
+文件: guides/testing_strategy.rst
+.. # docs/guides/testing_strategy.rst
+
+==================
+测试策略与指南
+==================
+
+`Trans-Hub` 项目致力于维护一个高质量、高覆盖率的测试套件。本指南详细介绍了项目的测试哲学、分层结构以及如何为新功能贡献测试。
+
+测试哲学
+--------
+
+我们的测试遵循以下核心原则，这些原则与我们的 :doc:`../CONTRIBUTING` 指南一脉相承：
+
+分层测试
+  我们严格区分 :strong:`单元测试` 和 :strong:`集成测试`，以在测试速度和覆盖范围之间取得平衡。
+
+行为驱动 (BDD)
+  测试应验证一个组件的 :strong:`公共接口和外部行为` （输入与输出），而不是其内部实现细节。这使得重构内部代码时，测试用例依然有效。
+
+确定性 (Deterministic)
+  所有测试，特别是单元测试，都必须是确定性的。:strong:`严禁` 依赖物理时间（如 `sleep`）或随机性。所有不确定性因素（如网络、时间）都必须通过 `pytest-mock` 进行精确控制。
+
+CI 优先
+  所有代码在合并前，:strong:`必须` 在干净的 CI 环境中通过所有测试（`pytest`）、类型检查（`mypy`）和代码风格检查（`ruff`）。
+
+测试分层结构
+------------
+
+项目的测试代码都位于 `tests/` 目录下，并被划分为两个主要部分：
+
+`tests/unit/`
+  - **职责**: 存放所有 :strong:`单元测试`。
+  - **特点**:
+    - :strong:`快速`: 每个测试都应在几毫秒内完成。
+    - :strong:`隔离`: 只测试单个类或函数，其所有外部依赖（如其他类、数据库、网络）都 :strong:`必须` 被 `mocker` 模拟掉。
+    - :strong:`无 I/O`: 单元测试 :strong:`绝不` 允许执行任何文件、网络或数据库 I/O 操作。
+
+`tests/integration/`
+  - **职责**: 存放所有 :strong:`集成测试` 和 :strong:`端到端 (E2E) 测试`。
+  - **特点**:
+    - :strong:`真实`: 测试多个组件的协同工作。
+    - :strong:`允许 I/O`: 可以执行真实的数据库操作（通常是内存数据库或临时文件）和模拟的 CLI 调用。
+    - :strong:`覆盖完整流程`: 用于验证从用户输入（如 CLI 命令）到系统最终状态（如数据库记录）的完整工作流。
+
+运行测试
+--------
+
+我们使用 `pytest` 作为测试运行器。
+
+.. code-block:: shell
+   :caption: 运行所有测试
+
+   poetry run pytest
+
+.. code-block:: shell
+   :caption: 只运行快速的单元测试 (在 CI 中用于快速反馈)
+
+   poetry run pytest tests/unit/
+
+.. code-block:: shell
+   :caption: 运行特定文件的测试
+
+   poetry run pytest tests/integration/cli/test_cli_request.py
+
+测试 Fixtures (`conftest.py`)
+-----------------------------
+
+我们利用 `pytest` 的 Fixture 机制来管理测试依赖和环境。
+
+`tests/unit/`
+  此目录下的测试通常直接使用 `pytest-mock` 提供的 `mocker` fixture 来创建 mock 对象。
+
+`tests/integration/cli/conftest.py`
+  提供用于测试 CLI 命令 :strong:`行为` 的 Fixtures。核心 Fixture 包括：
+
+  `cli_runner`
+    提供一个 `CliRunner` 实例来模拟命令行调用。
+
+  `mock_cli_backend`
+    一个 :strong:`非自动` 的 fixture，当被测试函数请求时，它会 :strong:`完全 mock 掉` `Coordinator` 和数据库，允许我们只测试 CLI 的参数解析、流程控制和输出是否正确，而无需执行真实的业务逻辑。
+
+`tests/integration/conftest.py`
+  提供用于 :strong:`端到端测试` 的、:strong:`真实` 的组件实例。核心 Fixture 包括：
+
+  `test_config`
+    为每个测试创建一个指向全新临时数据库的 `TransHubConfig`。
+
+  `coordinator`
+    一个 :strong:`完全可用` 的、连接到真实（临时）数据库的 `Coordinator` 实例。这是进行端到端流程验证的关键。
+
+如何贡献测试
+------------
+
+当您贡献一个新功能或修复一个 Bug 时，请遵循以下步骤：
+
+1.  **确定测试类型**:
+    - 如果您修改的是一个独立的、无依赖或依赖可被轻松 mock 的工具函数，请在 `tests/unit/` 下为其添加单元测试。
+    - 如果您添加了一个新的 CLI 命令或修改了 `Coordinator` 的核心流程，请在 `tests/integration/` 下为其添加集成测试。
+2.  **编写测试用例**:
+    - 遵循“安排 (Arrange) -> 行动 (Act) -> 断言 (Assert)”的模式。
+    - 使用 `mocker` 或我们提供的 `conftest.py` Fixtures 来准备测试环境。
+    - 调用您要测试的函数或 CLI 命令。
+    - 断言其返回值、最终状态或副作用（例如，一个 mock 是否被以正确的参数调用）是否符合预期。
+3.  **运行本地检查**: 在提交前，请务必在本地运行完整的 CI 检查流程：
+
+    .. code-block:: shell
+
+       poetry run ruff format .
+       poetry run ruff check --fix
+       poetry run mypy .
+       poetry run pytest
+================================================================================
 文件: index.rst
 .. # docs/index.rst (Final Version)
 
@@ -2059,6 +2057,7 @@ Schema 详解
    :caption: 贡献与开发
 
    guides/creating_an_engine
+   guides/testing_strategy
    guides/multilingual_support
    CHANGELOG
    RELEASE_SOP
