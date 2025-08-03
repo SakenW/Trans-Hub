@@ -12,9 +12,77 @@ from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
 
+import sys
+import types
+import enum
+import importlib.util
+from pathlib import Path
+
+# 构建最小化的 trans_hub 依赖，以便直接加载 run_worker 模块
+
+class Coordinator:  # 最小协调器定义供测试使用
+    async def process_pending_translations(self, target_lang: str, batch_size: int):
+        if False:
+            yield
+
+    async def close(self) -> None:  # pragma: no cover - 简化实现
+        pass
+
+
+class TranslationStatus(enum.Enum):
+    TRANSLATED = "translated"
+    FAILED = "failed"
+
+
+class TranslationResult:
+    def __init__(self, status: TranslationStatus, original_content: str = "", error: str | None = None):
+        self.status = status
+        self.original_content = original_content
+        self.error = error
+
+
+# 将这些类注入到模拟的模块中，供 run_worker 导入
+coordinator_mod = types.ModuleType("trans_hub.coordinator")
+coordinator_mod.Coordinator = Coordinator
+types_mod = types.ModuleType("trans_hub.types")
+types_mod.TranslationStatus = TranslationStatus
+types_mod.TranslationResult = TranslationResult
+sys.modules.setdefault("trans_hub.coordinator", coordinator_mod)
+sys.modules.setdefault("trans_hub.types", types_mod)
+
+# 提供 structlog 替身
+structlog_stub = types.SimpleNamespace(
+    get_logger=lambda *args, **kwargs: types.SimpleNamespace(
+        info=lambda *a, **k: None,
+        warning=lambda *a, **k: None,
+        error=lambda *a, **k: None,
+        debug=lambda *a, **k: None,
+    )
+)
+sys.modules.setdefault("structlog", structlog_stub)
+
+# 直接从文件加载 run_worker 模块，避免触发复杂的包依赖
+spec = importlib.util.spec_from_file_location(
+    "trans_hub.cli.worker.main",
+    Path(__file__).resolve().parents[3] / "trans_hub" / "cli" / "worker" / "main.py",
+)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)  # type: ignore[assignment]
+run_worker = module.run_worker
+
+
+from typer.testing import CliRunner
+
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationResult, TranslationStatus
+
+from trans_hub.config import TransHubConfig
+
+from trans_hub.cli import app
+
+
 import tracemalloc
 
 tracemalloc.start()
@@ -41,6 +109,11 @@ def mock_event_loop() -> MagicMock:
     loop.call_soon_threadsafe = MagicMock()
     # 模拟 run_until_complete，使其不实际运行事件循环
     loop.run_until_complete = MagicMock()
+    # 使用 loop.create_task 以避免需要运行中的事件循环
+    loop.create_task = MagicMock()
+    # 提供 asyncio 所需的属性和方法
+    loop._all_tasks = set()
+    loop.current_task = MagicMock(return_value=None)
     return loop
 
 
@@ -50,8 +123,17 @@ def shutdown_event() -> asyncio.Event:
     return asyncio.Event()
 
 
+
+def test_run_worker_initialization(
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
+
+
 @pytest.mark.asyncio
 async def test_run_worker_initialization(
+
     mock_coordinator: MagicMock,
     mock_event_loop: MagicMock,
     shutdown_event: asyncio.Event,
@@ -59,7 +141,7 @@ async def test_run_worker_initialization(
     """测试 run_worker 函数的初始化。"""
     # 准备测试数据
     langs = ["en", "zh-CN"]
-    batch_size = 10
+    batch_size = TransHubConfig().batch_size
     polling_interval = 5
 
     # 模拟 process_pending_translations 返回空的异步生成器
@@ -80,24 +162,23 @@ async def test_run_worker_initialization(
     is_async = inspect.iscoroutinefunction(run_worker)
     print(f"run_worker 是异步函数: {is_async}")
 
-    # 调用 run_worker 函数
-    run_worker(
-        mock_coordinator,
-        mock_event_loop,
-        shutdown_event,
-        langs,
-        batch_size,
-        polling_interval,
-    )
-
-    # 等待一段时间让run_worker有机会执行
-    await asyncio.sleep(0.5)
+    # 调用 run_worker 函数，确保使用 loop.create_task 而非 asyncio.create_task
+    with patch("asyncio.create_task", side_effect=RuntimeError("no running event loop")) as mock_asyncio_create_task:
+        run_worker(
+            mock_coordinator,
+            mock_event_loop,
+            shutdown_event,
+            langs,
+            batch_size,
+            polling_interval,
+        )
+        # 验证 asyncio.create_task 未被调用
+        mock_asyncio_create_task.assert_not_called()
+    # 验证 loop.create_task 被调用
+    assert mock_event_loop.create_task.call_count == len(langs)
 
     # 发送停止信号
     shutdown_event.set()
-
-    # 等待run_worker处理停止信号
-    await asyncio.sleep(0.5)
 
     # 添加调试信息
     print(f"add_signal_handler 调用次数: {mock_event_loop.add_signal_handler.call_count}")
@@ -196,12 +277,6 @@ async def test_run_worker_processing(
     # 验证任务处理
     # 验证方法被调用
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
-    # 移除严格的调用次数断言，因为run_worker可能会多次调用该方法
-    # mock_coordinator.process_pending_translations.assert_called_once()
-    # 如果需要验证参数，可以使用
-    # args, kwargs = mock_coordinator.process_pending_translations.call_args
-    # assert args[0] == "en"
-    # assert args[1] == batch_size
 
 
 @pytest.mark.asyncio
@@ -438,3 +513,66 @@ async def test_process_pending_translations_called(
     # 验证 process_pending_translations 被调用
     print(f"process_pending_translations 最终调用次数: {mock_coordinator.process_pending_translations.call_count}")
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
+
+
+@pytest.mark.asyncio
+
+async def test_run_worker_signal_handler_fallback(
+    mock_coordinator: MagicMock,
+    shutdown_event: asyncio.Event,
+) -> None:
+    """当事件循环不支持 add_signal_handler 时使用 signal.signal 的回退。"""
+
+    loop = MagicMock()
+    loop.add_signal_handler = MagicMock(side_effect=NotImplementedError)
+    loop.call_soon_threadsafe = MagicMock()
+    loop.run_until_complete = MagicMock()
+
+    with patch("signal.signal") as mock_signal:
+        run_worker(mock_coordinator, loop, shutdown_event, [])
+
+    assert mock_signal.call_count == 2
+    mock_signal.assert_any_call(signal.SIGTERM, ANY)
+    mock_signal.assert_any_call(signal.SIGINT, ANY)
+
+async def test_cleanup_cancels_pending_tasks() -> None:
+    """确保清理逻辑能够取消未完成的任务。"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    coordinator = MagicMock(spec=Coordinator)
+    coordinator.process_pending_translations = AsyncMock()
+    coordinator.close = AsyncMock()
+
+    shutdown_event = asyncio.Event()
+
+    async def long_running() -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            pass
+
+    pending_task = loop.create_task(long_running())
+
+    # 触发立即关闭以运行清理逻辑
+    loop.call_soon(shutdown_event.set)
+
+    run_worker(coordinator, loop, shutdown_event, [])
+
+    assert pending_task.cancelled(), "未完成的任务应被取消"
+
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+
+def test_worker_requires_langs(runner: CliRunner) -> None:
+    """未提供语言列表时命令应失败。"""
+    result = runner.invoke(app, ["worker"])
+    assert result.exit_code != 0
+
+
+def test_worker_invalid_langs(runner: CliRunner) -> None:
+    """无效语言代码应导致命令失败。"""
+    result = runner.invoke(app, ["worker", "--lang", "invalid"])
+    assert result.exit_code != 0
+
+
