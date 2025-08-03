@@ -17,6 +17,7 @@ from trans_hub.cli.request.main import request as request_command
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
+from trans_hub.logging_config import setup_logging
 
 log = structlog.get_logger("trans_hub.cli")
 console = Console()
@@ -60,6 +61,10 @@ def _initialize_coordinator(
 
     # 初始化协调器
     config = TransHubConfig()
+    setup_logging(
+        log_level=config.logging.level,
+        log_format=config.logging.format,
+    )
     from trans_hub.persistence.sqlite import SQLitePersistenceHandler
 
     _persistence_handler = SQLitePersistenceHandler(config.database_url)
