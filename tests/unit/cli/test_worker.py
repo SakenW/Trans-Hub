@@ -446,6 +446,25 @@ async def test_process_pending_translations_called(
 
 
 @pytest.mark.asyncio
+
+async def test_run_worker_signal_handler_fallback(
+    mock_coordinator: MagicMock,
+    shutdown_event: asyncio.Event,
+) -> None:
+    """当事件循环不支持 add_signal_handler 时使用 signal.signal 的回退。"""
+
+    loop = MagicMock()
+    loop.add_signal_handler = MagicMock(side_effect=NotImplementedError)
+    loop.call_soon_threadsafe = MagicMock()
+    loop.run_until_complete = MagicMock()
+
+    with patch("signal.signal") as mock_signal:
+        run_worker(mock_coordinator, loop, shutdown_event, [])
+
+    assert mock_signal.call_count == 2
+    mock_signal.assert_any_call(signal.SIGTERM, ANY)
+    mock_signal.assert_any_call(signal.SIGINT, ANY)
+
 async def test_cleanup_cancels_pending_tasks() -> None:
     """确保清理逻辑能够取消未完成的任务。"""
     loop = asyncio.new_event_loop()
@@ -474,7 +493,7 @@ async def test_cleanup_cancels_pending_tasks() -> None:
 
     loop.run_until_complete(asyncio.sleep(0))
     loop.close()
-=======
+
 def test_worker_requires_langs(runner: CliRunner) -> None:
     """未提供语言列表时命令应失败。"""
     result = runner.invoke(app, ["worker"])
@@ -485,4 +504,5 @@ def test_worker_invalid_langs(runner: CliRunner) -> None:
     """无效语言代码应导致命令失败。"""
     result = runner.invoke(app, ["worker", "--lang", "invalid"])
     assert result.exit_code != 0
+
 

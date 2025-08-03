@@ -43,8 +43,13 @@ def run_worker(
             log.warning("关闭事件未初始化，无法触发优雅停机")
 
     # 注册信号处理器
-    loop.add_signal_handler(signal.SIGTERM, signal_handler, signal.SIGTERM, None)
-    loop.add_signal_handler(signal.SIGINT, signal_handler, signal.SIGINT, None)
+    try:
+        loop.add_signal_handler(signal.SIGTERM, signal_handler, signal.SIGTERM, None)
+        loop.add_signal_handler(signal.SIGINT, signal_handler, signal.SIGINT, None)
+    except NotImplementedError:
+        # 在不支持 add_signal_handler 的平台上回退到 signal.signal
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
     async def process_language(target_lang: str) -> None:
         """处理单一语言的循环。"""
