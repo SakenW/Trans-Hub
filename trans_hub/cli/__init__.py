@@ -44,12 +44,8 @@ class State:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-def _initialize_coordinator(
-    skip_init: bool = False,
-) -> tuple[Coordinator, asyncio.AbstractEventLoop]:
-    """
-    初始化协调器和事件循环。
-    """
+def _initialize_coordinator() -> tuple[Coordinator, asyncio.AbstractEventLoop]:
+    """初始化协调器和事件循环并执行初始化。"""
     global _coordinator, _loop
 
     if _coordinator is not None and _loop is not None:
@@ -69,9 +65,7 @@ def _initialize_coordinator(
 
     _persistence_handler = SQLitePersistenceHandler(config.database_url)
     _coordinator = Coordinator(config, _persistence_handler)
-
-    if not skip_init:
-        _loop.run_until_complete(_coordinator.initialize())
+    _loop.run_until_complete(_coordinator.initialize())
 
     return _coordinator, _loop
 
