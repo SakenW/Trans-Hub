@@ -32,17 +32,6 @@ app.add_typer(app_app, name="app", help="应用主入口")
 _coordinator: Optional[Coordinator] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
-
-class State:
-    """
-    全局状态类，用于存储CLI运行时的状态信息。
-    """
-
-    def __init__(self) -> None:
-        self.coordinator: Optional[Coordinator] = None
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-
-
 def _initialize_coordinator(
     skip_init: bool = False,
 ) -> tuple[Coordinator, asyncio.AbstractEventLoop]:
