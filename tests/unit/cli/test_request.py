@@ -9,8 +9,10 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
 from trans_hub.cli.request.main import _async_request, request
+from trans_hub.cli import app
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationRequest, TranslationResult, TranslationStatus
 
@@ -30,6 +32,11 @@ def mock_event_loop() -> MagicMock:
     loop = MagicMock(spec=asyncio.AbstractEventLoop)
     loop.run_until_complete = MagicMock()
     return loop
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
 
 
 @pytest.mark.asyncio
@@ -127,6 +134,38 @@ async def test_request_success(
         business_id=business_id,
         force_retranslate=force,
     )
+
+
+
+@patch("trans_hub.cli.request_command")
+@patch("trans_hub.cli._initialize_coordinator")
+def test_cli_request_closes_loop(
+    mock_init: MagicMock, mock_request_cmd: MagicMock
+) -> None:
+    """确保 CLI request 命令退出时会关闭事件循环。"""
+    mock_coordinator = MagicMock(spec=Coordinator)
+    mock_coordinator.close = AsyncMock()
+    mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    mock_loop.run_until_complete = MagicMock()
+    mock_loop.close = MagicMock()
+    mock_init.return_value = (mock_coordinator, mock_loop)
+
+    from trans_hub.cli import request as cli_request
+
+    cli_request(text="hello", target_lang=["zh"])
+
+    mock_request_cmd.assert_called_once_with(
+        mock_coordinator, mock_loop, "hello", ["zh"], None, None, False
+    )
+    mock_loop.run_until_complete.assert_called_once()
+    mock_coordinator.close.assert_called_once()
+    mock_loop.close.assert_called_once()
+
+def test_request_invalid_langs(runner: CliRunner) -> None:
+    """无效语言代码应导致命令失败。"""
+    result = runner.invoke(app, ["request", "hello", "--target", "invalid"])
+    assert result.exit_code != 0
+
 
 
 @patch("asyncio.new_event_loop")
