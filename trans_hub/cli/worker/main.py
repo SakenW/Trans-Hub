@@ -1,16 +1,18 @@
+from __future__ import annotations
+
 # trans_hub/cli/worker/main.py
-"""
-Trans-Hub Worker CLI 子模块。
-"""
+"""Trans-Hub Worker CLI 子模块。"""
 
 import asyncio
 import signal
-from typing import Any, List
+from typing import Any, List, TYPE_CHECKING
 
 import structlog
 
-from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationStatus
+
+if TYPE_CHECKING:  # pragma: no cover
+    from trans_hub.coordinator import Coordinator
 
 log = structlog.get_logger("trans_hub.cli.worker")
 

@@ -1,7 +1,7 @@
+from __future__ import annotations
+
 # trans_hub/cli/gc/main.py
-"""
-Trans-Hub Garbage Collection CLI 子模块。
-"""
+"""Trans-Hub Garbage Collection CLI 子模块。"""
 
 import asyncio
 
@@ -10,7 +10,10 @@ import structlog
 from rich.console import Console
 from rich.table import Table
 
-from trans_hub.coordinator import Coordinator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from trans_hub.coordinator import Coordinator
 
 log = structlog.get_logger("trans_hub.cli.gc")
 console = Console()

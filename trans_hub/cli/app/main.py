@@ -1,18 +1,19 @@
+from __future__ import annotations
+
 # trans_hub/cli/app/main.py
-"""
-Trans-Hub Application CLI 子模块。
-"""
+"""Trans-Hub Application CLI 子模块。"""
 
 import asyncio
 import signal
 import sys
-from typing import NoReturn
+from typing import NoReturn, TYPE_CHECKING
 
 import structlog
 import typer
 from rich.console import Console
 
-from trans_hub.coordinator import Coordinator
+if TYPE_CHECKING:  # pragma: no cover
+    from trans_hub.coordinator import Coordinator
 
 log = structlog.get_logger("trans_hub.cli.app")
 console = Console()

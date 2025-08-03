@@ -1,100 +1,75 @@
 # tests/unit/cli/test_cli_main.py
-"""
-针对 Trans-Hub CLI 主入口的单元测试。
+"""针对 Trans‑Hub CLI 主入口的单元测试。
 
-这些测试验证了 CLI 主命令的基本功能，包括版本显示、帮助信息和命令调度。
+这些测试在没有真实 Typer 依赖的情况下验证 CLI 主逻辑。为了
+简化依赖，我们直接调用回调函数并使用简单的 MagicMock 对象来
+模拟上下文。
 """
 
+import pathlib
 import sys
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, patch
+import importlib.util
+import types
 
 import pytest
-import typer
-from typer.testing import CliRunner
 
-from trans_hub.cli import app
+# 构建一个无需执行 ``trans_hub.__init__`` 的临时包，从而避免昂贵的依赖。
+PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[3] / "trans_hub"
+pkg = types.ModuleType("trans_hub")
+pkg.__path__ = [str(PACKAGE_ROOT)]  # type: ignore[attr-defined]
+sys.modules["trans_hub"] = pkg
+
+# 允许导入同目录下提供的依赖桩
+sys.path.append(str(PACKAGE_ROOT.parent))
+
+spec = importlib.util.spec_from_file_location("trans_hub.cli", PACKAGE_ROOT / "cli" / "__init__.py")
+cli = importlib.util.module_from_spec(spec)
+sys.modules["trans_hub.cli"] = cli
+spec.loader.exec_module(cli)  # type: ignore[union-attr]
+
+from trans_hub.cli import app, gc, main, request, worker  # type: ignore[attr-defined]
 
 
-@pytest.fixture
-def runner() -> CliRunner:
-    """创建一个 Typer 测试运行器。"""
-    return CliRunner()
+@pytest.mark.parametrize("version_flag", [True, False])
+def test_main_command(version_flag: bool, capsys: pytest.CaptureFixture[str]) -> None:
+    """测试 main 回调的版本输出和帮助调用。"""
 
+    ctx = MagicMock()
+    ctx.invoked_subcommand = None
+    ctx.get_help.return_value = "help"
 
-@pytest.mark.parametrize(
-    "version_flag, expected_output, expected_exit_code",
-    [
-        (True, "Trans-Hub CLI Version 1.0.0", 0),
-        (False, "帮助信息", 0),
-    ],
-)
-def test_main_command(
-    version_flag: bool,
-    expected_output: str,
-    expected_exit_code: int,
-    runner: CliRunner,
-) -> None:
-    """测试 main 命令的基本功能。"""
-    # 准备命令参数
-    args = ["--version"] if version_flag else []
+    with pytest.raises(SystemExit) as exc:
+        main(ctx, version=version_flag)
 
-    # 运行命令
-    result = runner.invoke(app, args)
+    # 无论是否传入 --version，退出码都应为 0
+    assert exc.value.code == 0 or exc.value.code is None
 
-    # 验证退出码
-    assert result.exit_code == expected_exit_code
-
-    # 验证输出
+    captured = capsys.readouterr().out
     if version_flag:
-        # 忽略ANSI颜色代码进行验证
-        assert "Version" in result.output, \
-            f"版本信息未在输出中找到: {result.output}"
-        assert "1.0" in result.output, \
-            f"版本号未在输出中找到: {result.output}"
+        assert "Version" in captured and "1.0.0" in captured
     else:
-        # 帮助信息可能以不同格式呈现
-        assert len(result.output) > 0, \
-            "帮助信息输出为空"
-        assert "usage" in result.output.lower() or "使用" in result.output, \
-            f"帮助信息未在输出中找到: {result.output}"
+        ctx.get_help.assert_called_once()
 
 
 def test_command_decorator_applied() -> None:
-    """测试 CLI 命令是否存在。"""
-    # 验证命令存在
-    assert hasattr(app, 'command'), "Typer应用没有command方法"
+    """CLI 应用应具备 command 方法以注册子命令。"""
 
-    # 我们无法直接测试装饰器是否被应用，但可以测试命令是否具有某些特性
-    # 这里我们假设命令函数会有特定的名称或属性
-    # 这只是一个简化的测试方法
-    assert True, "此测试仅验证命令结构存在"
+    assert hasattr(app, "command")
 
 
 def test_cli_app_structure() -> None:
-    """测试 CLI 应用的结构是否正确。"""
-    # 验证命令结构
-    assert hasattr(app, 'command'), "Typer应用没有command方法"
+    """CLI 应用应当已经注册了一些命令。"""
 
-    # 尝试通过Typer的内部属性检查子命令
-    # 注意：这依赖于Typer的内部实现，可能会随版本变化
-    try:
-        # 获取Typer应用的子命令
-        subcommands = app.registered_commands
-        assert len(subcommands) > 0, "没有找到注册的命令"
-    except AttributeError:
-        # 如果无法访问registered_commands，我们使用一个更通用的方法
-        assert True, "无法直接验证子命令，但应用结构看起来有效"
+    assert hasattr(app, "registered_commands")
+    assert len(app.registered_commands) > 0
 
 
-@pytest.mark.parametrize("command_name", ["worker", "request", "gc"])
-def test_command_requires_coordinator(command_name: str, runner: CliRunner) -> None:
-    """测试需要协调器的命令在没有协调器时是否会优雅失败。"""
-    # 运行命令
-    result = runner.invoke(app, [command_name])
+@pytest.mark.parametrize("command_func", [worker, request, gc])
+def test_command_requires_coordinator(command_func) -> None:
+    """当协调器初始化失败时，命令应抛出 SystemExit。"""
 
-    # 验证命令执行失败
-    assert result.exit_code != 0, \
-        f"命令{command_name}应该失败，但退出码为{result.exit_code}"
+    with patch("trans_hub.cli._initialize_coordinator", side_effect=RuntimeError("fail")):
+        with pytest.raises(SystemExit):
+            command_func()  # type: ignore[arg-type]
 
-    # 注意：我们不再验证协调器初始化，因为不同命令可能有不同的实现方式
-    # 专注于验证命令失败的结果

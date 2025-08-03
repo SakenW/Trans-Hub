@@ -10,9 +10,30 @@ import tempfile
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
+import pathlib
+import sys
+import importlib
+import types
 import pytest
 import sqlite3
-from trans_hub.cli.db.main import db_migrate
+
+# 构建临时包以避免执行 trans_hub.__init__
+PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[3] / "trans_hub"
+pkg = types.ModuleType("trans_hub")
+pkg.__path__ = [str(PACKAGE_ROOT)]  # type: ignore[attr-defined]
+sys.modules["trans_hub"] = pkg
+
+sys.path.append(str(PACKAGE_ROOT.parent))
+
+# 为 trans_hub.utils 提供最小桩，避免加载真实依赖
+utils_stub = types.ModuleType("trans_hub.utils")
+def _placeholder() -> str:  # pragma: no cover
+    return "sqlite:///"
+utils_stub.get_database_url = _placeholder  # type: ignore[attr-defined]
+sys.modules["trans_hub.utils"] = utils_stub
+
+db_module = importlib.import_module("trans_hub.cli.db.main")
+db_migrate = db_module.db_migrate  # type: ignore[attr-defined]
 
 
 @pytest.fixture

@@ -9,11 +9,26 @@ import asyncio
 from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pathlib
+import sys
+import importlib
+import types
 import pytest
-import questionary
 
-from trans_hub.cli.gc.main import gc
-from trans_hub.coordinator import Coordinator
+# 构建临时包以避免执行 trans_hub.__init__
+PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[3] / "trans_hub"
+pkg = types.ModuleType("trans_hub")
+pkg.__path__ = [str(PACKAGE_ROOT)]  # type: ignore[attr-defined]
+sys.modules["trans_hub"] = pkg
+
+sys.path.append(str(PACKAGE_ROOT.parent))
+
+gc_module = importlib.import_module("trans_hub.cli.gc.main")
+gc = gc_module.gc  # type: ignore[attr-defined]
+
+# 使用简单的占位类以避免导入真实 Coordinator
+class Coordinator:  # pragma: no cover
+    pass
 
 
 @pytest.fixture

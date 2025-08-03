@@ -8,11 +8,35 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pathlib
+import sys
+import importlib
+import types
 import pytest
 
-from trans_hub.cli.request.main import _async_request, request
-from trans_hub.coordinator import Coordinator
-from trans_hub.types import TranslationRequest, TranslationResult, TranslationStatus
+# 构建临时包以避免执行 trans_hub.__init__
+PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[3] / "trans_hub"
+pkg = types.ModuleType("trans_hub")
+pkg.__path__ = [str(PACKAGE_ROOT)]  # type: ignore[attr-defined]
+sys.modules["trans_hub"] = pkg
+
+sys.path.append(str(PACKAGE_ROOT.parent))
+
+request_module = importlib.import_module("trans_hub.cli.request.main")
+_async_request = request_module._async_request  # type: ignore[attr-defined]
+request = request_module.request  # type: ignore[attr-defined]
+
+import enum
+
+class Coordinator:  # pragma: no cover - placeholder
+    pass
+
+class TranslationResult:  # pragma: no cover - placeholder
+    pass
+
+class TranslationStatus(enum.Enum):  # pragma: no cover
+    PENDING = "pending"
+    TRANSLATED = "translated"
 
 
 @pytest.fixture
@@ -32,8 +56,7 @@ def mock_event_loop() -> MagicMock:
     return loop
 
 
-@pytest.mark.asyncio
-async def test_async_request_success(mock_coordinator: MagicMock) -> None:
+def test_async_request_success(mock_coordinator: MagicMock) -> None:
     """测试 _async_request 函数成功提交翻译请求。"""
     # 准备测试数据
     text = "Hello, world!"
@@ -49,22 +72,23 @@ async def test_async_request_success(mock_coordinator: MagicMock) -> None:
     mock_coordinator.request.return_value = mock_result
 
     # 调用 _async_request
-    await _async_request(
-        mock_coordinator, text, [target_lang], source_lang, context_id, priority > 0
+    asyncio.run(
+        _async_request(
+            mock_coordinator, text, [target_lang], source_lang, context_id, priority > 0
+        )
     )
 
     # 验证调用
     mock_coordinator.request.assert_called_once_with(
         text_content=text,
-        target_langs=target_lang,
+        target_langs=[target_lang],
         source_lang=source_lang,
         business_id=context_id,
-        force_retranslate=priority,
+        force_retranslate=True,
     )
 
 
-@pytest.mark.asyncio
-async def test_async_request_missing_source_lang(mock_coordinator: MagicMock) -> None:
+def test_async_request_missing_source_lang(mock_coordinator: MagicMock) -> None:
     """测试 _async_request 函数在缺少源语言时的行为。"""
     # 准备测试数据
     text = "Hello, world!"
@@ -78,8 +102,10 @@ async def test_async_request_missing_source_lang(mock_coordinator: MagicMock) ->
     mock_coordinator.request.return_value = mock_result
 
     # 调用 _async_request
-    await _async_request(
-        mock_coordinator, text, [target_lang], source_lang, context_id, priority > 0
+    asyncio.run(
+        _async_request(
+            mock_coordinator, text, [target_lang], source_lang, context_id, priority > 0
+        )
     )
 
     # 验证源语言被设为 auto
@@ -88,13 +114,12 @@ async def test_async_request_missing_source_lang(mock_coordinator: MagicMock) ->
     call_args = mock_coordinator.request.call_args_list[0][1]
     assert call_args["source_lang"] is None
     assert call_args["text_content"] == text
-    assert call_args["target_langs"] == target_lang
+    assert call_args["target_langs"] == [target_lang]
     assert call_args["business_id"] == context_id
     assert call_args["force_retranslate"] == priority
 
 
-@pytest.mark.asyncio
-async def test_request_success(
+def test_request_success(
     mock_coordinator: MagicMock,
 ) -> None:
     """测试 request 函数成功提交翻译请求。"""
@@ -110,13 +135,15 @@ async def test_request_success(
     mock_coordinator.request.return_value = mock_result
 
     # 直接测试 _async_request 协程
-    await _async_request(
-        mock_coordinator,
-        text,
-        target_lang,
-        source_lang,
-        business_id,
-        force,
+    asyncio.run(
+        _async_request(
+            mock_coordinator,
+            text,
+            target_lang,
+            source_lang,
+            business_id,
+            force,
+        )
     )
 
     # 验证调用
@@ -130,8 +157,7 @@ async def test_request_success(
 
 
 @patch("asyncio.new_event_loop")
-@pytest.mark.asyncio
-async def test_request_error_handling(
+def test_request_error_handling(
     mock_new_event_loop: MagicMock,
     mock_coordinator: MagicMock,
 ) -> None:
@@ -148,13 +174,15 @@ async def test_request_error_handling(
 
     # 直接测试 _async_request 协程
     with pytest.raises(Exception, match="Request error"):
-        await _async_request(
-            mock_coordinator,
-            text,
-            target_lang,
-            source_lang,
-            business_id,
-            force,
+        asyncio.run(
+            _async_request(
+                mock_coordinator,
+                text,
+                target_lang,
+                source_lang,
+                business_id,
+                force,
+            )
         )
 
     # 验证请求被调用

@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 # trans_hub/cli/__init__.py
-"""
-Trans-Hub CLI 模块入口。
-"""
+"""Trans-Hub CLI 模块入口。"""
 
 import asyncio
 import functools
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import structlog
 import typer
@@ -15,8 +15,10 @@ from trans_hub.cli.app.main import app as app_app
 from trans_hub.cli.gc.main import gc as gc_command
 from trans_hub.cli.request.main import request as request_command
 from trans_hub.cli.worker.main import run_worker
-from trans_hub.config import TransHubConfig
-from trans_hub.coordinator import Coordinator
+
+if TYPE_CHECKING:  # pragma: no cover - for type checking only
+    from trans_hub.coordinator import Coordinator
+    from trans_hub.config import TransHubConfig
 
 log = structlog.get_logger("trans_hub.cli")
 console = Console()
@@ -29,7 +31,7 @@ app.add_typer(app_app, name="app", help="应用主入口")
 
 # 全局状态管理
 # 注意：这里简化了状态管理，实际项目中可能需要更复杂的机制
-_coordinator: Optional[Coordinator] = None
+_coordinator: Optional["Coordinator"] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 
@@ -45,7 +47,7 @@ class State:
 
 def _initialize_coordinator(
     skip_init: bool = False,
-) -> tuple[Coordinator, asyncio.AbstractEventLoop]:
+) -> tuple["Coordinator", asyncio.AbstractEventLoop]:
     """
     初始化协调器和事件循环。
     """
@@ -59,9 +61,11 @@ def _initialize_coordinator(
     asyncio.set_event_loop(_loop)
 
     # 初始化协调器
-    config = TransHubConfig()
+    from trans_hub.config import TransHubConfig
     from trans_hub.persistence.sqlite import SQLitePersistenceHandler
+    from trans_hub.coordinator import Coordinator
 
+    config = TransHubConfig()
     _persistence_handler = SQLitePersistenceHandler(config.database_url)
     _coordinator = Coordinator(config, _persistence_handler)
 
@@ -78,10 +82,8 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        # 初始化协调器和事件循环
-        coordinator, loop = _initialize_coordinator()
-
         try:
+            coordinator, loop = _initialize_coordinator()
             # 将coordinator和loop添加到kwargs中
             kwargs["coordinator"] = coordinator
             kwargs["loop"] = loop
