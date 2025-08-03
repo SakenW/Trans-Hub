@@ -29,7 +29,7 @@ trans-hub = "trans_hub.cli:app"
 
 # --- 核心依赖 (保持最精简) ---
 [tool.poetry.dependencies]
-python = ">=3.9, <3.14"
+python = ">=3.10, <3.14"
 pydantic = "^2.0"
 structlog = "^23.0"
 pydantic-settings = "^2.0"

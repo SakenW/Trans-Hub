@@ -71,6 +71,7 @@ def request_new(
     coordinator = create_coordinator(state.config)
     console.print(f"正在提交翻译请求: [dim]'{text[:50]}...'[/dim]")
     try:
+        # v3.1 最终决定：不再支持旧版 Python，直接使用 asyncio.run
         asyncio.run(
             _async_request_new(
                 coordinator, text, target_lang, source_lang, business_id, force

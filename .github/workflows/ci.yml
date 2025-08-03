@@ -4,9 +4,9 @@ name: Python CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -20,31 +20,29 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-    - name: Set up cache
-      uses: actions/cache@v4
-      id: poetry-cache # 给缓存步骤一个 ID
-      with:
-        path: .venv
-        # 核心修正：缓存 key 加入 pyproject.toml 的哈希
-        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
-    - name: Install dependencies
-      # 只有当缓存未命中时才运行安装
-      if: steps.poetry-cache.outputs.cache-hit != 'true'
-      run: poetry install --with dev
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+      - name: Set up cache
+        uses: actions/cache@v4
+        id: poetry-cache
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      - name: Install dependencies
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+        run: poetry install --with dev,docs
 
-    - name: Run Code Quality Checks
-      run: |
-        poetry run ruff check .
-        poetry run ruff format --check .
-        poetry run mypy .
+      - name: Run Code Quality Checks
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+          poetry run mypy .
 
   test:
     needs: lint
@@ -52,7 +50,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        # v3.1 最终决定：放弃对 3.9 的支持，专注于现代 Python 版本
+        python-version: ["3.10", "3.11", "3.12"]
 
     env:
       TH_OPENAI_ENDPOINT: ${{ secrets.TH_OPENAI_ENDPOINT }}
@@ -60,43 +59,36 @@ jobs:
       TH_OPENAI_MODEL: ${{ secrets.TH_OPENAI_MODEL }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Update SQLite
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y sqlite3
-        echo "SQLite version:"
-        sqlite3 --version
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-        
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      
-    - name: Set up cache
-      uses: actions/cache@v4
-      id: poetry-cache
-      with:
-        path: .venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
-        
-    - name: Install dependencies
-      if: steps.poetry-cache.outputs.cache-hit != 'true'
-      run: poetry install --with dev
-      
-    - name: Run Tests with Coverage
-      run: poetry run pytest --cov=trans_hub --cov-report=xml
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: true
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set up cache
+        uses: actions/cache@v4
+        id: poetry-cache
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+        run: poetry install --with dev,docs --all-extras
+
+      - name: Run Tests with Coverage
+        run: poetry run pytest --cov=trans_hub --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
   test-experimental:
     needs: lint
@@ -105,16 +97,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Update SQLite
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y sqlite3
-          echo "SQLite version:"
-          sqlite3 --version
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
       - name: Install Poetry
         uses: snok/install-poetry@v1
       - name: Set up cache
@@ -122,9 +108,9 @@ jobs:
         id: poetry-cache
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
+          key: venv-${{ runner.os }}-3.13-${{ hashFiles('**/poetry.lock') }}
       - name: Install dependencies
         if: steps.poetry-cache.outputs.cache-hit != 'true'
-        run: poetry install --with dev || true
+        run: poetry install --with dev,docs --all-extras || true
       - name: Run Tests with Pytest (Python 3.13)
         run: poetry run pytest

@@ -77,14 +77,15 @@ def gc_run(
     state: State = ctx.obj
     coordinator = create_coordinator(state.config)
     try:
+        # v3.1 最终决定：不再支持旧版 Python，直接使用 asyncio.run
         asyncio.run(_async_gc_run(coordinator, retention_days, yes))
     except Exception as e:
-        if "Not a tty" in str(e):
-            error_message = (
+        if "Not a tty" in str(e) or isinstance(e, RuntimeError):
+            error_msg = (
                 "[bold red]❌ 错误：此命令需要交互式终端。"
                 "请使用 --yes 标志在非交互式环境中运行。[/bold red]"
             )
-            console.print(error_message)
+            console.print(error_msg)
         else:
             console.print(f"[bold red]❌ 执行失败: {e}[/bold red]")
         raise typer.Exit(code=1)
