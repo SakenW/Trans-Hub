@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: trans-hub \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-08-03 02:38+0800\n"
+"POT-Creation-Date: 2025-08-03 10:36+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgid "配置模型 (Config)"
 msgstr ""
 
 #: ../../api/config.rst:8
-msgid "本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。"
+msgid "本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。这些模型负责管理整个系统的配置，包括数据库连接、引擎选择、缓存策略等。"
 msgstr ""
 
 #: ../../api/config.rst:11
@@ -92,6 +92,62 @@ msgid "A tuple containing the sources and their order for loading the settings v
 msgstr ""
 
 #: ../../api/config.rst:20
+msgid "TransHubConfig 详细说明"
+msgstr ""
+
+#: ../../api/config.rst:21
+msgid "`TransHubConfig` 是系统的主配置类，负责聚合所有子配置。配置可以通过环境变量、`.env` 文件或直接代码设置进行加载。"
+msgstr ""
+
+#: ../../api/config.rst:23
+msgid "**配置优先级**: 环境变量 > `.env` 文件 > 默认值"
+msgstr ""
+
+#: ../../api/config.rst:25
+msgid "**示例配置**:"
+msgstr ""
+
+#: ../../api/config.rst:40
+msgid "**关键字段说明**:"
+msgstr ""
+
+#: ../../api/config.rst:42
+msgid "``database_url``: 数据库连接 URL，默认为 `sqlite:///transhub.db`"
+msgstr ""
+
+#: ../../api/config.rst:43
+msgid "``active_engine``: 当前激活的翻译引擎，默认为 `translators`"
+msgstr ""
+
+#: ../../api/config.rst:44
+msgid "``batch_size``: 批处理大小，默认为 50"
+msgstr ""
+
+#: ../../api/config.rst:45
+msgid "``source_lang``: 源语言代码，默认为 None (自动检测)"
+msgstr ""
+
+#: ../../api/config.rst:46
+msgid "``gc_retention_days``: 垃圾回收保留天数，默认为 90"
+msgstr ""
+
+#: ../../api/config.rst:47
+msgid "``cache_config``: 缓存配置"
+msgstr ""
+
+#: ../../api/config.rst:48
+msgid "``engine_configs``: 各引擎的具体配置"
+msgstr ""
+
+#: ../../api/config.rst:49
+msgid "``retry_policy``: 重试策略配置"
+msgstr ""
+
+#: ../../api/config.rst:50
+msgid "``logging``: 日志配置"
+msgstr ""
+
+#: ../../api/config.rst:53
 msgid "引擎名称枚举"
 msgstr ""
 
@@ -99,7 +155,35 @@ msgstr ""
 msgid "基类：:py:class:`str`, :py:class:`~enum.Enum`"
 msgstr ""
 
-#: ../../api/config.rst:27
+#: ../../api/config.rst:60
+msgid "EngineName 说明"
+msgstr ""
+
+#: ../../api/config.rst:61
+msgid "`EngineName` 枚举定义了系统支持的所有翻译引擎。"
+msgstr ""
+
+#: ../../api/config.rst:63
+msgid "**可用引擎**:"
+msgstr ""
+
+#: ../../api/config.rst:65
+msgid "``DEBUG``: 调试引擎，用于开发和测试"
+msgstr ""
+
+#: ../../api/config.rst:66
+msgid "``OPENAI``: OpenAI 翻译引擎"
+msgstr ""
+
+#: ../../api/config.rst:67
+msgid "``TRANSLATORS``: 通用翻译引擎集成"
+msgstr ""
+
+#: ../../api/config.rst:68
+msgid "``MOCK_ENGINE``: 模拟引擎，用于测试"
+msgstr ""
+
+#: ../../api/config.rst:71
 msgid "引擎配置集合"
 msgstr ""
 
@@ -109,6 +193,54 @@ msgstr ""
 msgid "基类：:py:class:`~pydantic.main.BaseModel`"
 msgstr ""
 
-#: ../../api/config.rst:35
+#: ../../api/config.rst:79
+msgid "EngineConfigs 说明"
+msgstr ""
+
+#: ../../api/config.rst:80
+msgid "`EngineConfigs` 类用于存储各个引擎的具体配置。每个引擎配置都是可选的，只有在使用对应引擎时才会被加载。"
+msgstr ""
+
+#: ../../api/config.rst:82
+msgid "**示例**:"
+msgstr ""
+
+#: ../../api/config.rst:99
 msgid "其他配置模型"
+msgstr ""
+
+#: ../../api/config.rst:107
+msgid "LoggingConfig 说明"
+msgstr ""
+
+#: ../../api/config.rst:108
+msgid "`LoggingConfig` 类用于配置系统日志。"
+msgstr ""
+
+#: ../../api/config.rst:110
+msgid "``level``: 日志级别，默认为 \"INFO\""
+msgstr ""
+
+#: ../../api/config.rst:111
+msgid "``format``: 日志格式，可选 \"json\" 或 \"console\"，默认为 \"console\""
+msgstr ""
+
+#: ../../api/config.rst:119
+msgid "RetryPolicyConfig 说明"
+msgstr ""
+
+#: ../../api/config.rst:120
+msgid "`RetryPolicyConfig` 类用于配置请求失败时的重试策略。"
+msgstr ""
+
+#: ../../api/config.rst:122
+msgid "``max_attempts``: 最大重试次数，默认为 2"
+msgstr ""
+
+#: ../../api/config.rst:123
+msgid "``initial_backoff``: 初始退避时间 (秒)，默认为 1.0"
+msgstr ""
+
+#: ../../api/config.rst:124
+msgid "``max_backoff``: 最大退避时间 (秒)，默认为 60.0"
 msgstr ""

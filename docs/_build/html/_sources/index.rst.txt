@@ -22,6 +22,7 @@ Trans-Hub 是一个强大的翻译协调工具，旨在简化多语言内容的�
    :caption: 指南
 
    README.md
+   指南/多语言支持.md
 
 Indices and tables
 ==================

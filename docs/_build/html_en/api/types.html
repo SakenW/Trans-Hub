@@ -1,0 +1,419 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>核心数据类型 (Types) &mdash; trans-hub 3.0.0.dev0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=afcbd73c"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="持久化层 (Persistence)" href="persistence.html" />
+    <link rel="prev" title="API 参考" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2c3e50" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            trans-hub
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API 参考</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="config.html">配置模型 (Config)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="coordinator.html">协调器 (Coordinator)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="engines.html">翻译引擎 (Engines)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="exceptions.html">自定义异常 (Exceptions)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="index.html">API 参考</a></li>
+<li class="toctree-l1"><a class="reference internal" href="persistence.html">持久化层 (Persistence)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">核心数据类型 (Types)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.TranslationStatus"><code class="docutils literal notranslate"><span class="pre">TranslationStatus</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationStatus.PENDING"><code class="docutils literal notranslate"><span class="pre">TranslationStatus.PENDING</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationStatus.TRANSLATING"><code class="docutils literal notranslate"><span class="pre">TranslationStatus.TRANSLATING</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationStatus.TRANSLATED"><code class="docutils literal notranslate"><span class="pre">TranslationStatus.TRANSLATED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationStatus.FAILED"><code class="docutils literal notranslate"><span class="pre">TranslationStatus.FAILED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationStatus.APPROVED"><code class="docutils literal notranslate"><span class="pre">TranslationStatus.APPROVED</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.EngineSuccess"><code class="docutils literal notranslate"><span class="pre">EngineSuccess</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineSuccess.translated_text"><code class="docutils literal notranslate"><span class="pre">EngineSuccess.translated_text</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineSuccess.from_cache"><code class="docutils literal notranslate"><span class="pre">EngineSuccess.from_cache</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineSuccess.model_config"><code class="docutils literal notranslate"><span class="pre">EngineSuccess.model_config</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.EngineError"><code class="docutils literal notranslate"><span class="pre">EngineError</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineError.error_message"><code class="docutils literal notranslate"><span class="pre">EngineError.error_message</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineError.is_retryable"><code class="docutils literal notranslate"><span class="pre">EngineError.is_retryable</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.EngineError.model_config"><code class="docutils literal notranslate"><span class="pre">EngineError.model_config</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.TranslationRequest"><code class="docutils literal notranslate"><span class="pre">TranslationRequest</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationRequest.source_text"><code class="docutils literal notranslate"><span class="pre">TranslationRequest.source_text</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationRequest.source_lang"><code class="docutils literal notranslate"><span class="pre">TranslationRequest.source_lang</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationRequest.target_lang"><code class="docutils literal notranslate"><span class="pre">TranslationRequest.target_lang</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationRequest.context_hash"><code class="docutils literal notranslate"><span class="pre">TranslationRequest.context_hash</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationRequest.model_config"><code class="docutils literal notranslate"><span class="pre">TranslationRequest.model_config</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.TranslationResult"><code class="docutils literal notranslate"><span class="pre">TranslationResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.translation_id"><code class="docutils literal notranslate"><span class="pre">TranslationResult.translation_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.original_content"><code class="docutils literal notranslate"><span class="pre">TranslationResult.original_content</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.translated_content"><code class="docutils literal notranslate"><span class="pre">TranslationResult.translated_content</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.target_lang"><code class="docutils literal notranslate"><span class="pre">TranslationResult.target_lang</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.status"><code class="docutils literal notranslate"><span class="pre">TranslationResult.status</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.engine"><code class="docutils literal notranslate"><span class="pre">TranslationResult.engine</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.from_cache"><code class="docutils literal notranslate"><span class="pre">TranslationResult.from_cache</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.error"><code class="docutils literal notranslate"><span class="pre">TranslationResult.error</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.business_id"><code class="docutils literal notranslate"><span class="pre">TranslationResult.business_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.context_hash"><code class="docutils literal notranslate"><span class="pre">TranslationResult.context_hash</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.check_consistency"><code class="docutils literal notranslate"><span class="pre">TranslationResult.check_consistency()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.TranslationResult.model_config"><code class="docutils literal notranslate"><span class="pre">TranslationResult.model_config</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.ContentItem"><code class="docutils literal notranslate"><span class="pre">ContentItem</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.translation_id"><code class="docutils literal notranslate"><span class="pre">ContentItem.translation_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.business_id"><code class="docutils literal notranslate"><span class="pre">ContentItem.business_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.content_id"><code class="docutils literal notranslate"><span class="pre">ContentItem.content_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.context_id"><code class="docutils literal notranslate"><span class="pre">ContentItem.context_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.value"><code class="docutils literal notranslate"><span class="pre">ContentItem.value</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.context"><code class="docutils literal notranslate"><span class="pre">ContentItem.context</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#trans_hub.types.ContentItem.model_config"><code class="docutils literal notranslate"><span class="pre">ContentItem.model_config</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#trans_hub.types.GLOBAL_CONTEXT_SENTINEL"><code class="docutils literal notranslate"><span class="pre">GLOBAL_CONTEXT_SENTINEL</span></code></a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../README.html">Trans-Hub 文档系统维护指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../%E6%8C%87%E5%8D%97/%E5%A4%9A%E8%AF%AD%E8%A8%80%E6%94%AF%E6%8C%81.html">多语言文档支持</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2c3e50" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">trans-hub</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API 参考</a></li>
+      <li class="breadcrumb-item active">核心数据类型 (Types)</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/types.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-trans_hub.types">
+<span id="types"></span><h1>核心数据类型 (Types)<a class="headerlink" href="#module-trans_hub.types" title="Link to this heading"></a></h1>
+<p>本模块定义了 Trans-Hub 系统的核心数据类型。
+v3.0.dev 更新：为 TranslationResult 添加 translation_id 以优化持久化。</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">TranslationStatus</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#TranslationStatus"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.TranslationStatus" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></a></p>
+<p>表示翻译记录在其生命周期中的不同状态。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus.PENDING">
+<span class="sig-name descname"><span class="pre">PENDING</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'PENDING'</span></em><a class="headerlink" href="#trans_hub.types.TranslationStatus.PENDING" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus.TRANSLATING">
+<span class="sig-name descname"><span class="pre">TRANSLATING</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'TRANSLATING'</span></em><a class="headerlink" href="#trans_hub.types.TranslationStatus.TRANSLATING" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus.TRANSLATED">
+<span class="sig-name descname"><span class="pre">TRANSLATED</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'TRANSLATED'</span></em><a class="headerlink" href="#trans_hub.types.TranslationStatus.TRANSLATED" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus.FAILED">
+<span class="sig-name descname"><span class="pre">FAILED</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'FAILED'</span></em><a class="headerlink" href="#trans_hub.types.TranslationStatus.FAILED" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationStatus.APPROVED">
+<span class="sig-name descname"><span class="pre">APPROVED</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'APPROVED'</span></em><a class="headerlink" href="#trans_hub.types.TranslationStatus.APPROVED" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.EngineSuccess">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">EngineSuccess</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">translated_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_cache</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#EngineSuccess"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.EngineSuccess" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>代表从翻译引擎成功返回的单次翻译结果。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineSuccess.translated_text">
+<span class="sig-name descname"><span class="pre">translated_text</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.EngineSuccess.translated_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineSuccess.from_cache">
+<span class="sig-name descname"><span class="pre">from_cache</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></em><a class="headerlink" href="#trans_hub.types.EngineSuccess.from_cache" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineSuccess.model_config">
+<span class="sig-name descname"><span class="pre">model_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">ConfigDict</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#trans_hub.types.EngineSuccess.model_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration for the model, should be a dictionary conforming to [<cite>ConfigDict</cite>][pydantic.config.ConfigDict].</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.EngineError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">EngineError</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">error_message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_retryable</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#EngineError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.EngineError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>代表从翻译引擎返回的单次失败结果，并指明是否可重试。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineError.error_message">
+<span class="sig-name descname"><span class="pre">error_message</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.EngineError.error_message" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineError.is_retryable">
+<span class="sig-name descname"><span class="pre">is_retryable</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></em><a class="headerlink" href="#trans_hub.types.EngineError.is_retryable" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.EngineError.model_config">
+<span class="sig-name descname"><span class="pre">model_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">ConfigDict</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#trans_hub.types.EngineError.model_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration for the model, should be a dictionary conforming to [<cite>ConfigDict</cite>][pydantic.config.ConfigDict].</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">TranslationRequest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_lang</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_lang</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">context_hash</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#TranslationRequest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.TranslationRequest" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>表示一个内部传递或用于缓存查找的翻译请求单元。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest.source_text">
+<span class="sig-name descname"><span class="pre">source_text</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationRequest.source_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest.source_lang">
+<span class="sig-name descname"><span class="pre">source_lang</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationRequest.source_lang" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest.target_lang">
+<span class="sig-name descname"><span class="pre">target_lang</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationRequest.target_lang" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest.context_hash">
+<span class="sig-name descname"><span class="pre">context_hash</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationRequest.context_hash" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationRequest.model_config">
+<span class="sig-name descname"><span class="pre">model_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">ConfigDict</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#trans_hub.types.TranslationRequest.model_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration for the model, should be a dictionary conforming to [<cite>ConfigDict</cite>][pydantic.config.ConfigDict].</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">TranslationResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">translation_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">original_content</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">translated_content</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_lang</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">status</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#trans_hub.types.TranslationStatus" title="trans_hub.types.TranslationStatus"><span class="pre">TranslationStatus</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">engine</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_cache</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">error</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">business_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">context_hash</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#TranslationResult"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.TranslationResult" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>由 Coordinator 返回给最终用户的综合结果对象。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.translation_id">
+<span class="sig-name descname"><span class="pre">translation_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.translation_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.original_content">
+<span class="sig-name descname"><span class="pre">original_content</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.original_content" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.translated_content">
+<span class="sig-name descname"><span class="pre">translated_content</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.translated_content" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.target_lang">
+<span class="sig-name descname"><span class="pre">target_lang</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.target_lang" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.status">
+<span class="sig-name descname"><span class="pre">status</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#trans_hub.types.TranslationStatus" title="trans_hub.types.TranslationStatus"><span class="pre">TranslationStatus</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.status" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.engine">
+<span class="sig-name descname"><span class="pre">engine</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.engine" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.from_cache">
+<span class="sig-name descname"><span class="pre">from_cache</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.from_cache" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.error">
+<span class="sig-name descname"><span class="pre">error</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.error" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.business_id">
+<span class="sig-name descname"><span class="pre">business_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.business_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.context_hash">
+<span class="sig-name descname"><span class="pre">context_hash</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.TranslationResult.context_hash" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.check_consistency">
+<span class="sig-name descname"><span class="pre">check_consistency</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#trans_hub.types.TranslationResult" title="trans_hub.types.TranslationResult"><span class="pre">TranslationResult</span></a></span></span><a class="reference internal" href="../_modules/trans_hub/types.html#TranslationResult.check_consistency"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.TranslationResult.check_consistency" title="Link to this definition"></a></dt>
+<dd><p>验证模型状态的一致性。</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>验证后的模型实例。</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#trans_hub.types.TranslationResult" title="trans_hub.types.TranslationResult">TranslationResult</a></p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – 如果状态与内容不一致。</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.TranslationResult.model_config">
+<span class="sig-name descname"><span class="pre">model_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">ConfigDict</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#trans_hub.types.TranslationResult.model_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration for the model, should be a dictionary conforming to [<cite>ConfigDict</cite>][pydantic.config.ConfigDict].</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">ContentItem</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">translation_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">business_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">content_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">context_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/trans_hub/types.html#ContentItem"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#trans_hub.types.ContentItem" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>在内部处理流程中，代表一个从数据库取出的、准备进行翻译处理的原子任务。</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.translation_id">
+<span class="sig-name descname"><span class="pre">translation_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.translation_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.business_id">
+<span class="sig-name descname"><span class="pre">business_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.business_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.content_id">
+<span class="sig-name descname"><span class="pre">content_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.content_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.context_id">
+<span class="sig-name descname"><span class="pre">context_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.context_id" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.value">
+<span class="sig-name descname"><span class="pre">value</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.value" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.context">
+<span class="sig-name descname"><span class="pre">context</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></em><a class="headerlink" href="#trans_hub.types.ContentItem.context" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="trans_hub.types.ContentItem.model_config">
+<span class="sig-name descname"><span class="pre">model_config</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">ConfigDict</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#trans_hub.types.ContentItem.model_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration for the model, should be a dictionary conforming to [<cite>ConfigDict</cite>][pydantic.config.ConfigDict].</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="trans_hub.types.GLOBAL_CONTEXT_SENTINEL">
+<span class="sig-prename descclassname"><span class="pre">trans_hub.types.</span></span><span class="sig-name descname"><span class="pre">GLOBAL_CONTEXT_SENTINEL</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'__GLOBAL__'</span></em><a class="headerlink" href="#trans_hub.types.GLOBAL_CONTEXT_SENTINEL" title="Link to this definition"></a></dt>
+<dd><p>一个特殊的字符串常量，用作表示“全局”或“无上下文”翻译的哈希值。</p>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="API 参考" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="persistence.html" class="btn btn-neutral float-right" title="持久化层 (Persistence)" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Saken.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

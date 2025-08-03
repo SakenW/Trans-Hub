@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: trans-hub \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-08-03 02:38+0800\n"
+"POT-Creation-Date: 2025-08-03 10:36+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -36,18 +36,18 @@ msgstr ""
 msgid "Trans-Hub 是一个强大的翻译协调工具，旨在简化多语言内容的翻译流程。"
 msgstr ""
 
-#: ../../index.rst:27
+#: ../../index.rst:28
 msgid "Indices and tables"
 msgstr ""
 
-#: ../../index.rst:29
+#: ../../index.rst:30
 msgid ":ref:`genindex`"
 msgstr ""
 
-#: ../../index.rst:30
+#: ../../index.rst:31
 msgid ":ref:`modindex`"
 msgstr ""
 
-#: ../../index.rst:31
+#: ../../index.rst:32
 msgid ":ref:`search`"
 msgstr ""
