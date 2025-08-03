@@ -11,11 +11,16 @@ from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
+from typer.testing import CliRunner
 
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationResult, TranslationStatus
+
 from trans_hub.config import TransHubConfig
+
+from trans_hub.cli import app
+
 import tracemalloc
 
 tracemalloc.start()
@@ -49,6 +54,11 @@ def mock_event_loop() -> MagicMock:
 def shutdown_event() -> asyncio.Event:
     """创建一个关闭事件对象。"""
     return asyncio.Event()
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
 
 
 @pytest.mark.asyncio
@@ -439,3 +449,15 @@ async def test_process_pending_translations_called(
     # 验证 process_pending_translations 被调用
     print(f"process_pending_translations 最终调用次数: {mock_coordinator.process_pending_translations.call_count}")
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
+
+
+def test_worker_requires_langs(runner: CliRunner) -> None:
+    """未提供语言列表时命令应失败。"""
+    result = runner.invoke(app, ["worker"])
+    assert result.exit_code != 0
+
+
+def test_worker_invalid_langs(runner: CliRunner) -> None:
+    """无效语言代码应导致命令失败。"""
+    result = runner.invoke(app, ["worker", "--lang", "invalid"])
+    assert result.exit_code != 0
