@@ -323,19 +323,29 @@ async def test_run_worker_signal_handling(
                 except asyncio.TimeoutError:
                     pass
 
-    # 模拟 run_worker 的核心逻辑，避免直接调用导致的事件循环嵌套
-    worker_tasks = [process_language(target_lang) for target_lang in langs]
-    await asyncio.gather(*worker_tasks)
-    await mock_coordinator.close()
+    # 模拟 run_worker 的核心逻辑。
+    #
+    # 原实现中先调用 ``asyncio.gather`` 然后再设置 ``shutdown_event``，
+    # 会导致测试在等待协程结束时陷入死锁——协程只有在事件被设置后才会退出。
+    # 为了正确模拟 Worker 在接收到信号后停止的行为，我们先启动任务，
+    # 触发关闭事件，再等待任务结束。
+    worker_tasks = [
+        asyncio.create_task(process_language(target_lang)) for target_lang in langs
+    ]
 
-    # 等待异步操作初始化
-    await asyncio.sleep(0.5)
+    # 确保任务已经开始运行
+    await asyncio.sleep(0.1)
 
-    # 模拟发送信号
+    # 模拟发送信号以触发关闭
     shutdown_event.set()
 
-    # 等待一会儿确保信号被处理
-    await asyncio.sleep(0.5)
+    # 等待任务优雅退出
+    await asyncio.gather(*worker_tasks)
+
+    await mock_coordinator.close()
+
+    # 等待一小段时间确保信号被处理
+    await asyncio.sleep(0.1)
 
     # 添加调试信息
     print(f"add_signal_handler 调用次数: {mock_event_loop.add_signal_handler.call_count}")
