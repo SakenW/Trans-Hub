@@ -296,7 +296,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
             yield batch_items
             processed_count += len(batch_items)
 
-    async def save_translations(self, results: list[TranslationResult]) -> None:
+    async def save_translations(
+        self, results: list[TranslationResult], cursor: Optional[aiosqlite.Cursor] = None
+    ) -> None:
         if not results:
             return
         params_to_update: list[dict[str, Any]] = [
@@ -310,7 +312,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
             }
             for res in results
         ]
-        async with self._transaction() as cursor:
+        # 如果提供了游标，则在现有事务中执行
+        if cursor is not None:
             await cursor.executemany(
                 """
                 UPDATE th_translations SET
@@ -324,6 +327,22 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 """,
                 params_to_update,
             )
+        else:
+            # 否则创建新事务
+            async with self._transaction() as tx_cursor:
+                await tx_cursor.executemany(
+                    """
+                    UPDATE th_translations SET
+                        status = :status,
+                        translation_content = :translation_content,
+                        engine = :engine,
+                        error = :error,
+                        last_updated_at = :last_updated_at
+                    WHERE
+                        id = :id AND status = 'TRANSLATING'
+                    """,
+                    params_to_update,
+                )
 
     async def get_translation(
         self,

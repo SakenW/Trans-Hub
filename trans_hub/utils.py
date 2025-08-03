@@ -3,6 +3,7 @@
 本模块包含项目范围内的通用工具函数。
 
 这些函数被设计为无状态的、纯粹的辅助工具，用于执行如哈希计算、格式校验等常见任务。
+v3.1 修订：移除了易产生误导的 `get_database_url` 函数。
 """
 
 import hashlib
@@ -10,7 +11,6 @@ import json
 import re
 from typing import Any, Optional
 
-from trans_hub.config import TransHubConfig
 from trans_hub.types import GLOBAL_CONTEXT_SENTINEL
 
 
@@ -21,11 +21,14 @@ def get_context_hash(context: Optional[dict[str, Any]]) -> str:
     哈希过程是稳定的，即对于逻辑上相同的字典，即使键的顺序不同，
     也会生成相同的哈希值。空上下文会返回一个固定的哨兵值。
 
-    参数:
+    Args:
         context: 一个可被 JSON 序列化的字典，或 None。
 
-    返回:
+    Returns:
         上下文的十六进制哈希字符串。
+
+    Raises:
+        ValueError: 如果 context 包含无法被 JSON 序列化的数据。
     """
     if not context:
         return GLOBAL_CONTEXT_SENTINEL
@@ -48,21 +51,15 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
 
     如果任何一个代码格式无效，则抛出 ValueError。
 
-    参数:
+    Args:
         lang_codes: 一个包含语言代码字符串的列表。
+
+    Raises:
+        ValueError: 如果任何一个语言代码格式无效。
     """
-    lang_code_pattern = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
+    # 符合 BCP 47 标准的语言代码正则表达式
+    # 只允许 2-3 个小写字母，或 2-3 个小写字母+连字符+2 个大写字母的格式
+    lang_code_pattern = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
     for code in lang_codes:
         if not lang_code_pattern.match(code):
             raise ValueError(f"提供的语言代码 '{code}' 格式无效。")
-
-
-def get_database_url() -> str:
-    """
-    从配置中获取数据库 URL。
-
-    返回:
-        数据库 URL 字符串。
-    """
-    config = TransHubConfig()
-    return config.database_url
