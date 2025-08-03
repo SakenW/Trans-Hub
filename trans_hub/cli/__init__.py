@@ -71,6 +71,13 @@ def _initialize_coordinator(
     return _coordinator, _loop
 
 
+def reset_state() -> None:
+    """重置全局协调器和事件循环状态。"""
+    global _coordinator, _loop
+    _coordinator = None
+    _loop = None
+
+
 def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     装饰器，用于为CLI命令提供协调器和事件循环。
