@@ -35,6 +35,14 @@ _coordinator: Optional[Coordinator] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 
+def _initialize_coordinator(
+    skip_init: bool = False,
+) -> tuple[Coordinator, asyncio.AbstractEventLoop]:
+    """
+    初始化协调器和事件循环。
+    """
+
+
 class State:
     """
     全局状态类，用于存储CLI运行时的状态信息。
@@ -47,6 +55,7 @@ class State:
 
 def _initialize_coordinator() -> tuple[Coordinator, asyncio.AbstractEventLoop]:
     """初始化协调器和事件循环并执行初始化。"""
+
     global _coordinator, _loop
 
     if (
