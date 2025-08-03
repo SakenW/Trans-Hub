@@ -16,6 +16,7 @@ from trans_hub.cli.request.main import request as request_command
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
+from trans_hub.persistence import create_persistence_handler
 
 from trans_hub.utils import validate_lang_codes
 
@@ -71,6 +72,9 @@ def _initialize_coordinator() -> tuple[Coordinator, asyncio.AbstractEventLoop]:
 
     # 初始化协调器
     config = TransHubConfig()
+
+    _persistence_handler = create_persistence_handler(config)
+
     setup_logging(
         log_level=config.logging.level,
         log_format=config.logging.format,
@@ -78,6 +82,7 @@ def _initialize_coordinator() -> tuple[Coordinator, asyncio.AbstractEventLoop]:
     from trans_hub.persistence.sqlite import SQLitePersistenceHandler
 
     _persistence_handler = SQLitePersistenceHandler(config.database_url)
+
     _coordinator = Coordinator(config, _persistence_handler)
     _loop.run_until_complete(_coordinator.initialize())
 
