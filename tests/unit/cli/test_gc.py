@@ -14,6 +14,8 @@ import questionary
 
 from trans_hub.cli.gc.main import gc
 from trans_hub.coordinator import Coordinator
+from trans_hub.config import TransHubConfig
+import typer
 
 
 @pytest.fixture
@@ -47,8 +49,8 @@ def test_gc_dry_run(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令的干运行模式。"""
-    # 准备测试数据
-    retention_days = 90
+    # 使用配置中的默认保留天数
+    retention_days = TransHubConfig().gc_retention_days
     dry_run = True
 
     # 模拟垃圾回收报告
@@ -77,8 +79,8 @@ def test_gc_real_run_confirmed(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户确认）。"""
-    # 准备测试数据
-    retention_days = 90
+    # 使用配置中的默认保留天数
+    retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
     # 模拟垃圾回收报告
@@ -116,8 +118,8 @@ def test_gc_real_run_cancelled(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户取消）。"""
-    # 准备测试数据
-    retention_days = 90
+    # 使用配置中的默认保留天数
+    retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
     # 模拟垃圾回收报告
@@ -154,8 +156,8 @@ def test_gc_no_data_to_clean(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令在没有数据可清理时的行为。"""
-    # 准备测试数据
-    retention_days = 90
+    # 使用配置中的默认保留天数
+    retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
     # 模拟空垃圾回收报告
@@ -171,3 +173,19 @@ def test_gc_no_data_to_clean(
     )
     # 验证没有显示确认对话框
     assert "数据库很干净，无需进行垃圾回收" in str(mock_console_print.call_args_list)
+
+
+@patch("trans_hub.cli.gc.main.console.print")
+def test_gc_handles_errors(
+    mock_console_print: MagicMock,
+    mock_coordinator: MagicMock,
+    mock_event_loop: MagicMock,
+) -> None:
+    """当垃圾回收发生异常时应优雅退出。"""
+    retention_days = TransHubConfig().gc_retention_days
+    mock_coordinator.run_garbage_collection.side_effect = Exception("boom")
+
+    with pytest.raises(typer.Exit):
+        gc(mock_coordinator, mock_event_loop, retention_days, True)
+
+    mock_console_print.assert_called()
