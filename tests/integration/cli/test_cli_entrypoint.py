@@ -17,7 +17,12 @@ def test_version_option(cli_runner: CliRunner) -> None:
 
 
 def test_no_command_shows_help(cli_runner: CliRunner) -> None:
-    """测试不带任何命令调用时是否显示帮助信息。"""
+    """
+    测试不带任何命令调用时是否显示帮助信息。
+
+    v3.1 最终修复：移除 mocker 依赖，因为配置已由 conftest.py 自动 mock。
+    由于 rich 颜色已被全局禁用，现在可以安全地断言纯文本输出。
+    """
     result = cli_runner.invoke(app)
     assert result.exit_code == 0
     assert "Usage: trans-hub" in result.stdout
