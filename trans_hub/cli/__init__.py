@@ -78,9 +78,10 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        global _coordinator, _loop
         # 初始化协调器和事件循环
         coordinator, loop = _initialize_coordinator()
-
+        has_error = False
         try:
             # 将coordinator和loop添加到kwargs中
             kwargs["coordinator"] = coordinator
@@ -88,9 +89,19 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
             # 调用原始函数
             return func(*args, **kwargs)
         except Exception as e:
+            has_error = True
             log.error("命令执行失败", error=str(e), exc_info=True)
             console.print(f"[red]❌ 命令执行失败: {e}[/red]")
             raise typer.Exit(1)
+        finally:
+            if has_error:
+                if coordinator and loop:
+                    try:
+                        loop.run_until_complete(coordinator.close())
+                    finally:
+                        loop.close()
+                _coordinator = None
+                _loop = None
 
     return wrapper
 
