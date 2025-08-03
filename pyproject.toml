@@ -107,6 +107,7 @@ typer = { version = "*", extras = ["rich"] }
 fastapi = "*"
 uvicorn = { version = "*", extras = ["standard"] }
 markdown-it-py = "*"
+pytest-mock = "^3.14.1"
 
 
 [tool.ruff]
