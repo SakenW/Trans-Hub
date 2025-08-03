@@ -1,7 +1,99 @@
 <!-- docs/README.md -->
-# Trans-Hub 文档系统维护指南
+# Trans-Hub
 
-本指南描述了如何构建、维护和贡献 `trans-hub` 项目的官方文档。本文档系统基于 Sphinx 构建，并完全支持多语言。
+`Trans-Hub` 是一个功能强大、灵活可扩展的翻译协调系统，旨在简化多引擎翻译工作流，提供统一的 API 接口和丰富的功能集。
+
+## 核心特性
+
+- **多引擎支持**：集成多种翻译引擎，包括 OpenAI、Google Translate 等
+- **统一 API**：提供一致的接口，简化翻译请求的发送和结果处理
+- **智能缓存**：自动缓存翻译结果，提高性能并降低成本
+- **异步处理**：基于 Python asyncio 实现高效的异步翻译处理
+- **灵活配置**：支持多种配置方式，适应不同的使用场景
+- **可扩展性**：易于添加新的翻译引擎和自定义功能
+- **完整的生命周期管理**：跟踪翻译请求的整个生命周期
+- **强大的命令行工具**：提供便捷的管理和操作界面
+
+## 快速上手
+
+### 安装
+
+```bash
+# 使用 pip 安装
+pip install trans-hub
+
+# 或从源码安装
+git clone https://github.com/your-org/trans-hub.git
+cd trans-hub
+pip install -e .
+```
+
+### 基本使用
+
+```python
+import asyncio
+from trans_hub.coordinator import Coordinator
+from trans_hub.config import TransHubConfig
+
+async def main():
+    # 创建配置
+    config = TransHubConfig(
+        active_engine="debug",
+        database_url="sqlite:///trans_hub.db"
+    )
+
+    # 初始化协调器
+    coordinator = Coordinator(config)
+    await coordinator.initialize()
+
+    # 请求翻译
+    result = await coordinator.request_translation(
+        business_id="example.hello",
+        text="你好世界",
+        target_lang="en"
+    )
+
+    print(f"翻译结果: {result}")
+
+    # 关闭协调器
+    await coordinator.close()
+
+# 运行主函数
+asyncio.run(main())
+```
+
+### 启动 Worker
+
+```bash
+# 使用命令行工具启动 Worker
+th worker
+```
+
+## 文档
+
+- **API 文档**: [API Reference](api/index.rst)
+- **架构文档**: [Architecture Overview](guides/architecture.rst)
+- **数据模型**: [Data Model](guides/data_model.rst)
+- **用户指南**:
+  - [快速入门](getting_started.rst)
+  - [高级用法](guides/advanced_usage.rst)
+  - [配置指南](configuration.rst)
+  - [部署指南](guides/deployment.rst)
+  - [命令行工具](cli_reference.rst)
+- **开发者指南**:
+  - [贡献指南](CONTRIBUTING.md)
+  - [引擎开发](guides/creating_an_engine.rst)
+
+## 社区与贡献
+
+- **GitHub 仓库**: https://github.com/your-org/trans-hub
+- **报告问题**: https://github.com/your-org/trans-hub/issues
+- **贡献代码**: 请参阅 [贡献指南](CONTRIBUTING.md)
+- **讨论社区**: https://discord.gg/trans-hub
+
+## 许可证
+
+`Trans-Hub` 采用 MIT 许可证，详情请参阅项目根目录下的 LICENSE 文件.
 
 ## 目录结构
 

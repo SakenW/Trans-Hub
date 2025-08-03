@@ -18,7 +18,7 @@ def setup(app: Any) -> None:
     # app.add_config_value(...)
 
 # -- 项目信息 ----------------------------------------------------------------
-project = "trans-hub"
+project = "Trans-Hub"
 author = "Saken"
 copyright = "2025, Saken"
 release = "3.0.0.dev0"
@@ -38,6 +38,7 @@ extensions = [
     "sphinx.ext.ifconfig",
     "sphinx.ext.githubpages",
     "myst_parser",  # 添加对Markdown的支持
+    "sphinxcontrib.mermaid",  # 添加对mermaid图表的支持
 ]
 
 
@@ -48,6 +49,11 @@ gettext_compact = False
 
 # -- 插件配置 ----------------------------------------------------------------
 
+# Mermaid 图表配置
+mermaid_output_format = 'raw'   # 输出原始mermaid代码，由浏览器渲染
+mermaid_version = '10.4.0'     # 指定mermaid版本
+mermaid_use_cdn = True          # 使用CDN加载mermaid.js
+
 # Intersphinx: 链接到其他项目的文档
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -55,6 +61,7 @@ intersphinx_mapping = {
 
 # Autosectionlabel: 自动为章节生成标签
 autosectionlabel_prefix_document = True
+autosectionlabel_maxdepth = 2  # 只为H1和H2级别的标题生成标签
 
 # Todo: 在文档中显示 TODO 条目
 todo_include_todos = True

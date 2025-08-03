@@ -1,11 +1,12 @@
 .. # docs/api/config.rst
 
+===================
 配置模型 (Config)
 ===================
 
 .. currentmodule:: trans_hub.config
 
-本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。这些模型负责管理整个系统的配置，包括数据库连接、引擎选择、缓存策略等。
+本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。
 
 主要配置
 ----------
@@ -14,58 +15,13 @@
    :members:
    :undoc-members: false
    :show-inheritance:
-   :inherited-members: BaseModel
-
-.. rubric:: TransHubConfig 详细说明
-
-`TransHubConfig` 是系统的主配置类，负责聚合所有子配置。配置可以通过环境变量、`.env` 文件或直接代码设置进行加载。
-
-**配置优先级**: 环境变量 > `.env` 文件 > 默认值
-
-**示例配置**: 
-
-.. code-block:: python
-
-   from trans_hub.config import TransHubConfig, EngineName
-
-   # 创建配置实例
-   config = TransHubConfig(
-       database_url="sqlite:///transhub_prod.db",
-       active_engine=EngineName.OPENAI,
-       batch_size=100,
-       source_lang="en",
-       gc_retention_days=30,
-   )
-
-**关键字段说明**: 
-
-- ``database_url``: 数据库连接 URL，默认为 `sqlite:///transhub.db`
-- ``active_engine``: 当前激活的翻译引擎，默认为 `translators`
-- ``batch_size``: 批处理大小，默认为 50
-- ``source_lang``: 源语言代码，默认为 None (自动检测)
-- ``gc_retention_days``: 垃圾回收保留天数，默认为 90
-- ``cache_config``: 缓存配置
-- ``engine_configs``: 各引擎的具体配置
-- ``retry_policy``: 重试策略配置
-- ``logging``: 日志配置
+   :inherited-members: BaseSettings
 
 引擎名称枚举
 ------------
 .. autoclass:: EngineName
    :members:
    :undoc-members: false
-   :show-inheritance:
-
-.. rubric:: EngineName 说明
-
-`EngineName` 枚举定义了系统支持的所有翻译引擎。
-
-**可用引擎**: 
-
-- ``DEBUG``: 调试引擎，用于开发和测试
-- ``OPENAI``: OpenAI 翻译引擎
-- ``TRANSLATORS``: 通用翻译引擎集成
-- ``MOCK_ENGINE``: 模拟引擎，用于测试
 
 引擎配置集合
 ------------
@@ -75,26 +31,6 @@
    :undoc-members: false
    :show-inheritance:
 
-.. rubric:: EngineConfigs 说明
-
-`EngineConfigs` 类用于存储各个引擎的具体配置。每个引擎配置都是可选的，只有在使用对应引擎时才会被加载。
-
-**示例**: 
-
-.. code-block:: python
-
-   from trans_hub.config import EngineConfigs
-   from trans_hub.engines.openai import OpenAIEngineConfig
-
-   # 创建引擎配置
-   engine_configs = EngineConfigs(
-       openai=OpenAIEngineConfig(
-           api_key="your-api-key",
-           model="gpt-3.5-turbo",
-           timeout=30
-       )
-   )
-
 其他配置模型
 --------------
 
@@ -103,22 +39,7 @@
    :undoc-members: false
    :show-inheritance:
 
-.. rubric:: LoggingConfig 说明
-
-`LoggingConfig` 类用于配置系统日志。
-
-- ``level``: 日志级别，默认为 "INFO"
-- ``format``: 日志格式，可选 "json" 或 "console"，默认为 "console"
-
 .. autoclass:: RetryPolicyConfig
    :members:
    :undoc-members: false
    :show-inheritance:
-
-.. rubric:: RetryPolicyConfig 说明
-
-`RetryPolicyConfig` 类用于配置请求失败时的重试策略。
-
-- ``max_attempts``: 最大重试次数，默认为 2
-- ``initial_backoff``: 初始退避时间 (秒)，默认为 1.0
-- ``max_backoff``: 最大退避时间 (秒)，默认为 60.0
