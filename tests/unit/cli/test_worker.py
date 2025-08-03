@@ -11,10 +11,16 @@ from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
+from typer.testing import CliRunner
 
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationResult, TranslationStatus
+
+from trans_hub.config import TransHubConfig
+
+from trans_hub.cli import app
+
 import tracemalloc
 
 tracemalloc.start()
@@ -50,6 +56,11 @@ def shutdown_event() -> asyncio.Event:
     return asyncio.Event()
 
 
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
+
+
 @pytest.mark.asyncio
 async def test_run_worker_initialization(
     mock_coordinator: MagicMock,
@@ -59,7 +70,7 @@ async def test_run_worker_initialization(
     """测试 run_worker 函数的初始化。"""
     # 准备测试数据
     langs = ["en", "zh-CN"]
-    batch_size = 10
+    batch_size = TransHubConfig().batch_size
     polling_interval = 5
 
     # 模拟 process_pending_translations 返回空的异步生成器
@@ -438,3 +449,15 @@ async def test_process_pending_translations_called(
     # 验证 process_pending_translations 被调用
     print(f"process_pending_translations 最终调用次数: {mock_coordinator.process_pending_translations.call_count}")
     assert mock_coordinator.process_pending_translations.call_count > 0, "process_pending_translations 未被调用"
+
+
+def test_worker_requires_langs(runner: CliRunner) -> None:
+    """未提供语言列表时命令应失败。"""
+    result = runner.invoke(app, ["worker"])
+    assert result.exit_code != 0
+
+
+def test_worker_invalid_langs(runner: CliRunner) -> None:
+    """无效语言代码应导致命令失败。"""
+    result = runner.invoke(app, ["worker", "--lang", "invalid"])
+    assert result.exit_code != 0
