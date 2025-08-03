@@ -9,8 +9,10 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
 from trans_hub.cli.request.main import _async_request, request
+from trans_hub.cli import app
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationRequest, TranslationResult, TranslationStatus
 
@@ -30,6 +32,11 @@ def mock_event_loop() -> MagicMock:
     loop = MagicMock(spec=asyncio.AbstractEventLoop)
     loop.run_until_complete = MagicMock()
     return loop
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
 
 
 @pytest.mark.asyncio
@@ -129,6 +136,7 @@ async def test_request_success(
     )
 
 
+
 @patch("trans_hub.cli.request_command")
 @patch("trans_hub.cli._initialize_coordinator")
 def test_cli_request_closes_loop(
@@ -152,6 +160,12 @@ def test_cli_request_closes_loop(
     mock_loop.run_until_complete.assert_called_once()
     mock_coordinator.close.assert_called_once()
     mock_loop.close.assert_called_once()
+
+def test_request_invalid_langs(runner: CliRunner) -> None:
+    """无效语言代码应导致命令失败。"""
+    result = runner.invoke(app, ["request", "hello", "--target", "invalid"])
+    assert result.exit_code != 0
+
 
 
 @patch("asyncio.new_event_loop")

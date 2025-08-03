@@ -9,9 +9,9 @@ Trans-Hub 提供了强大的命令行工具，用于管理和操作翻译服务�
 显示当前 Trans-Hub CLI 的版本信息。
 
 ```bash
-python -m trans_hub.cli_main --version
+trans-hub --version
 # 或
-python -m trans_hub.cli_main -v
+trans-hub -v
 ```
 
 ## 子命令
@@ -20,7 +20,7 @@ python -m trans_hub.cli_main -v
 应用主入口。详细功能请参考 app 子模块文档。
 
 ```bash
-python -m trans_hub.cli_main app [子命令]
+trans-hub app [子命令]
 ```
 
 ### worker
@@ -34,13 +34,13 @@ python -m trans_hub.cli_main app [子命令]
 **示例**:
 ```bash
 # 启动 Worker 进程，处理所有语言的任务
-python -m trans_hub.cli_main worker
+trans-hub worker
 
 # 启动 Worker 进程，只处理英语和中文任务
-python -m trans_hub.cli_main worker --lang en zh
+trans-hub worker --lang en zh
 
 # 自定义批处理大小为 20，轮询间隔为 10 秒
-python -m trans_hub.cli_main worker --batch-size 20 --poll-interval 10
+trans-hub worker --batch-size 20 --poll-interval 10
 ```
 
 ### request
@@ -56,13 +56,13 @@ python -m trans_hub.cli_main worker --batch-size 20 --poll-interval 10
 **示例**:
 ```bash
 # 提交翻译请求，将文本翻译为法语和西班牙语
-python -m trans_hub.cli_main request "Hello world" --target fr es
+trans-hub request "Hello world" --target fr es
 
 # 指定源语言为英语
-python -m trans_hub.cli_main request "Hello world" --target fr es --source en
+trans-hub request "Hello world" --target fr es --source en
 
 # 添加业务ID并强制重新翻译
-python -m trans_hub.cli_main request "Hello world" --target fr es --business-id marketing --force
+trans-hub request "Hello world" --target fr es --business-id marketing --force
 ```
 
 ### gc
@@ -75,13 +75,13 @@ python -m trans_hub.cli_main request "Hello world" --target fr es --business-id 
 **示例**:
 ```bash
 # 执行垃圾回收，保留最近 90 天的数据
-python -m trans_hub.cli_main gc
+trans-hub gc
 
 # 自定义保留天数为 30 天
-python -m trans_hub.cli_main gc --retention-days 30
+trans-hub gc --retention-days 30
 
 # 仅预览垃圾回收结果，不实际删除数据
-python -m trans_hub.cli_main gc --dry-run
+trans-hub gc --dry-run
 ```
 
 ### db-migrate
@@ -93,8 +93,8 @@ python -m trans_hub.cli_main gc --dry-run
 **示例**:
 ```bash
 # 使用配置文件中的数据库 URL 执行迁移
-python -m trans_hub.cli_main db-migrate
+trans-hub db-migrate
 
 # 指定自定义数据库 URL
-python -m trans_hub.cli_main db-migrate --database-url sqlite:///custom.db
+trans-hub db-migrate --database-url sqlite:///custom.db
 ```

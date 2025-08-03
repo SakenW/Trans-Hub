@@ -43,8 +43,13 @@ def run_worker(
             log.warning("关闭事件未初始化，无法触发优雅停机")
 
     # 注册信号处理器
-    loop.add_signal_handler(signal.SIGTERM, signal_handler, signal.SIGTERM, None)
-    loop.add_signal_handler(signal.SIGINT, signal_handler, signal.SIGINT, None)
+    try:
+        loop.add_signal_handler(signal.SIGTERM, signal_handler, signal.SIGTERM, None)
+        loop.add_signal_handler(signal.SIGINT, signal_handler, signal.SIGINT, None)
+    except NotImplementedError:
+        # 在不支持 add_signal_handler 的平台上回退到 signal.signal
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
     async def process_language(target_lang: str) -> None:
         """处理单一语言的循环。"""
@@ -107,7 +112,7 @@ def run_worker(
     # 运行worker任务直到收到停机信号
     # 创建worker任务并包装成asyncio.Task对象
     worker_tasks = [
-        asyncio.create_task(process_language(target_lang)) for target_lang in lang
+        loop.create_task(process_language(target_lang)) for target_lang in lang
     ]
     log.info(f"创建了 {len(worker_tasks)} 个worker任务")
 
@@ -134,17 +139,42 @@ def run_worker(
         log.error(f"worker任务集合执行异常: {e}", exc_info=True)
 
     # 确保所有任务都已完成或被取消
-    pending_tasks = asyncio.all_tasks(loop=loop)
-    current_task = asyncio.current_task(loop=loop)
-    if pending_tasks:
-        log.info(f"仍有 {len(pending_tasks)} 个未完成的任务，正在取消...")
-        for task in pending_tasks:
-            if task != current_task:
+    async def cancel_pending_tasks() -> None:
+        pending_tasks = asyncio.all_tasks()
+        current_task = asyncio.current_task()
+        tasks_to_cancel = [t for t in pending_tasks if t is not current_task]
+        if tasks_to_cancel:
+            log.info(f"仍有 {len(tasks_to_cancel)} 个未完成的任务，正在取消...")
+            for task in tasks_to_cancel:
                 task.cancel()
+            for task in tasks_to_cancel:
                 try:
-                    loop.run_until_complete(task)
+                    await task
+                    log.info(f"任务 {task} 已完成")
                 except asyncio.CancelledError:
                     log.info(f"任务 {task} 已取消")
                 except Exception as e:
-                    log.error(f"任务 {task} 取消时发生异常: {e}", exc_info=True)
+                    log.error(
+                        f"任务 {task} 取消时发生异常: {e}",
+                        exc_info=True,
+                    )
 
+    loop.run_until_complete(cancel_pending_tasks())
+
+
+    # 执行协调器的优雅关闭
+    log.info("Worker 任务已完成，正在关闭协调器...")
+    try:
+        loop.run_until_complete(coordinator.close())
+        log.info("协调器已成功关闭")
+    except Exception as e:
+        log.error(f"关闭协调器时发生异常: {e}", exc_info=True)
+    finally:
+        loop.close()
+        try:
+            import trans_hub.cli as cli_main
+
+            cli_main._coordinator = None
+            cli_main._loop = None
+        except Exception:
+            pass
