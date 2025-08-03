@@ -51,7 +51,11 @@ def _initialize_coordinator(
     """
     global _coordinator, _loop
 
-    if _coordinator is not None and _loop is not None:
+    if (
+        _coordinator is not None
+        and _loop is not None
+        and _coordinator.initialized
+    ):
         return _coordinator, _loop
 
     # 创建新的事件循环
