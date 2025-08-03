@@ -101,7 +101,7 @@ if __name__ == '__main__':
     # 定义docs目录和输出文件路径
     project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     docs_dir = project_root / 'docs'
-    output_file = project_root / 'docs_merged.txt'
+    output_file = Path(__file__).parent / 'docs_merged.txt'
 
     # 创建并运行DocMerger
     merger = DocMerger(str(docs_dir), str(output_file))
