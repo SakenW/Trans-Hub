@@ -297,7 +297,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
             processed_count += len(batch_items)
 
     async def save_translations(
-        self, results: list[TranslationResult], cursor: Optional[aiosqlite.Cursor] = None
+        self,
+        results: list[TranslationResult],
+        cursor: Optional[aiosqlite.Cursor] = None,
     ) -> None:
         if not results:
             return

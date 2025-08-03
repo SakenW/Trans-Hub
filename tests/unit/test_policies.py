@@ -36,6 +36,7 @@ def mock_config() -> MagicMock:
 
 @pytest.fixture
 def mock_handler() -> AsyncMock:
+    """创建一个持久化处理器的 mock 对象。"""
     mock = AsyncMock(spec=PersistenceHandler)
     mock.get_business_id_for_job.return_value = "biz-123"
     mock.move_to_dlq = AsyncMock()
@@ -44,6 +45,7 @@ def mock_handler() -> AsyncMock:
 
 @pytest.fixture
 def mock_cache() -> AsyncMock:
+    """创建一个缓存对象的 mock。"""
     mock = AsyncMock()
     mock.get_cached_result.return_value = None
     mock.cache_translation_result = AsyncMock()
@@ -52,6 +54,7 @@ def mock_cache() -> AsyncMock:
 
 @pytest.fixture
 def mock_active_engine() -> AsyncMock:
+    """创建一个翻译引擎的 mock 对象。"""
     mock = AsyncMock()
     mock.atranslate_batch.return_value = [EngineSuccess(translated_text="mocked")]
     mock.ACCEPTS_CONTEXT = False
@@ -64,6 +67,7 @@ def mock_active_engine() -> AsyncMock:
 def mock_processing_context(
     mock_config: MagicMock, mock_handler: AsyncMock, mock_cache: AsyncMock
 ) -> ProcessingContext:
+    """创建一个处理上下文的 mock 对象。"""
     return ProcessingContext(
         config=mock_config,
         handler=mock_handler,
@@ -74,6 +78,7 @@ def mock_processing_context(
 
 @pytest.fixture
 def sample_batch() -> list[ContentItem]:
+    """提供一个用于测试的、包含单个任务的批次。"""
     return [
         ContentItem(
             translation_id="uuid-trans-1",
@@ -92,6 +97,7 @@ async def test_policy_builds_result_correctly(
     mock_active_engine: AsyncMock,
     sample_batch: list[ContentItem],
 ) -> None:
+    """测试默认处理策略能否在翻译成功时正确构建 TranslationResult 对象。"""
     mock_active_engine.atranslate_batch.return_value = [
         EngineSuccess(translated_text="Hallo")
     ]

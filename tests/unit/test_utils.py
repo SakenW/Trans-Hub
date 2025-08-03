@@ -29,7 +29,7 @@ def test_get_context_hash_with_nested_dict() -> None:
 
 def test_validate_lang_codes_valid() -> None:
     """测试有效的语言代码能通过校验。"""
-    validate_lang_codes(["en", "zh-CN", "fr"])  # Should not raise
+    validate_lang_codes(["en", "zh-CN", "fr", "es-419"])  # Should not raise
     validate_lang_codes(["de"])  # Should not raise
 
 

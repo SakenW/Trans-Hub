@@ -5,7 +5,10 @@ v3.0 更新：ID类型已从 int 切换为 str (UUID)，并增加了 touch_jobs 
 """
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, Optional, Protocol
+
+import aiosqlite
 
 from trans_hub.types import (
     ContentItem,
@@ -41,7 +44,19 @@ class PersistenceHandler(Protocol):
         force_retranslate: bool = False,
     ) -> None: ...
 
-    async def save_translations(self, results: list[TranslationResult]) -> None: ...
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
+        """异步事务上下文管理器，提供一个数据库游标用于执行事务操作。"""
+        # 协议方法体由实现类提供
+        from typing import cast
+
+        yield cast(aiosqlite.Cursor, None)  # 占位实现，实际由子类提供
+
+    async def save_translations(
+        self,
+        results: list[TranslationResult],
+        cursor: Optional[aiosqlite.Cursor] = None,
+    ) -> None: ...
 
     async def get_translation(
         self,
@@ -54,7 +69,9 @@ class PersistenceHandler(Protocol):
         self, content_id: str, context_id: Optional[str]
     ) -> Optional[str]: ...
 
-    async def touch_jobs(self, business_ids: list[str]) -> None: ...
+    async def touch_jobs(
+        self, business_ids: list[str], cursor: Optional[aiosqlite.Cursor] = None
+    ) -> None: ...
 
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False

@@ -3,7 +3,7 @@
 本模块包含项目范围内的通用工具函数。
 
 这些函数被设计为无状态的、纯粹的辅助工具，用于执行如哈希计算、格式校验等常见任务。
-v3.1 修订：移除了易产生误导的 `get_database_url` 函数。
+v3.1 修订：移除了易产生误导的 `get_database_url` 函数，并增强了语言代码校验。
 """
 
 import hashlib
@@ -47,7 +47,7 @@ def get_context_hash(context: Optional[dict[str, Any]]) -> str:
 
 def validate_lang_codes(lang_codes: list[str]) -> None:
     """
-    校验语言代码列表中的每个代码是否符合 BCP 47 的常见格式 (例如 'en', 'zh-CN')。
+    校验语言代码列表中的每个代码是否符合 BCP 47 的常见格式。
 
     如果任何一个代码格式无效，则抛出 ValueError。
 
@@ -57,9 +57,10 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
     Raises:
         ValueError: 如果任何一个语言代码格式无效。
     """
-    # 符合 BCP 47 标准的语言代码正则表达式
-    # 只允许 2-3 个小写字母，或 2-3 个小写字母+连字符+2 个大写字母的格式
-    lang_code_pattern = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
+    # v3.1 修复：改进的正则表达式，以更好地匹配 BCP 47，例如 'en', 'zh-CN', 'es-419'
+    lang_code_pattern = re.compile(
+        r"^[a-z]{2,3}(-[A-Z][a-z0-9]{1,3})?(-[A-Z]{2}|-[0-9]{3})?$"
+    )
     for code in lang_codes:
         if not lang_code_pattern.match(code):
             raise ValueError(f"提供的语言代码 '{code}' 格式无效。")

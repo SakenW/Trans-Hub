@@ -28,6 +28,8 @@ from .types import (
 from .utils import get_context_hash
 
 if TYPE_CHECKING:
+    import aiosqlite  # noqa: F401
+
     from .engines.base import BaseTranslationEngine
 
 logger = structlog.get_logger(__name__)
@@ -231,12 +233,13 @@ class Coordinator:
                         items_group, target_lang, self.processing_context, active_engine
                     )
                     # 在一个事务中处理保存翻译结果和更新作业时间戳
-                    async with self.handler._transaction() as cursor:
+                    async with self.handler._transaction() as cursor:  # type: aiosqlite.Cursor
                         await self.handler.save_translations(batch_results, cursor)
                         business_ids = [
                             result.business_id
                             for result in batch_results
-                            if result.status == TranslationStatus.TRANSLATED and result.business_id
+                            if result.status == TranslationStatus.TRANSLATED
+                            and result.business_id
                         ]
                         if business_ids:
                             await self.handler.touch_jobs(business_ids, cursor)

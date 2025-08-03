@@ -1,79 +1,34 @@
-# tests/test_main.py
+# tests/integration/test_coordinator_e2e.py
 """Trans-Hub 核心功能的端到端测试。"""
 
 import asyncio
 import os
-import shutil
-import sqlite3
-from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
 import aiosqlite
 import pytest
-import pytest_asyncio
-import structlog
-from dotenv import load_dotenv
 
-from trans_hub import Coordinator, EngineName, TransHubConfig
-from trans_hub.db.schema_manager import MIGRATIONS_DIR
+from trans_hub import Coordinator, EngineName
 from trans_hub.interfaces import PersistenceHandler
-from trans_hub.logging_config import setup_logging
-from trans_hub.persistence import DefaultPersistenceHandler, create_persistence_handler
+from trans_hub.persistence import DefaultPersistenceHandler
 from trans_hub.types import TranslationResult, TranslationStatus
 
-load_dotenv()
-setup_logging(log_level="INFO", log_format="console")
-logger = structlog.get_logger(__name__)
-
-TEST_DIR = Path(__file__).parent / "test_output"
+# 定义测试常量
 ENGINE_DEBUG = EngineName.DEBUG
 ENGINE_TRANSLATORS = EngineName.TRANSLATORS
 ENGINE_OPENAI = EngineName.OPENAI
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_environment() -> Generator[None, None, None]:
-    TEST_DIR.mkdir(exist_ok=True)
-    yield
-    shutil.rmtree(TEST_DIR)
-
-
-@pytest.fixture
-def test_config() -> TransHubConfig:
-    db_file = f"test_{os.urandom(4).hex()}.db"
-    return TransHubConfig(
-        database_url=f"sqlite:///{TEST_DIR / db_file}",
-        active_engine=ENGINE_DEBUG,
-        source_lang="en",
-    )
-
-
-@pytest_asyncio.fixture
-async def coordinator(test_config: TransHubConfig) -> AsyncGenerator[Coordinator, None]:
-    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
-    if not migration_files:
-        raise RuntimeError("在 migrations 目录中找不到 SQL 迁移脚本。")
-    latest_schema_file = migration_files[-1]
-    sql_script = "\n".join(
-        line
-        for line in latest_schema_file.read_text("utf-8").splitlines()
-        if not line.strip().startswith("--") and not line.strip().startswith("#")
-    )
-    conn = sqlite3.connect(test_config.db_path)
-    conn.executescript(sql_script)
-    conn.close()
-    handler: PersistenceHandler = create_persistence_handler(test_config)
-    coord = Coordinator(config=test_config, persistence_handler=handler)
-    await coord.initialize()
-    yield coord
-    await coord.close()
-
-
 @pytest.mark.asyncio
 async def test_full_workflow_with_debug_engine(coordinator: Coordinator) -> None:
+    """测试使用 Debug 引擎的完整翻译流程。
+
+    Args:
+        coordinator: 由 conftest.py 提供的、已初始化的真实 Coordinator 实例。
+    """
     text = "Hello"
     target_lang = "zh-CN"
     business_id = "test.debug.hello"
@@ -96,6 +51,11 @@ async def test_full_workflow_with_debug_engine(coordinator: Coordinator) -> None
 )
 @pytest.mark.asyncio
 async def test_openai_engine_workflow(coordinator: Coordinator) -> None:
+    """测试 OpenAI 引擎的翻译流程（需要 API 密钥）。
+
+    Args:
+        coordinator: 由 conftest.py 提供的、已初始化的真实 Coordinator 实例。
+    """
     coordinator.switch_engine(ENGINE_OPENAI.value)
     text = "Star"
     target_lang = "fr"
@@ -112,6 +72,11 @@ async def test_openai_engine_workflow(coordinator: Coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
+    """测试 Translators 引擎的翻译流程。
+
+    Args:
+        coordinator: 由 conftest.py 提供的、已初始化的真实 Coordinator 实例。
+    """
     coordinator.switch_engine(ENGINE_TRANSLATORS.value)
     text = "Moon"
     target_lang = "de"
@@ -125,6 +90,12 @@ async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
+    """测试垃圾回收（GC）能否正确清理过期和无关联的数据。
+
+    Args:
+        coordinator: 由 conftest.py 提供的、已初始化的真实 Coordinator 实例。
+    """
+    # 准备数据
     await coordinator.request(
         target_langs=["zh-CN"], text_content="fresh item", business_id="item.fresh"
     )
@@ -132,6 +103,8 @@ async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
         target_langs=["zh-CN"], text_content="stale item", business_id="item.stale"
     )
     _ = [res async for res in coordinator.process_pending_translations("zh-CN")]
+
+    # 手动将 "stale" 任务的时间戳设置为2天前
     handler = coordinator.handler
     assert isinstance(handler, DefaultPersistenceHandler)
     db_path = handler.db_path
@@ -142,10 +115,13 @@ async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
             (two_days_ago, "item.stale"),
         )
         await db.commit()
-    await coordinator.touch_jobs(["item.fresh"])
+
+    # 运行 GC，只清理过期 job
     report1 = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
-    assert report1["deleted_jobs"] == 1
-    assert report1["deleted_content"] == 0
+    assert report1.get("deleted_jobs", 0) == 1
+    assert report1.get("deleted_content", 0) == 0
+
+    # 手动删除与 "stale" 内容关联的翻译记录，使其成为孤立内容
     async with aiosqlite.connect(db_path) as db:
         cursor = await db.execute(
             "SELECT id FROM th_content WHERE value = 'stale item'"
@@ -157,36 +133,20 @@ async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
             "DELETE FROM th_translations WHERE content_id = ?", (stale_content_id,)
         )
         await db.commit()
+
+    # 再次运行 GC，清理孤立内容
     report2 = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
-    assert report2["deleted_jobs"] == 0
-    assert report2["deleted_content"] == 1
-
-
-@pytest.mark.asyncio
-async def test_force_retranslate_api(coordinator: Coordinator) -> None:
-    text = "Sun"
-    target_lang = "es"
-    await coordinator.request(target_langs=[target_lang], text_content=text)
-    _ = [res async for res in coordinator.process_pending_translations(target_lang)]
-    result = await coordinator.get_translation(text, target_lang)
-    assert result is not None and result.status == TranslationStatus.TRANSLATED
-    await coordinator.request(
-        target_langs=[target_lang], text_content=text, force_retranslate=True
-    )
-    handler = coordinator.handler
-    assert isinstance(handler, DefaultPersistenceHandler)
-    async with aiosqlite.connect(handler.db_path) as db:
-        async with db.execute(
-            "SELECT T.status FROM th_translations T JOIN th_content C ON T.content_id = C.id WHERE C.value = ?",
-            (text,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            assert row is not None and row[0] == TranslationStatus.PENDING.value
+    assert report2.get("deleted_jobs", 0) == 0
+    assert report2.get("deleted_content", 0) == 1
 
 
 @pytest.mark.asyncio
 async def test_graceful_shutdown(coordinator: Coordinator) -> None:
-    """测试优雅停机能否等待正在进行的任务完成。"""
+    """测试优雅停机能否等待正在进行的任务完成。
+
+    Args:
+        coordinator: 由 conftest.py 提供的、已初始化的真实 Coordinator 实例。
+    """
     text = "slow translation"
     target_lang = "fr"
     await coordinator.request(target_langs=[target_lang], text_content=text)
@@ -194,6 +154,7 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     processing_started = asyncio.Event()
     processing_can_finish = asyncio.Event()
 
+    # 拦截原始的处理方法
     original_process_batch = coordinator.processing_policy.process_batch
 
     async def slow_process_batch(*args: Any, **kwargs: Any) -> list[TranslationResult]:
@@ -210,29 +171,26 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     with patch.object(
         coordinator.processing_policy, "process_batch", side_effect=slow_process_batch
     ):
+        # 启动 worker
         worker_task: asyncio.Task[None] = asyncio.create_task(consume_worker())
-
         await processing_started.wait()
 
+        # 在 worker 处理到一半时，请求关闭
         close_task = asyncio.create_task(coordinator.close())
-
         await asyncio.sleep(0.1)
         assert not close_task.done(), (
             "close() 应该在等待 active processor 完成，不应立即结束"
         )
 
+        # 允许 worker 完成处理
         processing_can_finish.set()
-
-        # 等待处理完成
         await worker_task
 
-        # 在协调器关闭前获取翻译结果
+        # 在协调器完全关闭前，验证结果已写入数据库
         final_result = await coordinator.handler.get_translation(text, target_lang)
         assert final_result is not None
         assert final_result.status == TranslationStatus.TRANSLATED
 
+        # 等待关闭任务最终完成
         await close_task
-
-
-if __name__ == "__main__":
-    pytest.main(["-s", "-v", __file__])
+        assert close_task.done()

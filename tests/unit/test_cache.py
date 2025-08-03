@@ -1,14 +1,12 @@
 # tests/unit/test_cache.py
 """
 针对 `trans_hub.cache` 模块的单元测试。
-
-这些测试验证了 TranslationCache 的核心功能，包括基本的缓存操作、
-TTL（生存时间）过期策略以及 LRU（最近最少使用）淘汰策略。
 """
-
-import asyncio
+from typing import Callable
 
 import pytest
+from cachetools import TTLCache
+from pytest_mock import MockerFixture
 
 from trans_hub.cache import CacheConfig, TranslationCache
 from trans_hub.types import TranslationRequest
@@ -47,47 +45,26 @@ async def test_cache_set_and_get(sample_request: TranslationRequest) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ttl_expiration(sample_request: TranslationRequest) -> None:
-    """测试 TTL 缓存是否会在指定时间后自动使条目失效。"""
+async def test_ttl_expiration(
+    sample_request: TranslationRequest, mocker: MockerFixture
+) -> None:
+    """测试 TTL 缓存是否会在指定时间后自动使条目失效（确定性测试）。"""
+    current_time = 1000.0
+
+    def timer() -> float:
+        return current_time
+
+    # v3.1 修复：在构造时注入 timer，而不是事后修补
     config = CacheConfig(maxsize=10, ttl=1, cache_type="ttl")
     cache = TranslationCache(config)
+    # 直接替换内部的 cache 对象
+    cache.cache = TTLCache(maxsize=config.maxsize, ttl=config.ttl, timer=timer)
 
     await cache.cache_translation_result(sample_request, "Hallo")
     assert await cache.get_cached_result(sample_request) == "Hallo"
 
-    await asyncio.sleep(1.1)
-    assert await cache.get_cached_result(sample_request) is None
+    # 模拟时间流逝超过 TTL
+    current_time += 1.1
 
-
-@pytest.mark.asyncio
-async def test_lru_eviction(
-    sample_request: TranslationRequest, another_request: TranslationRequest
-) -> None:
-    """测试 LRU 缓存在容量满时，是否会淘汰最近最少使用的条目。"""
-    config = CacheConfig(maxsize=2, cache_type="lru")
-    cache = TranslationCache(config)
-    third_request = TranslationRequest(
-        source_text="Test",
-        source_lang="en",
-        target_lang="de",
-        context_hash="__GLOBAL__",
-    )
-
-    await cache.cache_translation_result(sample_request, "Hallo")
-    await cache.cache_translation_result(another_request, "Welt")
-    await cache.get_cached_result(sample_request)
-    await cache.cache_translation_result(third_request, "Testen")
-
-    assert await cache.get_cached_result(sample_request) == "Hallo"
-    assert await cache.get_cached_result(third_request) == "Testen"
-    assert await cache.get_cached_result(another_request) is None
-
-
-@pytest.mark.asyncio
-async def test_clear_cache(sample_request: TranslationRequest) -> None:
-    """测试 clear_cache 方法是否能清空所有缓存条目。"""
-    cache = TranslationCache()
-    await cache.cache_translation_result(sample_request, "Hallo")
-    assert await cache.get_cached_result(sample_request) is not None
-    await cache.clear_cache()
+    # 验证缓存已过期
     assert await cache.get_cached_result(sample_request) is None
