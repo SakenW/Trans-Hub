@@ -66,7 +66,7 @@ async def test_engine() -> TestTranslationEngine:
     return engine
 
 @pytest_asyncio.fixture(autouse=True)
-async def cleanup_engine(test_engine: TestTranslationEngine):
+async def cleanup_engine(test_engine: TestTranslationEngine) -> None:
     yield
     await test_engine.close()
 
