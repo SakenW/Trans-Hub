@@ -491,17 +491,12 @@ API 参考
    .. rubric:: 核心方法详解
 
    .. automethod:: ensure_pending_translations
+      :no-index:
 
       此方法是 `Coordinator.request()` 调用的核心。一个健壮的实现必须在一个**单一的原子事务**中完成所有关联的数据库检查和写入操作，以确保数据的一致性。
 
    .. automethod:: stream_translatable_items
-
-      这是一个异步生成器，用于从数据库中流式地获取待翻译的任务批次。对于每个批次，实现**必须**在一个**原子事务**中完成以下两步：
-
-      1. 查找一批符合条件的翻译任务。
-      2. **立即**将这些被选中的任务的状态更新为 ``TRANSLATING``，以防止其他并行的 Worker 实例重复获取相同的任务（行级锁）。
-
-      只有在事务**成功提交后**，才能 `yield` 出 `ContentItem` 的列表。
+      :no-index:
 
 
 默认 SQLite 实现
@@ -560,9 +555,7 @@ API 参考
    表示单个文本翻译成功。`from_cache` 标志指示结果是否来自**翻译引擎自身**的内部缓存（而非 `Coordinator` 的缓存）。
 
 .. autoclass:: EngineError
-   :members:
-   - error_message
-   - is_retryable
+   :members: error_message is_retryable
    :undoc-members: false
    :show-inheritance:
 
@@ -604,16 +597,16 @@ API 参考
 全局上下文哨兵
 ----------------
 
-.. autoattribute:: GLOBAL_CONTEXT_SENTINEL
+.. autoattribute:: trans_hub.types.GLOBAL_CONTEXT_SENTINEL
 
    一个特殊的字符串常量，当翻译请求没有提供上下文时，用作 `context_hash` 的值。这确保了 `context_hash` 字段在数据库中始终为非空，从而使 `UNIQUE` 约束能够正确工作。
 ================================================================================
 文件: cli_reference.rst
 .. # docs/cli_reference.rst
 
-==================
+======================
 命令行工具 (CLI) 参考
-==================
+======================
 
 `Trans-Hub` 提供了一个强大的命令行接口（CLI），用于启动后台服务、提交翻译任务和管理数据库。
 
@@ -623,7 +616,7 @@ API 参考
 所有命令都通过 `trans-hub` 入口点执行。您可以通过 `--help` 选项查看所有可用的命令和子命令。
 
 .. code-block:: shell
-   :prompt: $
+   
 
    trans-hub --help
 
@@ -638,7 +631,7 @@ API 参考
 启动一个或多个后台工作进程，持续处理指定语言的待翻译任务。这是 `Trans-Hub` 的核心服务命令。
 
 .. code-block:: shell
-   :prompt: $
+
 
    trans-hub run-worker --lang <LANG_CODE> [OPTIONS]
 
@@ -652,13 +645,12 @@ API 参考
 
 .. code-block:: shell
    :caption: 启动一个处理中文和日文翻译的 Worker
-   :prompt: $
+
 
    trans-hub run-worker --lang zh-CN --lang ja
 
 .. code-block:: shell
    :caption: 启动一个高吞吐量的英文 Worker
-   :prompt: $
 
    trans-hub run-worker --lang en --batch-size 100 --interval 2
 
@@ -667,7 +659,7 @@ API 参考
 提交一个新的翻译请求到队列中，供后台 Worker 处理。
 
 .. code-block:: shell
-   :prompt: $
+
 
    trans-hub request [OPTIONS] <TEXT_TO_TRANSLATE>
 
@@ -686,13 +678,11 @@ API 参考
 
 .. code-block:: shell
    :caption: 将 "你好" 翻译成英文和法文
-   :prompt: $
 
    trans-hub request --target en --target fr "你好"
 
 .. code-block:: shell
    :caption: 强制重新翻译一个带有业务 ID 的术语
-   :prompt: $
 
    trans-hub request --target ja --id "term.login" --force "ログイン"
 
@@ -701,7 +691,6 @@ API 参考
 执行数据库垃圾回收，清理过期的、无关联的旧数据。
 
 .. code-block:: shell
-   :prompt: $
 
    trans-hub gc [OPTIONS]
 
@@ -714,13 +703,11 @@ API 参考
 
 .. code-block:: shell
    :caption: 预览将要被清理的数据
-   :prompt: $
 
    trans-hub gc --dry-run --days 30
 
 .. code-block:: shell
    :caption: 实际执行清理操作
-   :prompt: $
 
    trans-hub gc --days 30
    # (程序会请求用户确认)
@@ -735,7 +722,6 @@ API 参考
 对数据库应用所有必要的迁移脚本，使其达到最新的 Schema 版本。这是初始化新数据库或升级 `Trans-Hub` 版本后的**必要步骤**。
 
 .. code-block:: shell
-   :prompt: $
 
    trans-hub db migrate [OPTIONS]
 
@@ -747,13 +733,11 @@ API 参考
 
 .. code-block:: shell
    :caption: 对默认数据库执行迁移
-   :prompt: $
 
    trans-hub db migrate
 
 .. code-block:: shell
    :caption: 对一个指定的数据库文件执行迁移
-   :prompt: $
 
    trans-hub db migrate --db-url "sqlite:///./backup.db"
 ================================================================================
@@ -905,13 +889,13 @@ API 参考
 - 您熟悉基本的命令行操作。
 
 第一步：安装 Trans-Hub
----------------------
+========================
 
 我们推荐使用 `Poetry` 来管理项目依赖。
 
 .. code-block:: shell
    :caption: 使用 Poetry 安装 (推荐)
-   :prompt: $
+   
 
    # 安装核心库、CLI 工具和免费的 `translators` 引擎
    poetry add "trans-hub[cli,translators]"
@@ -920,14 +904,13 @@ API 参考
 
 .. code-block:: shell
    :caption: 使用 pip 安装
-   :prompt: $
 
    pip install "trans-hub[cli,translators]"
 
 安装完成后，您可以通过 `--version` 标志来验证 `trans-hub` CLI 是否可用。
 
 .. code-block:: shell
-   :prompt: $
+
 
    trans-hub --version
 
@@ -962,7 +945,6 @@ API 参考
 
 .. code-block:: shell
    :caption: 运行数据库迁移命令
-   :prompt: $
 
    trans-hub db migrate
 
@@ -975,30 +957,34 @@ API 参考
 
 .. code-block:: shell
    :caption: 使用 request 命令提交任务
-   :prompt: $
 
    trans-hub request --target zh-CN --target ja "Hello, world!"
 
 执行后，您会看到一条确认消息。这个任务现在已经被登记在数据库中，状态为 `PENDING`。
 
 第五步：启动 Worker 并观察结果
------------------------------
+=================================
 
 现在，我们需要启动一个后台工作进程（Worker）来处理我们刚刚提交的任务。
 
-**请打开一个新的终端窗口**（保持当前窗口不变），并运行以下命令来启动一个专门处理中文和日文翻译的 Worker：
+请打开一个新的终端窗口（保持当前窗口不变），并运行以下命令来启动一个专门处理中文和日文翻译的 Worker：
 
 .. code-block:: shell
    :caption: 在新终端中启动 Worker
-   :prompt: $
 
    trans-hub run-worker --lang zh-CN --lang ja
 
 启动后，您将看到 Worker 开始轮询数据库，发现并处理待办任务。由于我们将日志级别设为 `DEBUG`，您会看到详细的日志输出，包括翻译成功或失败的信息。
 
-.. image:: /_static/worker_running_demo.gif
-   :alt: Worker 运行示例
-   :align: center
+.. note::
+
+   以下是 Worker 运行示例图片，但该图片当前缺失。
+
+   .. 暂时注释掉缺失的图片引用
+   .. 
+   .. .. image:: /_static/worker_running_demo.gif
+   ..    :alt: Worker 运行示例
+   ..    :align: center
 
 成功了！
 --------
@@ -1051,16 +1037,16 @@ API 参考
 `business_id`: 身份标识
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-- **作用**: 用于**生命周期管理**和来源追踪。例如，你可以通过 `business_id` 来更新或重新翻译某个特定的文本。
-- **特点**: 存储在独立的 `th_jobs` 表中，**不影响**翻译结果。
-- **推荐命名**: 带命名空间的点分式路径，如 ``ui.login-page.title``。
+- 作用: 用于生命周期管理和来源追踪。例如，你可以通过 `business_id` 来更新或重新翻译某个特定的文本。
+- 特点: 存储在独立的 `th_jobs` 表中，不影响翻译结果。
+- 推荐命名: 带命名空间的点分式路径，如 ``ui.login-page.title``。
 
 `context`: 翻译情境
 ^^^^^^^^^^^^^^^^^^^^
 
-- **作用**: 用于区分不同情境下的翻译，**会直接影响**翻译结果。
-- **特点**: 其哈希值是数据库中翻译记录唯一性约束的一部分。
-- **使用场景**: 当同一个文本在不同上下文中有不同翻译时必须使用。例如，单词 "Submit" 在软件界面中应翻译为“提交”，但在法律文件中可能需要翻译为“呈递”。
+- 作用: 用于区分不同情境下的翻译，会直接影响翻译结果。
+- 特点: 其哈希值是数据库中翻译记录唯一性约束的一部分。
+- 使用场景: 当同一个文本在不同上下文中有不同翻译时必须使用。例如，单词 "Submit" 在软件界面中应翻译为“提交”，但在法律文件中可能需要翻译为“呈递”。
 
 上下文翻译实战
 --------------
@@ -1186,7 +1172,7 @@ API 参考
    # )
 
 与 Web 框架集成 (FastAPI)
-------------------------
+----------------------------
 
 `Trans-Hub` 的纯异步设计使其能与 FastAPI 等现代 Web 框架无缝集成。推荐使用 FastAPI 的依赖注入系统来管理 `Coordinator` 的生命周期。
 
@@ -1237,278 +1223,119 @@ API 参考
 - 探索 :doc:`命令行工具 <../cli_reference>` 的使用。
 ================================================================================
 文件: guides/architecture.rst
-# Trans-Hub 架构概述
+.. # docs/guides/architecture.rst (Final Merged Version)
 
-## 设计哲学与核心原则
+==================
+Trans-Hub 架构概述
+==================
 
-Trans-Hub 架构遵循以下核心原则：
+:文档目的: 本文档旨在提供一个关于 `Trans-Hub` 系统架构、设计原则和核心工作流程的全面概览。它是理解“系统如何工作”的起点。
 
-1. **异步优先**：所有核心操作均基于 Python 的异步 I/O 模型实现，最大化并发性能
-2. **职责明确**：每个组件负责单一功能，确保高内聚低耦合
-3. **依赖抽象**：核心业务逻辑依赖于抽象接口而非具体实现
-4. **可扩展性**：通过插件化设计支持多种翻译引擎和持久化后端
-5. **健壮性**：内置重试、缓存和错误处理机制
-6. **可观测性**：全面的日志记录和指标收集
+设计哲学与核心原则
+--------------------
 
-## 系统架构图
+`Trans-Hub` 是一个**异步优先**、可嵌入 Python 应用的、带持久化存储的智能本地化后端引擎。其架构遵循以下核心原则：
 
-```
-+------------------+      +-------------------+      +-------------------+
-|                  |      |                   |      |                   |
-|  Client 应用     +----->+   Coordinator     +----->+  Translation      |
-|                  |      |                   |      |  Engines          |
-+------------------+      +-------------------+      +-------------------+
-                               ^                          ^
-                               |                          |
-                               v                          v
-+------------------+      +-------------------+      +-------------------+
-|                  |      |                   |      |                   |
-|  Persistence     |<-----+   Rate Limiter    |<-----+  Cache System     |
-|  Layer           |      |                   |      |                   |
-+------------------+      +-------------------+      +-------------------+
-```
+- **异步优先 (Async-First)**: 整个核心库被设计为纯异步，以实现最大的 I/O 并发性能。
+- **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚，确保高内聚、低耦合。
+- **依赖注入与抽象 (Dependency Injection & Abstraction)**: 核心组件通过接口 (`typing.Protocol`) 交互，松耦合，易于测试。
+- **可扩展性 (Extensibility)**: 通过插件化的引擎子系统和抽象的持久化层，支持轻松扩展。
+- **健壮性 (Robustness)**: 内置重试、缓存、并发控制和详细的错误处理机制。
+- **结构化配置 (Structured Configuration)**: 所有配置项均通过 Pydantic 模型进行定义和验证。
 
-## 核心组件职责
-
-### 1. Coordinator
-
-`Coordinator` 是系统的核心协调器，负责：
-- 接收和验证翻译请求
-- 选择合适的翻译引擎
-- 应用速率限制和缓存策略
-- 处理翻译结果的持久化
-- 实现重试逻辑和错误处理
-
-### 2. PersistenceHandler
-
-`PersistenceHandler` 负责所有数据持久化操作：
-- 存储翻译请求和结果
-- 管理待处理翻译队列
-- 维护翻译上下文和历史
-- 支持事务和并发控制
-
-### 3. TranslationEngines
-
-翻译引擎负责实际的翻译工作：
-- 实现统一的 `TranslationEngine` 接口
-- 封装第三方翻译服务 API
-- 处理特定引擎的认证和错误
-- 支持批量翻译和特定领域优化
-
-### 4. RateLimiter
-
-速率限制器确保系统不会超过 API 限制：
-- 实现令牌桶或漏桶算法
-- 支持不同引擎的定制限制
-- 提供异步等待机制
-
-### 5. CacheSystem
-
-缓存系统优化性能并减少 API 调用：
-- 支持多级缓存策略
-- 实现基于内容哈希的缓存键
-- 提供缓存失效机制
-
-## 核心工作流
-
-### 翻译请求处理流程
-
-1. 客户端提交翻译请求到 `Coordinator`
-2. `Coordinator` 检查缓存，若命中则直接返回结果
-3. 未命中缓存时，`Coordinator` 应用速率限制
-4. 调用选定的翻译引擎执行翻译
-5. 翻译完成后，`Coordinator` 将结果写入缓存和持久化存储
-6. 向客户端返回翻译结果
-
-### 引擎切换流程
-
-1. 客户端调用 `switch_engine` 方法
-2. `Coordinator` 验证引擎名称有效性
-3. 惰性初始化新引擎（如未初始化过）
-4. 更新当前活动引擎
-5. 返回确认信息
-
-### 异步处理流程
-
-对于大批量翻译或长时间运行的任务：
-1. 客户端提交异步翻译请求
-2. `Coordinator` 将请求加入待处理队列
-3. 返回任务 ID 给客户端
-4. 后台 Worker 进程从队列中获取任务
-5. 执行翻译并更新任务状态
-6. 客户端通过任务 ID 查询结果
-
-## 扩展点与插件机制
-
-Trans-Hub 提供以下扩展点：
-
-1. **引擎扩展**：实现 `TranslationEngine` 接口添加新翻译引擎
-2. **持久化扩展**：实现 `PersistenceHandler` 接口支持新存储后端
-3. **策略扩展**：自定义速率限制、缓存和重试策略
-4. **钩子扩展**：在关键流程点添加自定义逻辑
-
-通过这种模块化设计，Trans-Hub 能够轻松适应不同的使用场景和需求变化.
-
-**文档目的**: 本文档旨在提供一个关于 `Trans-Hub` 系统架构、设计原则和核心工作流程的高层概览。它是理解“系统如何工作”的起点。
-
-[返回文档索引](../INDEX.md)
-
----
-
-## **1. 设计哲学与核心原则**
-
-### **1.1 项目定位**
-
-`Trans-Hub` 是一个**异步优先**、可嵌入 Python 应用程序的、带持久化存储的智能本地化（i18n）后端引擎。它旨在统一和简化多语言翻译工作流，通过智能缓存、可插拔的翻译引擎、以及健壮的错误处理和策略控制，为上层应用提供高效、低成本、高可靠的翻译能力。
-
-### **1.2 核心工程原则**
-
-- **异步优先 (Async-First)**: 整个核心库被设计为纯异步，以实现最大的 I/O 并发性能，并与现代异步 Web 框架（如 FastAPI）无缝集成。
-- **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚。`PersistenceHandler` 只管理数据库，`Engine` 只处理翻译逻辑，`Coordinator` 只负责编排工作流。
-- **依赖注入 (Dependency Injection)**: 核心组件在其构造函数中接收其依赖，使得组件之间松耦合，易于测试和替换。
-- **契约优先 (Contract First)**: 所有模块交互都通过严格的 DTOs (使用 Pydantic) 和接口 (`typing.Protocol`) 进行约束。
-- **结构化配置 (Structured Configuration)**: 系统的所有配置项均通过 Pydantic 模型进行定义和验证，并能自动从环境变量或 `.env` 文件加载。
-
----
-
-## **2. 系统架构**
+系统架构
+--------
 
 `Trans-Hub` 采用模块化的分层架构和**依赖倒置**的注册模式，确保各组件职责单一、高度解耦。
 
-```mermaid
-graph TD
-    subgraph "上层应用 (User Application)"
-        A["异步应用逻辑 (e.g., FastAPI)"]
-        G[".env 文件"]
-    end
+.. mermaid::
 
-    subgraph "核心库: Trans-Hub"
-        B["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
-        U1["<b>配置模型 (TransHubConfig)</b><br/>单一事实来源"]
-        D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象<br/><i>(内置并发写锁)</i>"]
-        F["统一数据库 (SQLite)"]
-        
-        subgraph "插件化引擎子系统"
-            E_meta["<b>引擎元数据注册表 (meta.py)</b><br/>解耦中心"]
-            C3["<b>引擎加载器 (engine_registry.py)</b><br/>动态发现"]
-            E_impl["<b>引擎实现</b><br/>(e.g., OpenAIEngine)"]
-        end
+   graph TD
+       subgraph "上层应用 (User Application)"
+           A["异步应用逻辑 (e.g., FastAPI)"]
+           G[".env 文件"]
+       end
 
-        subgraph "核心机制"
-            C1["内存缓存 (Cache)"]
-            C2["重试/速率限制"]
-        end
-    end
+       subgraph "核心库: Trans-Hub"
+           B["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
+           U1["<b>配置模型 (TransHubConfig)</b><br/>单一事实来源"]
+           D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象<br/><i>(内置并发写锁)</i>"]
+           F["统一数据库 (SQLite)"]
+           
+           subgraph "插件化引擎子系统"
+               E_meta["<b>引擎元数据注册表 (meta.py)</b><br/>解耦中心"]
+               C3["<b>引擎加载器 (engine_registry.py)</b><br/>动态发现"]
+               E_impl["<b>引擎实现</b><br/>(e.g., OpenAIEngine)"]
+           end
 
-    G -- "加载环境变量" --> U1
-    A -- "创建" --> U1
-    A -- "实例化并调用" --> B
-    
-    B -- "使用" --> C1 & C2
-    B -- "依赖于" --> D
-    
-    subgraph "初始化/发现流程"
-        style C3 fill:#e6f3ff,stroke:#36c
-        style E_impl fill:#e6f3ff,stroke:#36c
-        style E_meta fill:#e6f3ff,stroke:#36c
-        
-        U1 -- "1. 查询配置类型" --> E_meta
-        B -- "2. 使用引擎名查询" --> C3
-        C3 -- "3. 导入模块, 触发" --> E_impl
-        E_impl -- "4. 自我注册 Config" --> E_meta
-    end
-    
-    D -- "操作" --> F
-```
+           subgraph "核心机制"
+               C1["内存缓存 (Cache)"]
+               C2["重试/速率限制"]
+           end
+       end
 
-### **组件职责**
+       G -- "加载环境变量" --> U1
+       A -- "创建" --> U1
+       A -- "实例化并调用" --> B
+       
+       B -- "使用" --> C1 & C2
+       B -- "依赖于" --> D
+       
+       subgraph "初始化/发现流程"
+           style C3 fill:#e6f3ff,stroke:#36c
+           style E_impl fill:#e6f3ff,stroke:#36c
+           style E_meta fill:#e6f3ff,stroke:#36c
+           
+           U1 -- "1. 查询配置类型" --> E_meta
+           B -- "2. 使用引擎名查询" --> C3
+           C3 -- "3. 导入模块, 触发" --> E_impl
+           E_impl -- "4. 自我注册 Config" --> E_meta
+       end
+       
+       D -- "操作" --> F
 
-- **`Coordinator` (主协调器)**: **业务流程的大脑**。它是上层应用与之交互的唯一入口。它负责编排所有操作：接收请求、应用重试/速率限制策略、调用引擎、处理缓存和将结果存入数据库。
-- **`PersistenceHandler` (持久化处理器)**: **数据库的守门人**。它是一个定义了所有数据库读写操作的抽象接口。其默认实现 `DefaultPersistenceHandler` 基于 `aiosqlite`，并通过**内部的异步写锁**来保证所有写操作的事务安全，即使在多个并发的 Worker 和 API 请求下也能稳定工作。
-- **`BaseTranslationEngine` (引擎基类)**: **翻译能力的插件插槽**。它定义了所有翻译引擎必须遵守的契约，其核心是实现 `_atranslate_one` 异步方法。
-- **`TransHubConfig` (配置模型)**: **系统的控制面板**。它是一个 Pydantic 模型，集中了所有的配置项，并由 `Coordinator` 在初始化时动态填充。
-- **引擎发现与注册机制**:
-  - `engine_registry.py` 负责**发现和加载**引擎的**实现代码** (`...Engine` 类)。
-  - `engines/meta.py` 负责维护一个引擎名到其**配置模型** (`...Config` 类) 的映射。
-  - 这个双注册表系统彻底解耦了配置系统和引擎实现，避免了循环依赖。
+核心工作流详解
+--------------
 
----
+`Trans-Hub` 的核心是异步的，其工作流的核心是 `Coordinator.process_pending_translations` 方法。
 
-## **3. 核心工作流详解**
+.. mermaid::
+   :caption: `process_pending_translations` 核心时序图
 
-以下是 `Coordinator.process_pending_translations` 的核心工作流，它整合了内存缓存、数据库交互和引擎调用。
+   sequenceDiagram
+       participant App as 上层应用 (Worker)
+       participant Coord as Coordinator
+       participant Cache as TranslationCache
+       participant Handler as PersistenceHandler
+       participant Engine as TranslationEngine
 
-```mermaid
-sequenceDiagram
-    participant App as 上层应用
-    participant Coord as Coordinator
-    participant Cache as TranslationCache
-    participant Handler as PersistenceHandler
-    participant Engine as TranslationEngine
+       App->>+Coord: process_pending_translations('zh-CN')
+       Coord->>+Handler: stream_translatable_items('zh-CN', ...)
+       Note over Handler: (获取写锁)<br>事务1: 锁定一批待办任务<br>(状态->TRANSLATING)<br>(释放写锁)
+       Handler-->>-Coord: yield batch_of_items
 
-    App->>+Coord: process_pending_translations('zh-CN')
-    Coord->>+Handler: stream_translatable_items('zh-CN', ...)
-    Note over Handler: (获取写锁)<br>事务1: 锁定一批待办任务<br>(状态->TRANSLATING)<br>(释放写锁)
-    Handler-->>-Coord: yield batch_of_items
-
-    loop 针对每个翻译批次 (按 context 分组)
-        Coord->>+Cache: 检查内存缓存
-        Cache-->>-Coord: cached_results, uncached_items
-
-        opt 如果有未缓存的项目
-            loop 批次内部的重试尝试
-                Note over Coord: (应用速率限制)
-                Coord->>+Engine: atranslate_batch(uncached_items)
-                Engine-->>-Coord: List<EngineBatchItemResult>
-                alt 批次中存在可重试错误
-                    Coord->>Coord: await asyncio.sleep(指数退避)
-                else
-                    break
-                end
-            end
-            Coord->>+Cache: 缓存新翻译结果
-            Cache-->>-Coord: (新结果已缓存)
-        end
-
-        Note over Coord: 组合所有结果
-        Coord->>+Handler: save_translations(all_results)
-        Note over Handler: (获取写锁)<br>事务2: 原子更新翻译记录<br>(释放写锁)
-        Handler-->>-Coord: (数据库更新完成)
-
-        loop 对每个最终结果
-            Coord-->>App: yield TranslationResult
-        end
-    end
-```
-
-### **并发安全**
-
-`Trans-Hub` 被设计用于高并发环境。为了处理像“多个生产者 (`request`) 和一个工作者 (`process_pending_translations`) 同时对数据库进行写操作”这样的场景，`DefaultPersistenceHandler` 在其内部实现了一个**异步写锁 (`asyncio.Lock`)**。
-
-- 所有执行**写事务**的方法（如 `ensure_pending_translations`, `save_translations`）在执行前都必须获取这个锁。
-- 这确保了对数据库的写操作是**原子且串行**的，从根本上避免了事务冲突和数据竞争。
-- **只读**操作（如 `get_translation`）**不会**获取这个锁，因此可以与正在进行的写操作并发执行（得益于 SQLite 的 WAL 模式），最大限度地保证了读取性能。
-
----
-
-## **4. 扩展性**
-
-`Trans-Hub` 的设计使其在两个关键维度上具有高度的可扩展性：
-
-1.  **翻译能力**: 通过在 `trans_hub/engines/` 目录下添加新文件，可以轻松地集成任何第三方翻译服务。
-    > _详见 [指南：开发一个新引擎](../contributing/developing_engines.md)_
-2.  **存储后端**: 通过实现 `PersistenceHandler` 协议，可以将默认的 SQLite 存储替换为任何支持异步的数据库，如 PostgreSQL (使用 `asyncpg`) 或 MySQL。
-
-这使得 `Trans-Hub` 能够灵活地适应从小型项目到大规模、高并发生产环境的各种需求。
+       loop 针对每个翻译批次
+           Coord->>+Cache: 检查内存缓存
+           Cache-->>-Coord: cached_results, uncached_items
+           opt 如果有未缓存的项目
+               Coord->>+Engine: atranslate_batch(uncached_items)
+               Engine-->>-Coord: List<EngineBatchItemResult>
+               Coord->>+Cache: 缓存新翻译结果
+           end
+           Coord->>+Handler: save_translations(all_results)
+           Note over Handler: (获取写锁)<br>事务2: 原子更新翻译记录<br>(释放写锁)
+           Handler-->>-Coord: (数据库更新完成)
+           Coord-->>App: yield TranslationResult
+       end
 ================================================================================
 文件: guides/creating_an_engine.rst
 .. # docs/guides/creating_an_engine.rst
 
-======================
+=====================================
 为 Trans-Hub 开发新引擎
-======================
+=====================================
 
-欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的**纯异步**、**动态发现**和**自我注册**的架构，这个过程比你想象的要简单得多。
+欢迎你，未来的贡献者！本指南将带你一步步地为 `Trans-Hub` 开发一个全新的翻译引擎。得益于 `Trans-Hub` 的纯异步、动态发现和自我注册的架构，这个过程比你想象的要简单得多。
 
 在开始之前，我们假设你已经对 `Trans-Hub` 的 :doc:`核心架构 <architecture>` 有了基本的了解。
 
@@ -1529,7 +1356,7 @@ sequenceDiagram
 - **数据库、缓存、重试、速率限制**: 这些都由 ``Coordinator`` 处理。
 
 核心模式：只实现 `_execute_single_translation`
---------------------------------------------
+--------------------------------------------------------------------
 
 这是为 `Trans-Hub` v3.0+ 开发引擎的**唯一核心要求**。你的引擎主类必须继承 ``BaseTranslationEngine``，但你**唯一**需要重写的方法就是 ``_execute_single_translation``。基类已经为你处理了所有外围的批处理和控制逻辑。
 
@@ -1539,12 +1366,12 @@ sequenceDiagram
 假设我们要创建一个对接 “Awesome Translate” 服务的引擎。
 
 第一步：创建引擎文件
-^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 在 ``trans_hub/engines/`` 目录下，创建一个新的 Python 文件，例如 **`awesome_engine.py`**。
 
 第二步：实现引擎代码
-^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 打开 ``awesome_engine.py`` 文件，并遵循以下结构编写代码。这是构建一个新引擎的“黄金模板”。
 
@@ -1624,7 +1451,7 @@ sequenceDiagram
                # ...
 
 一份完整的示例：`AwesomeEngine`
------------------------------
+------------------------------------------
 
 下面是一个完整的、遵循所有最佳实践的 ``awesome_engine.py`` 文件示例。
 
@@ -1691,7 +1518,7 @@ sequenceDiagram
    register_engine_config("awesome", AwesomeEngineConfig)
 
 编写测试：验证你的引擎
---------------------
+----------------------------------------
 
 为你的引擎编写异步测试是至关重要的。最好的方法是编写一个集成测试，验证 `Coordinator` 能否成功使用你的新引擎。
 
@@ -1801,7 +1628,7 @@ Schema 详解
    );
 
 上下文表 (`th_contexts`)
-^^^^^^^^^^^^^^^^^^^^^^^
+===========================
 
 - **职责**: 存储唯一的上下文信息及其哈希值。
 - **实现**:
@@ -1957,14 +1784,13 @@ Schema 详解
 在您的生产服务器上，我们推荐从 PyPI 安装，并包含您计划使用的引擎以及 CLI 工具所需的附加依赖。
 
 .. code-block:: shell
-   :prompt: $
 
    # 示例：安装核心库、CLI 工具以及 OpenAI 引擎
    pip install "trans-hub[cli,openai]"
 
 ### 第二步：配置
 
-在生产环境中，**强烈推荐**使用 ``.env`` 文件或环境变量来管理配置，特别是敏感的 API 密钥。
+在生产环境中，强烈推荐使用 ``.env`` 文件或环境变量来管理配置，特别是敏感的 API 密钥。
 
 在您的部署目录下，创建一个 ``.env`` 文件。
 
@@ -1995,10 +1821,9 @@ Schema 详解
 
 ### 第三步：初始化数据库
 
-在首次启动 Worker 之前，**必须**运行数据库迁移来初始化数据库 Schema。
+在首次启动 Worker 之前，必须运行数据库迁移来初始化数据库 Schema。
 
 .. code-block:: shell
-   :prompt: $
 
    # 在您的部署目录下运行
    trans-hub db migrate
@@ -2041,7 +1866,6 @@ Schema 详解
 配置完成后，启动并启用该服务：
 
 .. code-block:: shell
-   :prompt: #
 
    systemctl daemon-reload
    systemctl start trans-hub-worker
@@ -2051,7 +1875,6 @@ Schema 详解
 您可以通过 `journalctl` 查看 Worker 的实时日志：
 
 .. code-block:: shell
-   :prompt: #
 
    journalctl -u trans-hub-worker -f
 
@@ -2064,13 +1887,13 @@ Schema 详解
 安全最佳实践
 ------------
 
-- **使用环境变量**: **切勿**将 API 密钥等敏感信息硬编码在代码中。始终使用 `.env` 文件或环境变量。
+- **使用环境变量**: 切勿将 API 密钥等敏感信息硬编码在代码中。始终使用 `.env` 文件或环境变量。
 - **文件权限**: 限制对 `.env` 文件和数据库文件的访问权限。
 - **最小权限原则**: 运行 Worker 的系统用户应被授予最小必要的权限。
 - **定期备份**: 定期备份您的 SQLite 数据库文件。
 
 升级 `Trans-Hub`
----------------
+==================
 
 1.  **停止服务**: `sudo systemctl stop trans-hub-worker`
 2.  **备份数据库**: `cp /var/data/trans_hub_prod.db /var/data/trans_hub_prod.db.bak`
@@ -2109,7 +1932,6 @@ Schema 详解
 
 .. code-block:: shell
    :caption: 在 docs/ 目录下运行
-   :prompt: $
 
    make gettext
 
@@ -2121,14 +1943,12 @@ Schema 详解
 
 .. code-block:: shell
    :caption: 示例：更新英语 (en) 的翻译文件
-   :prompt: $
 
    make update-po-en
 
 如果您想添加一种全新的语言（例如，法语 `fr`），可以手动运行 `sphinx-intl` 命令，然后为它创建一个 Makefile 快捷方式。
 
 .. code-block:: shell
-   :prompt: $
 
    sphinx-intl update -p _build/gettext -l fr
 
@@ -2163,7 +1983,6 @@ Schema 详解
 
 .. code-block:: shell
    :caption: 示例：构建并预览英文文档
-   :prompt: $
 
    make -e SPHINXOPTS="-D language=en" html
 
@@ -2200,9 +2019,7 @@ Schema 详解
 
 **Trans-Hub** 是一个**异步优先**、可嵌入 Python 应用程序的、带持久化存储的智能本地化（i18n）后端引擎。
 
-它旨在统一和简化多语言翻译工作流，通过智能缓存、可插拔的翻译引擎、以及健robust的错误处理和策略控制，为上层应用提供高效、低成本、高可靠的翻译能力。
-
-无论您是正在为您的 Web 应用添加多语言支持，还是需要处理大量的离线文本翻译，`Trans-Hub` 都能为您提供坚实的基础设施。
+它旨在统一和简化多语言翻译工作流，通过智能缓存、可插拔的翻译引擎、以及健壮的错误处理和策略控制，为上层应用提供高效、低成本、高可靠的翻译能力。
 
 .. note::
 
@@ -2243,7 +2060,12 @@ Schema 详解
 
    guides/creating_an_engine
    guides/multilingual_support
-   changelog
+   CHANGELOG
+   RELEASE_SOP
+   ROADMAP
+   README
+   RELEASE_NOTES
+   CONTRIBUTING
 
 .. toctree::
    :hidden:

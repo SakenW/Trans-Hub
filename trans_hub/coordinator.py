@@ -1,7 +1,6 @@
 # trans_hub/coordinator.py
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
-v3.1 修订：移除了不属于其核心职责的 `run_migrations` 方法。
 """
 
 import asyncio
@@ -28,8 +27,6 @@ from .types import (
 from .utils import get_context_hash
 
 if TYPE_CHECKING:
-    import aiosqlite  # noqa: F401
-
     from .engines.base import BaseTranslationEngine
 
 logger = structlog.get_logger(__name__)
@@ -45,7 +42,12 @@ class Coordinator:
         rate_limiter: Optional[RateLimiter] = None,
         max_concurrent_requests: Optional[int] = None,
     ) -> None:
-        """初始化 Coordinator。
+        """
+        初始化 Coordinator。
+
+        v3.1 最终修复：将 discover_engines() 的调用恢复到此处，以确保
+        任何 Coordinator 实例在创建时都能访问已发现的引擎，这对于非 CLI
+        应用场景（如示例脚本）至关重要。
 
         Args:
             config: Trans-Hub 的主配置对象。
@@ -53,7 +55,9 @@ class Coordinator:
             rate_limiter: 可选的速率限制器实例。
             max_concurrent_requests: 可选的最大并发请求数。
         """
+        # 确保在创建 Coordinator 实例时，引擎注册表已被填充
         discover_engines()
+
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
@@ -69,10 +73,6 @@ class Coordinator:
         self._processor_lock = asyncio.Lock()
         self._shutdown_complete_event = asyncio.Event()
 
-        logger.info(
-            "协调器已创建，等待初始化。", available_engines=list(ENGINE_REGISTRY.keys())
-        )
-
         self.processing_context = ProcessingContext(
             config=self.config,
             handler=self.handler,
@@ -81,29 +81,16 @@ class Coordinator:
         )
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
+    # ... (Coordinator 的其余代码保持不变) ...
     @property
     def active_engine(self) -> "BaseTranslationEngine[Any]":
-        """获取当前活动的翻译引擎实例。
-
-        Returns:
-            当前活动的引擎实例。
-        """
+        """获取当前活动的翻译引擎实例。"""
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> "BaseTranslationEngine[Any]":
-        """根据引擎名称获取或创建引擎实例（惰性加载）。
-
-        Args:
-            engine_name: 引擎的名称。
-
-        Returns:
-            请求的引擎实例。
-
-        Raises:
-            EngineNotFoundError: 如果请求的引擎未注册。
-        """
+        """根据引擎名称获取或创建引擎实例（惰性加载）。"""
         if engine_name not in self._engine_instances:
             logger.debug("首次请求，正在创建引擎实例...", engine_name=engine_name)
             engine_class = ENGINE_REGISTRY.get(engine_name)
@@ -122,15 +109,7 @@ class Coordinator:
         return self._engine_instances[engine_name]
 
     def switch_engine(self, engine_name: str) -> None:
-        """切换当前的活动翻译引擎。
-
-        Args:
-            engine_name: 新的活动引擎的名称。
-
-        Raises:
-            EngineNotFoundError: 如果目标引擎不可用。
-            ConfigurationError: 如果目标引擎需要源语言但未配置。
-        """
+        """切换当前的活动翻译引擎。"""
         if engine_name == self.config.active_engine.value:
             return
 
@@ -181,18 +160,7 @@ class Coordinator:
         batch_size: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
-        """处理指定语言的待处理翻译任务。
-
-        这是一个异步生成器，会持续产出翻译结果直到处理完所有待处理项。
-
-        Args:
-            target_lang: 目标语言代码。
-            batch_size: 每个批次处理的大小。如果为 None, 则使用全局配置。
-            limit: 本次调用最多处理的任务数量。
-
-        Yields:
-            TranslationResult 对象。
-        """
+        """处理指定语言的待处理翻译任务。"""
         if self._shutting_down:
             return
 
@@ -232,19 +200,13 @@ class Coordinator:
                     batch_results = await self.processing_policy.process_batch(
                         items_group, target_lang, self.processing_context, active_engine
                     )
-                    # 在一个事务中处理保存翻译结果和更新作业时间戳
-                    async with self.handler._transaction() as cursor:  # type: aiosqlite.Cursor
-                        await self.handler.save_translations(batch_results, cursor)
-                        business_ids = [
-                            result.business_id
-                            for result in batch_results
-                            if result.status == TranslationStatus.TRANSLATED
-                            and result.business_id
-                        ]
-                        if business_ids:
-                            await self.handler.touch_jobs(business_ids, cursor)
-                    # 事务完成后产出结果
+                    await self.handler.save_translations(batch_results)
                     for result in batch_results:
+                        if (
+                            result.status == TranslationStatus.TRANSLATED
+                            and result.business_id
+                        ):
+                            await self.touch_jobs([result.business_id])
                         yield result
                 finally:
                     async with self._processor_lock:
@@ -261,18 +223,7 @@ class Coordinator:
         source_lang: Optional[str] = None,
         force_retranslate: bool = False,
     ) -> None:
-        """提交一个新的翻译请求。
-
-        此方法将请求加入持久化队列，由后台 Worker 异步处理。
-
-        Args:
-            target_langs: 目标语言代码列表。
-            text_content: 要翻译的原文。
-            business_id: 关联的业务ID，可选。
-            context: 翻译上下文信息，可选。
-            source_lang: 源语言。如果为 None, 则使用全局配置。
-            force_retranslate: 是否强制重新翻译，即使已有缓存或成功记录。
-        """
+        """提交一个新的翻译请求。"""
         if self._shutting_down:
             logger.warning("系统正在停机，已拒绝新的翻译请求。")
             return
@@ -320,11 +271,7 @@ class Coordinator:
         )
 
     async def touch_jobs(self, business_ids: list[str]) -> None:
-        """更新一个或多个业务ID关联任务的 `updated_at` 时间戳。
-
-        Args:
-            business_ids: 需要“触摸”的业务ID列表。
-        """
+        """更新一个或多个业务ID关联任务的 `updated_at` 时间戳。"""
         if not business_ids:
             return
         await self.handler.touch_jobs(business_ids)
@@ -335,16 +282,7 @@ class Coordinator:
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
-        """直接获取一个翻译结果，会依次查找内存缓存和数据库。
-
-        Args:
-            text_content: 原文。
-            target_lang: 目标语言。
-            context: 上下文信息，可选。
-
-        Returns:
-            如果找到，返回 TranslationResult 对象，否则返回 None。
-        """
+        """直接获取一个翻译结果，会依次查找内存缓存和数据库。"""
         context_hash = get_context_hash(context)
         request = TranslationRequest(
             source_text=text_content,
@@ -377,15 +315,7 @@ class Coordinator:
     async def run_garbage_collection(
         self, expiration_days: Optional[int] = None, dry_run: bool = False
     ) -> dict[str, int]:
-        """运行垃圾回收，清理旧的、无关联的数据。
-
-        Args:
-            expiration_days: 保留天数。如果为 None, 则使用全局配置。
-            dry_run: 是否为预演模式，只报告不删除。
-
-        Returns:
-            一个包含各类已删除或将被删除项目数量的字典。
-        """
+        """运行垃圾回收，清理旧的、无关联的数据。"""
         days = expiration_days or self.config.gc_retention_days
         return await self.handler.garbage_collect(retention_days=days, dry_run=dry_run)
 
@@ -412,7 +342,7 @@ class Coordinator:
         close_tasks = [instance.close() for instance in self._engine_instances.values()]
         if close_tasks:
             await asyncio.gather(*close_tasks)
-        await asyncio.sleep(0.1)  # 短暂等待以确保异步关闭操作完成
+        await asyncio.sleep(0.1)
         await self.handler.close()
         self.initialized = False
         logger.info("优雅停机完成。")

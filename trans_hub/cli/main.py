@@ -13,7 +13,8 @@ from trans_hub.cli.request import request_app
 from trans_hub.cli.state import State
 from trans_hub.cli.worker import worker_app
 from trans_hub.config import TransHubConfig
-from trans_hub.optimized_logging_config import setup_logging
+from trans_hub.engine_registry import discover_engines
+from trans_hub.logging_config import setup_logging
 
 # 创建主 Typer 应用
 app = typer.Typer(
@@ -33,14 +34,7 @@ console = Console()
 
 
 def version_callback(value: bool) -> None:
-    """
-    一个专门的回调函数，用于处理 --version 选项。
-
-    如果 --version 标志被使用，此函数会打印版本信息并以状态码 0 正常退出。
-
-    Args:
-        value: 标志是否被设置。
-    """
+    """处理 --version 选项的回调函数。"""
     if value:
         console.print(f"Trans-Hub [bold cyan]v{trans_hub.__version__}[/bold cyan]")
         raise typer.Exit()
@@ -60,12 +54,16 @@ def main(
 ) -> None:
     """
     主回调函数，在任何子命令执行前运行。
-    负责初始化配置、日志和共享状态。
+
+    v3.1 最终修复：确保日志配置先于引擎发现。
     """
-    # 初始化配置并将其存储在上下文中，供子命令使用
     try:
         config = TransHubConfig()
+        # 1. 首先配置日志系统
         setup_logging(log_level=config.logging.level, log_format=config.logging.format)
+        # 2. 然后执行引擎发现
+        discover_engines()
+        # 3. 最后将配置存入上下文
         ctx.obj = State(config=config)
     except Exception as e:
         console.print("[bold red]❌ 启动失败：无法加载配置或初始化日志。[/bold red]")
