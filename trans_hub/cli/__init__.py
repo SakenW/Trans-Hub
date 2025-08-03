@@ -100,7 +100,9 @@ def _with_coordinator(func: Callable[..., Any]) -> Callable[..., Any]:
 def worker(
     coordinator: Coordinator,
     loop: asyncio.AbstractEventLoop,
-    langs: list[str] = typer.Option([], "--lang", "-l", help="要处理的语言列表"),
+    langs: list[str] = typer.Option(
+        [], "--lang", "-l", help="要处理的语言列表（至少指定一个）"
+    ),
     batch_size: int = typer.Option(10, "--batch-size", "-b", help="每批处理的任务数量"),
     poll_interval: int = typer.Option(
         5, "--poll-interval", "-p", help="轮询间隔（秒）"
@@ -109,6 +111,11 @@ def worker(
     """
     启动Trans-Hub Worker进程，处理待翻译任务。
     """
+    if not langs:
+        log.error("No target languages specified for worker")
+        console.print("[red]❌ 必须使用 --lang 指定至少一个语言[/red]")
+        raise typer.Exit(1)
+
     # 创建关闭事件
     shutdown_event = asyncio.Event()
     run_worker(coordinator, loop, shutdown_event, langs, batch_size, poll_interval)

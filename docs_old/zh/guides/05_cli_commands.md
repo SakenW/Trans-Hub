@@ -27,20 +27,19 @@ python -m trans_hub.cli_main app [子命令]
 启动 Trans-Hub Worker 进程，处理待翻译任务。
 
 **参数**:
-- `--lang`, `-l`: 要处理的语言列表（可选）
+- `--lang`, `-l`: 要处理的语言列表（必需，至少指定一个）
 - `--batch-size`, `-b`: 每批处理的任务数量，默认值为 10
 - `--poll-interval`, `-p`: 轮询间隔（秒），默认值为 5.0
 
+> 未指定 `--lang` 时命令将失败。
+
 **示例**:
 ```bash
-# 启动 Worker 进程，处理所有语言的任务
-python -m trans_hub.cli_main worker
-
 # 启动 Worker 进程，只处理英语和中文任务
 python -m trans_hub.cli_main worker --lang en zh
 
 # 自定义批处理大小为 20，轮询间隔为 10 秒
-python -m trans_hub.cli_main worker --batch-size 20 --poll-interval 10
+python -m trans_hub.cli_main worker --lang en --batch-size 20 --poll-interval 10
 ```
 
 ### request
