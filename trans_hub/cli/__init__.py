@@ -20,6 +20,7 @@ from trans_hub.coordinator import Coordinator
 
 log = structlog.get_logger("trans_hub.cli")
 console = Console()
+DEFAULT_BATCH_SIZE = TransHubConfig().batch_size
 
 # 创建Typer应用实例
 app = typer.Typer(help="Trans-Hub 命令行工具")
@@ -101,7 +102,12 @@ def worker(
     coordinator: Coordinator,
     loop: asyncio.AbstractEventLoop,
     langs: list[str] = typer.Option([], "--lang", "-l", help="要处理的语言列表"),
-    batch_size: int = typer.Option(10, "--batch-size", "-b", help="每批处理的任务数量"),
+    batch_size: int = typer.Option(
+        DEFAULT_BATCH_SIZE,
+        "--batch-size",
+        "-b",
+        help=f"每批处理的任务数量（默认读取配置 batch_size={DEFAULT_BATCH_SIZE}）",
+    ),
     poll_interval: int = typer.Option(
         5, "--poll-interval", "-p", help="轮询间隔（秒）"
     ),

@@ -15,6 +15,7 @@ import pytest
 from trans_hub.cli.worker.main import run_worker
 from trans_hub.coordinator import Coordinator
 from trans_hub.types import TranslationResult, TranslationStatus
+from trans_hub.config import TransHubConfig
 import tracemalloc
 
 tracemalloc.start()
@@ -59,7 +60,7 @@ async def test_run_worker_initialization(
     """测试 run_worker 函数的初始化。"""
     # 准备测试数据
     langs = ["en", "zh-CN"]
-    batch_size = 10
+    batch_size = TransHubConfig().batch_size
     polling_interval = 5
 
     # 模拟 process_pending_translations 返回空的异步生成器
