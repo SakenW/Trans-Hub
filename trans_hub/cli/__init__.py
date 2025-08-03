@@ -35,6 +35,9 @@ app = typer.Typer(help="Trans-Hub 命令行工具")
 _coordinator: Optional[Coordinator] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
+# 配置默认值
+DEFAULT_GC_RETENTION_DAYS = TransHubConfig().gc_retention_days
+
 
 def _initialize_coordinator(
     skip_init: bool = False,
@@ -209,7 +212,15 @@ def request(
 def gc(
     coordinator: Coordinator,
     loop: asyncio.AbstractEventLoop,
-    retention_days: int = typer.Option(90, "--retention-days", "-r", help="保留天数"),
+    retention_days: int = typer.Option(
+        DEFAULT_GC_RETENTION_DAYS,
+        "--retention-days",
+        "-r",
+        help=(
+            f"保留天数（默认: {DEFAULT_GC_RETENTION_DAYS} 天，来自配置 "
+            "gc_retention_days）"
+        ),
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help="仅预览，不执行删除"),
 ) -> None:
     """

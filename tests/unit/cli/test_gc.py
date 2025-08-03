@@ -10,9 +10,9 @@ from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
-import questionary
 
 from trans_hub.cli.gc.main import gc
+from trans_hub.config import TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.config import TransHubConfig
 import typer
@@ -55,7 +55,11 @@ def test_gc_dry_run(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令的干运行模式。"""
+
+    # 准备测试数据
+
     # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = True
 
@@ -89,7 +93,11 @@ def test_gc_real_run_confirmed(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户确认）。"""
+
+    # 准备测试数据
+
     # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
@@ -134,7 +142,11 @@ def test_gc_real_run_cancelled(
     mock_questionary_confirm: MagicMock,
 ) -> None:
     """测试 gc 命令的实际运行模式（用户取消）。"""
+
+    # 准备测试数据
+
     # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
@@ -178,7 +190,11 @@ def test_gc_no_data_to_clean(
     mock_event_loop: MagicMock,
 ) -> None:
     """测试 gc 命令在没有数据可清理时的行为。"""
+
+    # 准备测试数据
+
     # 使用配置中的默认保留天数
+
     retention_days = TransHubConfig().gc_retention_days
     dry_run = False
 
