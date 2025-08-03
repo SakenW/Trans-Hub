@@ -112,7 +112,7 @@ def run_worker(
     # 运行worker任务直到收到停机信号
     # 创建worker任务并包装成asyncio.Task对象
     worker_tasks = [
-        asyncio.create_task(process_language(target_lang)) for target_lang in lang
+        loop.create_task(process_language(target_lang)) for target_lang in lang
     ]
     log.info(f"创建了 {len(worker_tasks)} 个worker任务")
 

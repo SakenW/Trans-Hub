@@ -11,6 +11,67 @@ from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
+
+import sys
+import types
+import enum
+import importlib.util
+from pathlib import Path
+
+# 构建最小化的 trans_hub 依赖，以便直接加载 run_worker 模块
+
+class Coordinator:  # 最小协调器定义供测试使用
+    async def process_pending_translations(self, target_lang: str, batch_size: int):
+        if False:
+            yield
+
+    async def close(self) -> None:  # pragma: no cover - 简化实现
+        pass
+
+
+class TranslationStatus(enum.Enum):
+    TRANSLATED = "translated"
+    FAILED = "failed"
+
+
+class TranslationResult:
+    def __init__(self, status: TranslationStatus, original_content: str = "", error: str | None = None):
+        self.status = status
+        self.original_content = original_content
+        self.error = error
+
+
+# 将这些类注入到模拟的模块中，供 run_worker 导入
+coordinator_mod = types.ModuleType("trans_hub.coordinator")
+coordinator_mod.Coordinator = Coordinator
+types_mod = types.ModuleType("trans_hub.types")
+types_mod.TranslationStatus = TranslationStatus
+types_mod.TranslationResult = TranslationResult
+sys.modules.setdefault("trans_hub.coordinator", coordinator_mod)
+sys.modules.setdefault("trans_hub.types", types_mod)
+
+# 提供 structlog 替身
+structlog_stub = types.SimpleNamespace(
+    get_logger=lambda *args, **kwargs: types.SimpleNamespace(
+        info=lambda *a, **k: None,
+        warning=lambda *a, **k: None,
+        error=lambda *a, **k: None,
+        debug=lambda *a, **k: None,
+    )
+)
+sys.modules.setdefault("structlog", structlog_stub)
+
+# 直接从文件加载 run_worker 模块，避免触发复杂的包依赖
+spec = importlib.util.spec_from_file_location(
+    "trans_hub.cli.worker.main",
+    Path(__file__).resolve().parents[3] / "trans_hub" / "cli" / "worker" / "main.py",
+)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)  # type: ignore[assignment]
+run_worker = module.run_worker
+
+
 from typer.testing import CliRunner
 
 from trans_hub.cli.worker.main import run_worker
@@ -20,6 +81,7 @@ from trans_hub.types import TranslationResult, TranslationStatus
 from trans_hub.config import TransHubConfig
 
 from trans_hub.cli import app
+
 
 import tracemalloc
 
@@ -47,6 +109,11 @@ def mock_event_loop() -> MagicMock:
     loop.call_soon_threadsafe = MagicMock()
     # 模拟 run_until_complete，使其不实际运行事件循环
     loop.run_until_complete = MagicMock()
+    # 使用 loop.create_task 以避免需要运行中的事件循环
+    loop.create_task = MagicMock()
+    # 提供 asyncio 所需的属性和方法
+    loop._all_tasks = set()
+    loop.current_task = MagicMock(return_value=None)
     return loop
 
 
@@ -56,6 +123,9 @@ def shutdown_event() -> asyncio.Event:
     return asyncio.Event()
 
 
+
+def test_run_worker_initialization(
+
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
@@ -63,6 +133,7 @@ def runner() -> CliRunner:
 
 @pytest.mark.asyncio
 async def test_run_worker_initialization(
+
     mock_coordinator: MagicMock,
     mock_event_loop: MagicMock,
     shutdown_event: asyncio.Event,
@@ -91,24 +162,23 @@ async def test_run_worker_initialization(
     is_async = inspect.iscoroutinefunction(run_worker)
     print(f"run_worker 是异步函数: {is_async}")
 
-    # 调用 run_worker 函数
-    run_worker(
-        mock_coordinator,
-        mock_event_loop,
-        shutdown_event,
-        langs,
-        batch_size,
-        polling_interval,
-    )
-
-    # 等待一段时间让run_worker有机会执行
-    await asyncio.sleep(0.5)
+    # 调用 run_worker 函数，确保使用 loop.create_task 而非 asyncio.create_task
+    with patch("asyncio.create_task", side_effect=RuntimeError("no running event loop")) as mock_asyncio_create_task:
+        run_worker(
+            mock_coordinator,
+            mock_event_loop,
+            shutdown_event,
+            langs,
+            batch_size,
+            polling_interval,
+        )
+        # 验证 asyncio.create_task 未被调用
+        mock_asyncio_create_task.assert_not_called()
+    # 验证 loop.create_task 被调用
+    assert mock_event_loop.create_task.call_count == len(langs)
 
     # 发送停止信号
     shutdown_event.set()
-
-    # 等待run_worker处理停止信号
-    await asyncio.sleep(0.5)
 
     # 添加调试信息
     print(f"add_signal_handler 调用次数: {mock_event_loop.add_signal_handler.call_count}")
