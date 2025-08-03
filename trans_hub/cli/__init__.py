@@ -183,7 +183,7 @@ def main(
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         # 没有指定子命令时显示帮助信息
-        ctx.get_help()
+        console.print(ctx.get_help())
         raise typer.Exit(0)
 
 
