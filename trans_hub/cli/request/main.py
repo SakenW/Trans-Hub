@@ -59,9 +59,3 @@ def request(
     except Exception as e:
         log.error("请求处理失败", error=str(e), exc_info=True)
         raise SystemExit(1)
-    finally:
-        # 确保协调器已关闭
-        if coordinator:
-            log.info("请求处理完成，正在关闭协调器...")
-            loop.run_until_complete(coordinator.close())
-            log.info("协调器已关闭")

@@ -148,10 +148,3 @@ def run_worker(
                 except Exception as e:
                     log.error(f"任务 {task} 取消时发生异常: {e}", exc_info=True)
 
-    # 执行协调器的优雅关闭
-    log.info("Worker 任务已完成，正在关闭协调器...")
-    try:
-        loop.run_until_complete(coordinator.close())
-        log.info("协调器已成功关闭")
-    except Exception as e:
-        log.error(f"关闭协调器时发生异常: {e}", exc_info=True)
