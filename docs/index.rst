@@ -46,6 +46,7 @@
    :caption: 贡献与开发
 
    guides/creating_an_engine
+   guides/testing_strategy
    guides/multilingual_support
    CHANGELOG
    RELEASE_SOP

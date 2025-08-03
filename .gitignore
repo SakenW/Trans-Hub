@@ -137,3 +137,6 @@ desktop.ini
 *.tmp.env
 
 docs/merged_docs.md
+
+_build
+_static

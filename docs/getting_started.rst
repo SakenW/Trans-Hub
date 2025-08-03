@@ -19,7 +19,6 @@
 
 .. code-block:: shell
    :caption: 使用 Poetry 安装 (推荐)
-   
 
    # 安装核心库、CLI 工具和免费的 `translators` 引擎
    poetry add "trans-hub[cli,translators]"
@@ -34,7 +33,6 @@
 安装完成后，您可以通过 `--version` 标志来验证 `trans-hub` CLI 是否可用。
 
 .. code-block:: shell
-
 
    trans-hub --version
 
@@ -80,9 +78,9 @@
 现在，让我们向系统提交一个翻译任务。我们将把 "Hello, world!" 翻译成中文和日文。
 
 .. code-block:: shell
-   :caption: 使用 request 命令提交任务
+   :caption: 使用 request new 命令提交任务
 
-   trans-hub request --target zh-CN --target ja "Hello, world!"
+   trans-hub request new --target zh-CN --target ja "Hello, world!"
 
 执行后，您会看到一条确认消息。这个任务现在已经被登记在数据库中，状态为 `PENDING`。
 
@@ -96,24 +94,14 @@
 .. code-block:: shell
    :caption: 在新终端中启动 Worker
 
-   trans-hub run-worker --lang zh-CN --lang ja
+   trans-hub worker start --lang zh-CN --lang ja
 
 启动后，您将看到 Worker 开始轮询数据库，发现并处理待办任务。由于我们将日志级别设为 `DEBUG`，您会看到详细的日志输出，包括翻译成功或失败的信息。
-
-.. note::
-
-   以下是 Worker 运行示例图片，但该图片当前缺失。
-
-   .. 暂时注释掉缺失的图片引用
-   .. 
-   .. .. image:: /_static/worker_running_demo.gif
-   ..    :alt: Worker 运行示例
-   ..    :align: center
 
 成功了！
 --------
 
-恭喜您！您已经成功地完成了 `Trans-Hub` 的一次完整工作流。您刚刚体验了 `Trans-Hub` 设计的核心：**通过 `request` 命令将任务登记与耗时的翻译处理解耦，并由独立的 `run-worker` 进程在后台完成实际工作。**
+恭喜您！您已经成功地完成了 `Trans-Hub` 的一次完整工作流。您刚刚体验了 `Trans-Hub` 设计的核心：**通过 `request new` 命令将任务登记与耗时的翻译处理解耦，并由独立的 `worker start` 进程在后台完成实际工作。**
 
 下一步
 ------

@@ -1,5 +1,6 @@
 #!/bin/bash
 # 文档构建脚本
+# bash docs/build_docs.sh
 
 # 确保脚本在错误时退出
 set -e

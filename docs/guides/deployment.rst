@@ -89,7 +89,7 @@
    # 关键：确保使用您安装了 trans-hub 的虚拟环境中的可执行文件
    # 如果使用 Poetry，路径可能类似 /home/myapp_user/.cache/pypoetry/virtualenvs/.../bin/trans-hub
    # 如果使用 venv，路径可能类似 /opt/my_app/trans-hub/.venv/bin/trans-hub
-   ExecStart=/path/to/your/virtualenv/bin/trans-hub run-worker --lang en --lang zh-CN
+   ExecStart=/path/to/your/virtualenv/bin/trans-hub worker start --lang en --lang zh-CN
 
    # 从部署目录加载 .env 文件
    EnvironmentFile=/opt/my_app/trans-hub/.env
