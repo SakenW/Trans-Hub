@@ -13,6 +13,7 @@ import typer
 from typer.testing import CliRunner
 
 from trans_hub.cli import app
+from trans_hub.exceptions import ConfigurationError
 
 
 @pytest.fixture
@@ -98,3 +99,27 @@ def test_command_requires_coordinator(command_name: str, runner: CliRunner) -> N
 
     # 注意：我们不再验证协调器初始化，因为不同命令可能有不同的实现方式
     # 专注于验证命令失败的结果
+
+
+def test_non_sqlite_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """当配置为非SQLite数据库时，CLI应抛出ConfigurationError。"""
+    from trans_hub import cli as cli_module
+
+    # 重置全局状态
+    cli_module._coordinator = None
+    if cli_module._loop is not None:
+        cli_module._loop.close()
+    cli_module._loop = None
+
+    # 设置不受支持的数据库URL
+    monkeypatch.setenv("TH_DATABASE_URL", "postgresql://localhost/testdb")
+
+    with pytest.raises(ConfigurationError):
+        cli_module._initialize_coordinator(skip_init=True)
+
+    # 清理全局状态
+    if cli_module._loop is not None:
+        cli_module._loop.close()
+    cli_module._loop = None
+    cli_module._coordinator = None
+
