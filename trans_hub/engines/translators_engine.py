@@ -1,7 +1,6 @@
 # trans_hub/engines/translators_engine.py
 """提供一个使用 `translators` 库的免费翻译引擎。"""
 
-# ... (imports 保持不变) ...
 import asyncio
 from typing import Any, Optional
 
@@ -12,7 +11,6 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
-from trans_hub.engines.meta import register_engine_config
 from trans_hub.exceptions import APIError
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
@@ -39,7 +37,6 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
     VERSION = "2.2.1"
     ACCEPTS_CONTEXT = True
 
-    # ... (__init__, _ensure_initialized 方法保持不变) ...
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
         self.ts_module: Optional[Any] = None
@@ -95,6 +92,3 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
                 error_message=f"Translators({provider}) Error: {e}",
                 is_retryable=True,
             )
-
-
-register_engine_config("translators", TranslatorsEngineConfig)

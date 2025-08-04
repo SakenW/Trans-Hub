@@ -14,7 +14,6 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
-from trans_hub.engines.meta import register_engine_config
 from trans_hub.exceptions import ConfigurationError
 from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
@@ -200,6 +199,3 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             )
         except Exception as e:
             return EngineError(error_message=f"未知引擎错误: {e}", is_retryable=True)
-
-
-register_engine_config("openai", OpenAIEngineConfig)
