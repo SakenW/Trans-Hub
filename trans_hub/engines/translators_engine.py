@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import structlog
 
+# 修复：确保所有必要的导入都存在
 from trans_hub.core.exceptions import APIError
 from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import (
@@ -14,7 +15,6 @@ from trans_hub.engines.base import (
     BaseTranslationEngine,
 )
 
-# 修复：添加 logger 定义
 logger = structlog.get_logger(__name__)
 
 
@@ -28,6 +28,8 @@ class TranslatorsEngineConfig(BaseEngineConfig):
     """Translators 引擎的配置。"""
 
     provider: str = "google"
+    # 修复：移除之前版本中错误添加的 translation_map 字段
+    # 该字段属于 DebugEngineConfig，不属于这里
 
 
 class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):

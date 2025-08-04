@@ -6,12 +6,16 @@ Trans-Hub v3.0 批量处理与并发示例
 1. 在一个循环中快速提交大量（例如100个）独立的翻译请求。
 2. 启动多个并发的 Worker (AsyncIO Task) 来同时处理不同语言的任务。
 3. 统计并验证所有任务是否都已成功处理。
+
+运行方式:
+在项目根目录执行: `poetry run python examples/05_batch_processing_and_concurrency.py`
 """
 import asyncio
 import os
 import sys
 import time
 from pathlib import Path
+from typing import List
 
 import structlog
 
@@ -23,32 +27,34 @@ sys.path.insert(0, str(project_root))
 
 from trans_hub import Coordinator, TransHubConfig  # noqa: E402
 from trans_hub.core import TranslationResult  # noqa: E402
+from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
 from trans_hub.logging_config import setup_logging  # noqa: E402
 from trans_hub.persistence import create_persistence_handler  # noqa: E402
 
 # --- 日志配置 ---
-setup_logging(log_level="WARNING")  # 设置为 WARNING 以避免大量INFO日志刷屏
-log = structlog.get_logger(__name__)
+setup_logging(log_level="WARNING")
+log = structlog.get_logger("trans_hub")
 
 # --- 准备测试环境 ---
-DB_FILE = "th_example_05.db"
+DB_FILE = Path(__file__).parent / "th_example_05.db"
 NUM_TASKS = 100
 TARGET_LANGS = ["de", "fr", "es"]
 
 
 async def main() -> None:
     """执行批量处理与并发示例。"""
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
+    if DB_FILE.exists():
+        DB_FILE.unlink()
 
-    config = TransHubConfig(database_url=f"sqlite:///{DB_FILE}", source_lang="en")
+    config = TransHubConfig(database_url=f"sqlite:///{DB_FILE.resolve()}", source_lang="en")
+    apply_migrations(config.db_path)
     handler = create_persistence_handler(config)
     coordinator = Coordinator(config=config, persistence_handler=handler)
 
     try:
         await coordinator.initialize()
+        log.warning("✅ 协调器初始化成功", db_path=str(DB_FILE))
 
-        # 1. 快速提交大量任务
         log.warning(f"🚀 步骤 1: 正在快速提交 {NUM_TASKS} 个翻译请求...")
         start_time = time.monotonic()
         request_tasks = []
@@ -65,19 +71,11 @@ async def main() -> None:
             f"✅ {NUM_TASKS * len(TARGET_LANGS)} 个任务条目提交完毕，耗时: {duration:.2f}s"
         )
 
-        # 2. 启动多个并发 Worker
         log.warning(f"👷 步骤 2: 启动 {len(TARGET_LANGS)} 个并发 Worker...")
         start_time = time.monotonic()
-        worker_tasks = [
-            asyncio.create_task(consume_all(coordinator, lang))
-            for lang in TARGET_LANGS
-        ]
-        
-        # 等待所有 Worker 完成
-        results_per_lang = await asyncio.gather(*worker_tasks)
+        results_per_lang = await process_translations_with_results(coordinator, TARGET_LANGS)
         duration = time.monotonic() - start_time
 
-        # 3. 验证结果
         log.warning("🔍 步骤 3: 验证处理结果...")
         total_processed = sum(len(results) for results in results_per_lang)
         log.warning(
@@ -88,13 +86,29 @@ async def main() -> None:
 
     finally:
         await coordinator.close()
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
+        log.warning("🚪 协调器已关闭")
+        if DB_FILE.exists():
+            DB_FILE.unlink()
 
 
-async def consume_all(coordinator: Coordinator, lang: str) -> list[TranslationResult]:
+async def process_translations_with_results(
+    coordinator: Coordinator, langs: List[str]
+) -> List[List[TranslationResult]]:
+    """模拟 Worker 处理所有待办任务并返回结果。"""
+    tasks = [
+        asyncio.create_task(consume_all_and_return(coordinator, lang))
+        for lang in langs
+    ]
+    return await asyncio.gather(*tasks)
+
+
+async def consume_all_and_return(
+    coordinator: Coordinator, lang: str
+) -> List[TranslationResult]:
     """消费指定语言的所有待办任务并返回结果列表。"""
-    return [res async for res in coordinator.process_pending_translations(lang)]
+    results = [res async for res in coordinator.process_pending_translations(lang)]
+    log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")
+    return results
 
 
 if __name__ == "__main__":

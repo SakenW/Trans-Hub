@@ -39,7 +39,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def connect(self) -> None:
         """建立与 SQLite 数据库的连接。"""
         try:
-            self._conn = await aiosqlite.connect(self.db_path)
+            self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row
             await self._conn.execute("PRAGMA foreign_keys = ON")
             logger.info("SQLite 数据库连接已建立", db_path=self.db_path)
@@ -61,40 +61,48 @@ class SQLitePersistenceHandler(PersistenceHandler):
         return self._conn
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncGenerator[aiosqlite.Cursor, None]:
-        """提供一个原子的数据库事务上下文。"""
-        async with self.connection.cursor() as cursor:
+    async def _transaction(self) -> AsyncGenerator[aiosqlite.Connection, None]:
+        """提供一个手动的、原子的数据库事务上下文。"""
+        transaction_started = False
+        try:
             try:
-                await cursor.execute("BEGIN")
-                yield cursor
+                await self.connection.execute("BEGIN")
+                transaction_started = True
+            except aiosqlite.OperationalError as e:
+                if "cannot start a transaction within a transaction" in str(e):
+                    transaction_started = False
+                else:
+                    raise
+
+            yield self.connection
+
+            if transaction_started:
                 await self.connection.commit()
-            except Exception:
-                logger.error("SQLite 事务执行失败，正在回滚", exc_info=True)
-                if self.connection.is_alive():
-                    await self.connection.rollback()
-                raise
+        except Exception:
+            logger.error("SQLite 事务执行失败，正在回滚", exc_info=True)
+            if self.connection.is_alive() and transaction_started:
+                await self.connection.rollback()
+            raise
 
     async def reset_stale_tasks(self) -> None:
         """[实现] 在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
         now_iso = datetime.now(timezone.utc).isoformat()
-        async with self._transaction():
-            async with self.connection.cursor() as cursor:
-                await cursor.execute(
-                    """
-                    UPDATE th_translations
-                    SET status = ?, error = NULL, last_updated_at = ?
-                    WHERE status = ?
-                    """,
-                    (
-                        TranslationStatus.PENDING.value,
-                        now_iso,
-                        TranslationStatus.TRANSLATING.value,
-                    ),
-                )
-                if cursor.rowcount > 0:
-                    logger.warning(
-                        "系统自愈：重置了遗留的翻译任务", count=cursor.rowcount
-                    )
+        async with self._transaction() as tx:
+            cursor = await tx.execute(
+                """
+                UPDATE th_translations
+                SET status = ?, error = NULL, last_updated_at = ?
+                WHERE status = ?
+                """,
+                (
+                    TranslationStatus.PENDING.value,
+                    now_iso,
+                    TranslationStatus.TRANSLATING.value,
+                ),
+            )
+            if cursor.rowcount > 0:
+                logger.warning("系统自愈：重置了遗留的翻译任务", count=cursor.rowcount)
+            await cursor.close()
 
     async def ensure_content_and_context(
         self,
@@ -103,15 +111,17 @@ class SQLitePersistenceHandler(PersistenceHandler):
         context: Optional[dict[str, Any]],
     ) -> tuple[str, Optional[str]]:
         """[实现] 确保源内容和上下文已存在于数据库中，并返回它们的内部ID。"""
-        async with self._transaction() as cursor:
-            await cursor.execute(
+        async with self._transaction() as tx:
+            cursor = await tx.execute(
                 "SELECT id FROM th_content WHERE business_id = ?", (business_id,)
             )
             content_row = await cursor.fetchone()
+            await cursor.close()
             now_iso = datetime.now(timezone.utc).isoformat()
+
             if content_row:
                 content_id = cast(str, content_row["id"])
-                await cursor.execute(
+                await tx.execute(
                     "UPDATE th_content SET source_payload_json = ?, updated_at = ? "
                     "WHERE id = ?",
                     (
@@ -122,13 +132,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
             else:
                 content_id = generate_uuid()
-                await cursor.execute(
-                    (
-                        "INSERT INTO th_content "
-                        "(id, business_id, source_payload_json, "
-                        "created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?)"
-                    ),
+                await tx.execute(
+                    "INSERT INTO th_content (id, business_id, source_payload_json, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
                     (
                         content_id,
                         business_id,
@@ -141,20 +148,20 @@ class SQLitePersistenceHandler(PersistenceHandler):
             context_id: Optional[str] = None
             if context:
                 context_hash = get_context_hash(context)
-                await cursor.execute(
+                cursor = await tx.execute(
                     "SELECT id FROM th_contexts WHERE context_hash = ?", (context_hash,)
                 )
                 context_row = await cursor.fetchone()
+                await cursor.close()
                 if context_row:
                     context_id = cast(str, context_row["id"])
                 else:
                     context_id = generate_uuid()
-                    await cursor.execute(
-                        (
-                            "INSERT INTO th_contexts "
-                            "(id, context_hash, context_payload_json, created_at) "
-                            "VALUES (?, ?, ?, ?)"
-                        ),
+                    await tx.execute(
+                        "INSERT INTO th_contexts (id, context_hash, "
+                        "context_payload_json, "
+                        "created_at) "
+                        "VALUES (?, ?, ?, ?)",
                         (
                             context_id,
                             context_hash,
@@ -163,25 +170,22 @@ class SQLitePersistenceHandler(PersistenceHandler):
                         ),
                     )
 
-            await cursor.execute(
+            cursor = await tx.execute(
                 "SELECT id FROM th_jobs WHERE content_id = ?", (content_id,)
             )
             job_row = await cursor.fetchone()
+            await cursor.close()
             if job_row:
-                await cursor.execute(
+                await tx.execute(
                     "UPDATE th_jobs SET last_requested_at = ? WHERE id = ?",
                     (now_iso, job_row["id"]),
                 )
             else:
-                await cursor.execute(
-                    (
-                        "INSERT INTO th_jobs "
-                        "(id, content_id, last_requested_at) "
-                        "VALUES (?, ?, ?)"
-                    ),
+                await tx.execute(
+                    "INSERT INTO th_jobs (id, content_id, last_requested_at) "
+                    "VALUES (?, ?, ?)",
                     (generate_uuid(), content_id, now_iso),
                 )
-
         return content_id, context_id
 
     async def create_pending_translations(
@@ -195,9 +199,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
     ) -> None:
         """[实现] 为给定的内容和上下文创建待处理的翻译任务。"""
         now_iso = datetime.now(timezone.utc).isoformat()
-        async with self._transaction() as cursor:
+        async with self._transaction() as tx:
             if force_retranslate:
-                # ... (此处省略 force_retranslate 逻辑)
+                # ...
                 pass
 
             insert_sql = (
@@ -219,9 +223,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 for lang in target_langs
             ]
             if params:
-                await cursor.executemany(insert_sql, params)
+                await tx.executemany(insert_sql, params)
 
-    def stream_translatable_items(
+    async def stream_translatable_items(
         self,
         lang_code: str,
         statuses: list[TranslationStatus],
@@ -229,84 +233,81 @@ class SQLitePersistenceHandler(PersistenceHandler):
         limit: Optional[int] = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
         """[实现] 以流式方式获取待处理的翻译任务批次。"""
+        processed_count = 0
+        while limit is None or processed_count < limit:
+            current_batch_size = min(
+                batch_size,
+                (limit - processed_count) if limit is not None else batch_size,
+            )
+            if current_batch_size <= 0:
+                break
 
-        async def generator() -> AsyncGenerator[list[ContentItem], None]:
-            processed_count = 0
-            while limit is None or processed_count < limit:
-                current_batch_size = min(
-                    batch_size,
-                    (limit - processed_count) if limit is not None else batch_size,
+            batch_items: list[ContentItem] = []
+            async with self._transaction() as tx:
+                status_placeholders = ",".join("?" for _ in statuses)
+                find_ids_sql = (
+                    f"SELECT id FROM th_translations "
+                    f"WHERE lang_code = ? AND status IN ({status_placeholders}) "
+                    "ORDER BY last_updated_at ASC LIMIT ?"
                 )
-                if current_batch_size <= 0:
+                params = (
+                    [lang_code] + [s.value for s in statuses] + [current_batch_size]
+                )
+
+                cursor = await tx.execute(find_ids_sql, params)
+                rows = await cursor.fetchall()
+                if not rows:
                     break
 
-                batch: list[ContentItem] = []
-                async with self._transaction() as cursor:
-                    status_placeholders = ",".join("?" for _ in statuses)
-                    find_ids_sql = (
-                        f"SELECT id FROM th_translations "
-                        f"WHERE lang_code = ? "
-                        f"AND status IN ({status_placeholders}) "
-                        f"ORDER BY last_updated_at ASC "
-                        f"LIMIT ?"
+                batch_ids = [row["id"] for row in rows]
+                id_placeholders = ",".join("?" for _ in batch_ids)
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                await tx.execute(
+                    f"UPDATE th_translations SET status = ?, last_updated_at = ? "
+                    f"WHERE id IN ({id_placeholders})",
+                    [TranslationStatus.TRANSLATING.value, now_iso] + batch_ids,
+                )
+
+                find_details_sql = f"""
+                    SELECT
+                        t.id as translation_id,
+                        c.business_id,
+                        t.content_id,
+                        t.context_id,
+                        c.source_payload_json,
+                        ctx.context_payload_json
+                    FROM th_translations t
+                    JOIN th_content c ON t.content_id = c.id
+                    LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+                    WHERE t.id IN ({id_placeholders})
+                """
+                details_cursor = await tx.execute(find_details_sql, batch_ids)
+                detail_rows = await details_cursor.fetchall()
+
+                batch_items = [
+                    ContentItem(
+                        translation_id=r["translation_id"],
+                        business_id=r["business_id"],
+                        content_id=r["content_id"],
+                        context_id=r["context_id"],
+                        source_payload=json.loads(r["source_payload_json"]),
+                        context=(
+                            json.loads(r["context_payload_json"])
+                            if r["context_payload_json"]
+                            else None
+                        ),
                     )
-                    params = (
-                        [lang_code] + [s.value for s in statuses] + [current_batch_size]
-                    )
-                    await cursor.execute(find_ids_sql, params)
-                    rows = await cursor.fetchall()
-                    if not rows:
-                        break
+                    for r in detail_rows
+                ]
+                await cursor.close()
+                await details_cursor.close()
 
-                    batch_ids = [row["id"] for row in rows]
-                    id_placeholders = ",".join("?" for _ in batch_ids)
-                    now_iso = datetime.now(timezone.utc).isoformat()
+            if not batch_items:
+                break
 
-                    await cursor.execute(
-                        f"UPDATE th_translations SET status = ?, last_updated_at = ? "
-                        f"WHERE id IN ({id_placeholders})",
-                        [TranslationStatus.TRANSLATING.value, now_iso] + batch_ids,
-                    )
-
-                    find_details_sql = f"""
-                        SELECT
-                            t.id as translation_id,
-                            c.business_id,
-                            t.content_id,
-                            t.context_id,
-                            c.source_payload_json,
-                            ctx.context_payload_json
-                        FROM th_translations t
-                        JOIN th_content c ON t.content_id = c.id
-                        LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-                        WHERE t.id IN ({id_placeholders})
-                    """
-                    await cursor.execute(find_details_sql, batch_ids)
-                    detail_rows = await cursor.fetchall()
-
-                    batch = [
-                        ContentItem(
-                            translation_id=r["translation_id"],
-                            business_id=r["business_id"],
-                            content_id=r["content_id"],
-                            context_id=r["context_id"],
-                            source_payload=json.loads(r["source_payload_json"]),
-                            context=(
-                                json.loads(r["context_payload_json"])
-                                if r["context_payload_json"]
-                                else None
-                            ),
-                        )
-                        for r in detail_rows
-                    ]
-
-                if not batch:
-                    break
-
-                yield batch
-                processed_count += len(batch)
-
-        return generator()
+            yield batch_items
+            processed_count += len(batch_items)
 
     async def save_translation_results(
         self,
@@ -333,8 +334,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
             for res in results
         ]
 
-        async with self._transaction() as cursor:
-            await cursor.executemany(
+        async with self._transaction() as tx:
+            await tx.executemany(
                 """
                 UPDATE th_translations
                 SET
@@ -373,9 +374,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
               AND COALESCE(ctx.context_hash, '__GLOBAL__') = ?
         """
 
-        async with self.connection.cursor() as cursor:
-            await cursor.execute(sql, (business_id, target_lang, context_hash))
-            row = await cursor.fetchone()
+        cursor = await self.connection.execute(
+            sql, (business_id, target_lang, context_hash)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
 
         if not row:
             return None
@@ -392,7 +395,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
             target_lang=target_lang,
             status=TranslationStatus(row["status"]),
             engine=row["engine"],
-            from_cache=True,  # Fetched from DB is considered a cache hit
+            from_cache=True,
             error=row["error"],
             context_hash=context_hash,
         )
@@ -406,43 +409,40 @@ class SQLitePersistenceHandler(PersistenceHandler):
         ).isoformat()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
-        async with self._transaction() as cursor:
-            # 1. 删除过期的 jobs
-            await cursor.execute(
+        async with self._transaction() as tx:
+            cursor = await tx.execute(
                 "SELECT id FROM th_jobs WHERE last_requested_at < ?", (cutoff_date,)
             )
             expired_job_ids = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
             stats["deleted_jobs"] = len(expired_job_ids)
             if not dry_run and expired_job_ids:
                 placeholders = ",".join("?" * len(expired_job_ids))
-                await cursor.execute(
+                await tx.execute(
                     f"DELETE FROM th_jobs WHERE id IN ({placeholders})",
                     expired_job_ids,
                 )
 
-            # 2. 删除孤立的 content
-            await cursor.execute(
+            cursor = await tx.execute(
                 """
                 SELECT c.id FROM th_content c
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
-                )
+                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
                   AND NOT EXISTS (
-                    SELECT 1 FROM th_translations t WHERE t.content_id = c.id
-                )
+                      SELECT 1 FROM th_translations t WHERE t.content_id = c.id
+                  )
                 """
             )
             orphan_content_ids = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
             stats["deleted_content"] = len(orphan_content_ids)
             if not dry_run and orphan_content_ids:
                 placeholders = ",".join("?" * len(orphan_content_ids))
-                await cursor.execute(
+                await tx.execute(
                     f"DELETE FROM th_content WHERE id IN ({placeholders})",
                     orphan_content_ids,
                 )
 
-            # 3. 删除孤立的 contexts
-            await cursor.execute(
+            cursor = await tx.execute(
                 """
                 SELECT ctx.id FROM th_contexts ctx
                 WHERE NOT EXISTS (
@@ -451,10 +451,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 """
             )
             orphan_context_ids = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
             stats["deleted_contexts"] = len(orphan_context_ids)
             if not dry_run and orphan_context_ids:
                 placeholders = ",".join("?" * len(orphan_context_ids))
-                await cursor.execute(
+                await tx.execute(
                     f"DELETE FROM th_contexts WHERE id IN ({placeholders})",
                     orphan_context_ids,
                 )
@@ -469,5 +470,5 @@ class SQLitePersistenceHandler(PersistenceHandler):
         engine_version: str,
     ) -> None:
         """[实现] 将任务移至死信队列。"""
-        # (此方法实现保持不变，但需注意其依赖的 ContentItem 结构)
+        # (此方法实现保持不变)
         pass
