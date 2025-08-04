@@ -1,10 +1,5 @@
 # tests/integration/conftest.py
-"""为所有集成测试提供共享的、真实的 Fixtures。
-
-此 conftest.py 文件中的 Fixtures 用于创建真实的、有副作用的测试环境，
-例如创建临时数据库文件、初始化真实的 Coordinator 等。
-它们被所有 `tests/integration/` 子目录下的测试共享。
-"""
+"""为所有集成测试提供共享的、真实的 Fixtures。"""
 
 import os
 import shutil
@@ -16,9 +11,9 @@ import pytest_asyncio
 from dotenv import load_dotenv
 
 from trans_hub import Coordinator, EngineName, TransHubConfig
+from trans_hub.core.interfaces import PersistenceHandler
 from trans_hub.db.schema_manager import apply_migrations
 from trans_hub.engine_registry import discover_engines
-from trans_hub.interfaces import PersistenceHandler
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import create_persistence_handler
 
@@ -46,7 +41,6 @@ def test_config() -> TransHubConfig:
     db_file = f"e2e_test_{os.urandom(4).hex()}.db"
     return TransHubConfig(
         database_url=f"sqlite:///{TEST_DIR / db_file}",
-        # v3.1 最终修复：使用 EngineName 枚举成员，而不是字符串
         active_engine=EngineName.DEBUG,
         source_lang="en",
     )

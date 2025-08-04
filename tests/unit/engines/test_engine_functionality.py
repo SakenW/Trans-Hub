@@ -11,9 +11,13 @@ import pytest
 import pytest_asyncio
 from pytest_mock import MockerFixture
 
-from trans_hub.engines.base import BaseContextModel, BaseEngineConfig, BaseTranslationEngine
+from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
+from trans_hub.engines.base import (
+    BaseContextModel,
+    BaseEngineConfig,
+    BaseTranslationEngine,
+)
 from trans_hub.rate_limiter import RateLimiter
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
 class _TestEngineConfig(BaseEngineConfig):
@@ -48,7 +52,9 @@ class _TestTranslationEngine(BaseTranslationEngine[_TestEngineConfig]):
         """模拟翻译执行，不包含延迟。"""
         await asyncio.sleep(0)  # 允许任务切换
         if "error" not in text:
-            return EngineSuccess(translated_text=f"{text} (translated to {target_lang})")
+            return EngineSuccess(
+                translated_text=f"{text} (translated to {target_lang})"
+            )
         else:
             return EngineError(error_message="Simulated error", is_retryable=True)
 
@@ -69,8 +75,6 @@ async def test_concurrency_control_limits_active_tasks(
 ) -> None:
     """
     测试并发控制功能（确定性测试）。
-
-    v3.1 最终修复：使用多个 asyncio.Event 精确协调任务执行，以确保断言的可靠性。
     """
     test_engine.config = _TestEngineConfig(max_concurrency=2)
     test_engine._concurrency_semaphore = asyncio.Semaphore(2)
@@ -82,7 +86,9 @@ async def test_concurrency_control_limits_active_tasks(
 
     original_execute = test_engine._execute_single_translation
 
-    async def controlled_execute(text: str, *args: Any, **kwargs: Any) -> EngineBatchItemResult:
+    async def controlled_execute(
+        text: str, *args: Any, **kwargs: Any
+    ) -> EngineBatchItemResult:
         nonlocal active_task_count, max_concurrent
         task_index = int(text[-1])
         async with asyncio.Lock():
@@ -101,15 +107,11 @@ async def test_concurrency_control_limits_active_tasks(
         for i in range(5)
     ]
 
-    # 等待前2个任务启动，它们应该能获取信号量
     await asyncio.wait_for(task_started_events[0].wait(), timeout=1)
     await asyncio.wait_for(task_started_events[1].wait(), timeout=1)
 
     assert max_concurrent == 2
-
-    # 此时第3个任务应该被阻塞，尚未启动
     assert not task_started_events[2].is_set()
 
-    # 允许所有任务完成
     can_finish_event.set()
     await asyncio.gather(*tasks)

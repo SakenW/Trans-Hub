@@ -3,7 +3,7 @@
 
 import pytest
 
-from trans_hub.types import GLOBAL_CONTEXT_SENTINEL
+from trans_hub.core.types import GLOBAL_CONTEXT_SENTINEL
 from trans_hub.utils import get_context_hash, validate_lang_codes
 
 
@@ -29,8 +29,8 @@ def test_get_context_hash_with_nested_dict() -> None:
 
 def test_validate_lang_codes_valid() -> None:
     """测试有效的语言代码能通过校验。"""
-    validate_lang_codes(["en", "zh-CN", "fr", "es-419"])  # Should not raise
-    validate_lang_codes(["de"])  # Should not raise
+    validate_lang_codes(["en", "zh-CN", "fr", "es-419"])
+    validate_lang_codes(["de"])
 
 
 @pytest.mark.parametrize(

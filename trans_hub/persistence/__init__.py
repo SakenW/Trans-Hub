@@ -2,8 +2,8 @@
 """本模块作为持久化层的公共入口，导出核心组件。"""
 
 from trans_hub.config import TransHubConfig
-from trans_hub.exceptions import ConfigurationError
-from trans_hub.interfaces import PersistenceHandler
+from trans_hub.core.exceptions import ConfigurationError
+from trans_hub.core.interfaces import PersistenceHandler
 
 from .sqlite import SQLitePersistenceHandler as DefaultPersistenceHandler
 

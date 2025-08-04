@@ -1,5 +1,8 @@
 # tests/unit/test_policies.py
-"""测试处理策略 (Processing Policies) 的单元测试。"""
+"""
+测试处理策略 (Processing Policies) 的单元测试。
+v3.0.0 更新：全面重写以测试基于结构化载荷（payload）的处理逻辑。
+"""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,29 +10,27 @@ import pytest
 
 from trans_hub.config import RetryPolicyConfig, TransHubConfig
 from trans_hub.context import ProcessingContext
-from trans_hub.interfaces import PersistenceHandler
-from trans_hub.policies import DefaultProcessingPolicy
-from trans_hub.types import (
+from trans_hub.core import (
     ContentItem,
+    EngineError,
     EngineSuccess,
     TranslationStatus,
 )
+from trans_hub.core.interfaces import PersistenceHandler
+from trans_hub.policies import DefaultProcessingPolicy
 
 
 @pytest.fixture
 def mock_config() -> MagicMock:
     """创建一个更精确的、结构完整的 TransHubConfig mock 对象。"""
     mock = MagicMock(spec=TransHubConfig)
-
     mock_retry_policy = MagicMock(spec=RetryPolicyConfig)
     mock_retry_policy.max_attempts = 2
     mock_retry_policy.initial_backoff = 0.01
     mock.retry_policy = mock_retry_policy
-
     mock_active_engine_enum = MagicMock()
     mock_active_engine_enum.value = "debug"
     mock.active_engine = mock_active_engine_enum
-
     mock.source_lang = "en"
     return mock
 
@@ -38,7 +39,6 @@ def mock_config() -> MagicMock:
 def mock_handler() -> AsyncMock:
     """创建一个持久化处理器的 mock 对象。"""
     mock = AsyncMock(spec=PersistenceHandler)
-    mock.get_business_id_for_job.return_value = "biz-123"
     mock.move_to_dlq = AsyncMock()
     return mock
 
@@ -85,14 +85,14 @@ def sample_batch() -> list[ContentItem]:
             business_id="biz-123",
             content_id="uuid-content-1",
             context_id="uuid-context-1",
-            value="Hello",
+            source_payload={"text": "Hello", "metadata": "do_not_touch"},
             context={"domain": "testing"},
         )
     ]
 
 
 @pytest.mark.asyncio
-async def test_policy_builds_result_correctly(
+async def test_policy_builds_result_correctly_on_success(
     mock_processing_context: ProcessingContext,
     mock_active_engine: AsyncMock,
     sample_batch: list[ContentItem],
@@ -102,10 +102,38 @@ async def test_policy_builds_result_correctly(
         EngineSuccess(translated_text="Hallo")
     ]
     policy = DefaultProcessingPolicy()
+
     results = await policy.process_batch(
         sample_batch, "de", mock_processing_context, mock_active_engine
     )
+
     assert len(results) == 1
     result = results[0]
     assert result.status == TranslationStatus.TRANSLATED
     assert result.business_id == "biz-123"
+    assert result.original_payload == {"text": "Hello", "metadata": "do_not_touch"}
+    assert result.translated_payload == {"text": "Hallo", "metadata": "do_not_touch"}
+
+
+@pytest.mark.asyncio
+async def test_policy_handles_engine_failure(
+    mock_processing_context: ProcessingContext,
+    mock_active_engine: AsyncMock,
+    sample_batch: list[ContentItem],
+) -> None:
+    """测试在引擎返回失败时，策略能否正确构建 FAILED 状态的结果。"""
+    mock_active_engine.atranslate_batch.return_value = [
+        EngineError(error_message="API limit reached", is_retryable=False)
+    ]
+    policy = DefaultProcessingPolicy()
+
+    results = await policy.process_batch(
+        sample_batch, "de", mock_processing_context, mock_active_engine
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == TranslationStatus.FAILED
+    assert result.error == "API limit reached"
+    assert result.translated_payload is None
+    assert result.original_payload == {"text": "Hello", "metadata": "do_not_touch"}

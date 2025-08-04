@@ -1,4 +1,4 @@
-# trans_hub/exceptions.py
+# trans_hub/core/exceptions.py
 """
 本模块定义了 Trans-Hub 项目中所有自定义的、语义化的异常类型。
 

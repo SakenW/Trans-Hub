@@ -1,5 +1,8 @@
 # trans_hub/cli/worker.py
-"""处理后台 Worker 运行的 CLI 命令。"""
+"""
+处理后台 Worker 运行的 CLI 命令。
+v3.0.0 更新：调整日志输出以适配结构化载荷（payload）。
+"""
 
 import asyncio
 import signal
@@ -52,11 +55,16 @@ async def _run_worker_loop(
                 processed_count = 0
                 async for result in coordinator.process_pending_translations(lang):
                     processed_count += 1
+                    # 从 payload 中提取要记录的文本，这里我们约定使用 'text' 键
+                    original_text = result.original_payload.get(
+                        "text", str(result.original_payload)
+                    )
                     logger.info(
                         "处理完成",
                         lang=lang,
+                        business_id=result.business_id,
                         status=result.status.value,
-                        original=f"'{result.original_content[:20]}...'",
+                        original=f"'{str(original_text)[:20]}...'",
                         error=result.error,
                     )
                 if processed_count == 0:

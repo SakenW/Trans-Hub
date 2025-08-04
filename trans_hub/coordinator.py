@@ -1,10 +1,13 @@
 # trans_hub/coordinator.py
 """
 本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
+v3.0.0 重大更新：
+- 适配 v3.0.0 的数据库 Schema 和可插拔的持久层协议。
+- 实现“稳定引用ID”和“结构化载荷”原则。
+- 内部逻辑上划分出“解析层”与“操作层”的职责。
 """
 
 import asyncio
-import json
 from collections.abc import AsyncGenerator
 from itertools import groupby
 from typing import TYPE_CHECKING, Any, Optional
@@ -14,17 +17,16 @@ import structlog
 from .cache import TranslationCache
 from .config import EngineName, TransHubConfig
 from .context import ProcessingContext
-from .engine_registry import ENGINE_REGISTRY, discover_engines
-from .exceptions import ConfigurationError, EngineNotFoundError
-from .interfaces import PersistenceHandler
-from .policies import DefaultProcessingPolicy, ProcessingPolicy
-from .rate_limiter import RateLimiter
-from .types import (
-    TranslationRequest,
+from .core import (
+    ConfigurationError,
+    EngineNotFoundError,
+    PersistenceHandler,
     TranslationResult,
     TranslationStatus,
 )
-from .utils import get_context_hash
+from .engine_registry import ENGINE_REGISTRY, discover_engines
+from .policies import DefaultProcessingPolicy, ProcessingPolicy
+from .rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
     from .engines.base import BaseTranslationEngine
@@ -44,20 +46,8 @@ class Coordinator:
     ) -> None:
         """
         初始化 Coordinator。
-
-        v3.1 最终修复：将 discover_engines() 的调用恢复到此处，以确保
-        任何 Coordinator 实例在创建时都能访问已发现的引擎，这对于非 CLI
-        应用场景（如示例脚本）至关重要。
-
-        Args:
-            config: Trans-Hub 的主配置对象。
-            persistence_handler: 实现了 PersistenceHandler 协议的持久化处理器实例。
-            rate_limiter: 可选的速率限制器实例。
-            max_concurrent_requests: 可选的最大并发请求数。
         """
-        # 确保在创建 Coordinator 实例时，引擎注册表已被填充
         discover_engines()
-
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
@@ -81,7 +71,6 @@ class Coordinator:
         )
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
-    # ... (Coordinator 的其余代码保持不变) ...
     @property
     def active_engine(self) -> "BaseTranslationEngine[Any]":
         """获取当前活动的翻译引擎实例。"""
@@ -90,17 +79,22 @@ class Coordinator:
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> "BaseTranslationEngine[Any]":
-        """根据引擎名称获取或创建引擎实例（惰性加载）。"""
+        """根据引擎名称获取或创建引擎实例（惰性加载和动态配置解析）。"""
         if engine_name not in self._engine_instances:
-            logger.debug("首次请求，正在创建引擎实例...", engine_name=engine_name)
             engine_class = ENGINE_REGISTRY.get(engine_name)
             if not engine_class:
                 raise EngineNotFoundError(
                     f"引擎 '{engine_name}' 未在引擎注册表中找到。"
                 )
 
-            engine_config_data = getattr(self.config.engine_configs, engine_name, None)
-            engine_config_instance = engine_config_data or engine_class.CONFIG_MODEL()
+            EngineConfigModel = engine_class.CONFIG_MODEL
+            raw_config_data = self.config.engine_configs.get(engine_name, {})
+            try:
+                engine_config_instance = EngineConfigModel(**raw_config_data)
+            except Exception as e:
+                raise ConfigurationError(
+                    f"解析引擎 '{engine_name}' 的配置失败: {e}"
+                ) from e
 
             self._engine_instances[engine_name] = engine_class(
                 config=engine_config_instance
@@ -128,22 +122,6 @@ class Coordinator:
         if self.initialized:
             return
         logger.info("协调器初始化开始...")
-        try:
-            active_engine_instance = self.active_engine
-            if (
-                active_engine_instance.REQUIRES_SOURCE_LANG
-                and not self.config.source_lang
-            ):
-                raise ConfigurationError(
-                    f"活动引擎 '{self.config.active_engine.value}' 需要提供源语言。"
-                )
-        except Exception as e:
-            logger.error(
-                "初始化活动引擎时失败。",
-                engine=self.config.active_engine.value,
-                exc_info=True,
-            )
-            raise e
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
         init_tasks = [
@@ -160,7 +138,7 @@ class Coordinator:
         batch_size: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
-        """处理指定语言的待处理翻译任务。"""
+        """[解析层] 处理指定语言的待处理翻译任务。"""
         if self._shutting_down:
             return
 
@@ -187,10 +165,9 @@ class Coordinator:
             if not batch:
                 continue
 
+            # 按上下文ID对批次进行分组，以优化API调用
             batch.sort(key=lambda item: item.context_id or "")
-            for _context_id, items_group_iter in groupby(
-                batch, key=lambda item: item.context_id
-            ):
+            for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
 
                 async with self._processor_lock:
@@ -198,15 +175,13 @@ class Coordinator:
 
                 try:
                     batch_results = await self.processing_policy.process_batch(
-                        items_group, target_lang, self.processing_context, active_engine
+                        items_group,
+                        target_lang,
+                        self.processing_context,
+                        active_engine,
                     )
-                    await self.handler.save_translations(batch_results)
+                    await self.handler.save_translation_results(batch_results)
                     for result in batch_results:
-                        if (
-                            result.status == TranslationStatus.TRANSLATED
-                            and result.business_id
-                        ):
-                            await self.touch_jobs([result.business_id])
                         yield result
                 finally:
                     async with self._processor_lock:
@@ -216,101 +191,74 @@ class Coordinator:
 
     async def request(
         self,
+        business_id: str,
+        source_payload: dict[str, Any],
         target_langs: list[str],
-        text_content: str,
-        business_id: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
         source_lang: Optional[str] = None,
         force_retranslate: bool = False,
     ) -> None:
-        """提交一个新的翻译请求。"""
+        """
+        [操作层入口] 提交一个新的翻译请求。
+        """
         if self._shutting_down:
             logger.warning("系统正在停机，已拒绝新的翻译请求。")
             return
+
+        op = self._execute_request_operation(
+            business_id=business_id,
+            source_payload=source_payload,
+            target_langs=target_langs,
+            context=context,
+            source_lang=source_lang,
+            force_retranslate=force_retranslate,
+        )
+
         if self._request_semaphore:
             async with self._request_semaphore:
-                await self._request_internal(
-                    target_langs,
-                    text_content,
-                    business_id,
-                    context,
-                    source_lang,
-                    force_retranslate,
-                )
+                await op
         else:
-            await self._request_internal(
-                target_langs,
-                text_content,
-                business_id,
-                context,
-                source_lang,
-                force_retranslate,
-            )
+            await op
 
-    async def _request_internal(
+    async def _execute_request_operation(
         self,
+        business_id: str,
+        source_payload: dict[str, Any],
         target_langs: list[str],
-        text_content: str,
-        business_id: Optional[str],
         context: Optional[dict[str, Any]],
         source_lang: Optional[str],
         force_retranslate: bool,
     ) -> None:
-        """内部请求处理逻辑。"""
-        context_hash = get_context_hash(context)
-        context_json = json.dumps(context, ensure_ascii=False) if context else None
-        await self.handler.ensure_pending_translations(
-            text_content=text_content,
-            target_langs=target_langs,
+        """[操作层实现] 执行翻译请求的核心数据库操作。"""
+        content_id, context_id = await self.handler.ensure_content_and_context(
             business_id=business_id,
-            context_hash=context_hash,
-            context_json=context_json,
+            source_payload=source_payload,
+            context=context,
+        )
+        await self.handler.create_pending_translations(
+            content_id=content_id,
+            context_id=context_id,
+            target_langs=target_langs,
             source_lang=(source_lang or self.config.source_lang),
             engine_version=self.active_engine.VERSION,
             force_retranslate=force_retranslate,
         )
-
-    async def touch_jobs(self, business_ids: list[str]) -> None:
-        """更新一个或多个业务ID关联任务的 `updated_at` 时间戳。"""
-        if not business_ids:
-            return
-        await self.handler.touch_jobs(business_ids)
+        logger.info("翻译请求已成功入队", business_id=business_id, langs=target_langs)
 
     async def get_translation(
         self,
-        text_content: str,
+        business_id: str,
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
-        """直接获取一个翻译结果，会依次查找内存缓存和数据库。"""
-        context_hash = get_context_hash(context)
-        request = TranslationRequest(
-            source_text=text_content,
-            source_lang=self.config.source_lang,
+        """
+        [解析层] 直接获取一个翻译结果。
+        """
+        return await self.handler.find_translation(
+            business_id=business_id,
             target_lang=target_lang,
-            context_hash=context_hash,
+            context=context,
         )
-        cached_text = await self.cache.get_cached_result(request)
-        if cached_text:
-            return TranslationResult(
-                translation_id="from-mem-cache",
-                original_content=text_content,
-                translated_content=cached_text,
-                target_lang=target_lang,
-                status=TranslationStatus.TRANSLATED,
-                from_cache=True,
-                engine=f"{self.config.active_engine.value} (mem-cached)",
-                context_hash=context_hash,
-                business_id=None,
-            )
-        db_result = await self.handler.get_translation(
-            text_content, target_lang, context
-        )
-        if db_result and db_result.translated_content:
-            await self.cache.cache_translation_result(
-                request, db_result.translated_content
-            )
-        return db_result
 
     async def run_garbage_collection(
         self, expiration_days: Optional[int] = None, dry_run: bool = False
@@ -341,7 +289,8 @@ class Coordinator:
         logger.info("所有批次处理完成，正在关闭底层资源...")
         close_tasks = [instance.close() for instance in self._engine_instances.values()]
         if close_tasks:
-            await asyncio.gather(*close_tasks)
+            # 使用 return_exceptions=True 来防止一个引擎关闭失败导致整个过程崩溃
+            await asyncio.gather(*close_tasks, return_exceptions=True)
         await asyncio.sleep(0.1)
         await self.handler.close()
         self.initialized = False

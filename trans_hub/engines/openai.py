@@ -9,17 +9,16 @@ import structlog
 from pydantic import Field, HttpUrl, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from trans_hub.core.exceptions import ConfigurationError
+from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import (
     BaseContextModel,
     BaseEngineConfig,
     BaseTranslationEngine,
 )
-from trans_hub.exceptions import ConfigurationError
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 _AsyncOpenAIClient: Optional[type] = None
 try:
-    # --- 最终修复：导入更精确的类型 ---
     from openai import (
         APIConnectionError,
         APIStatusError,
@@ -54,11 +53,11 @@ class OpenAIContext(BaseContextModel):
 class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     """OpenAI 引擎的配置模型。"""
 
-    model_config = SettingsConfigDict(env_prefix="TH_", extra="ignore")
-    openai_api_key: Optional[SecretStr] = None
-    openai_endpoint: HttpUrl = Field(default=cast(HttpUrl, "https://api.openai.com/v1"))
-    openai_model: str = "gpt-3.5-turbo"
-    openai_temperature: float = 0.1
+    model_config = SettingsConfigDict(env_prefix="TH_OPENAI_", extra="ignore")
+    api_key: Optional[SecretStr] = Field(default=None, alias="th_openai_api_key")
+    endpoint: HttpUrl = Field(default=cast(HttpUrl, "https://api.openai.com/v1"))
+    model: str = "gpt-3.5-turbo"
+    temperature: float = 0.1
     default_prompt_template: str = (
         "Translate the following text from {source_lang} to {target_lang}. "
         "Return only the translated text, without any additional explanations "
@@ -66,7 +65,7 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
         'Text to translate: "{text}"'
     )
 
-    @field_validator("openai_endpoint", mode="before")
+    @field_validator("endpoint", mode="before")
     @classmethod
     def _validate_endpoint(cls, v: Any, info: ValidationInfo) -> Any:
         if isinstance(v, str) and not v.strip():
@@ -89,32 +88,32 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         if _AsyncOpenAIClient is None:
             raise ImportError(
                 "要使用 OpenAIEngine, 请安装 'openai' 库: "
-                'pip install "trans-hub[openai]"'
+                '"pip install "trans-hub[openai]"'
             )
-        if not self.config.openai_api_key:
+        if not config.api_key:
             if "PYTEST_CURRENT_TEST" in os.environ or "CI" in os.environ:
-                self.config.openai_api_key = SecretStr("dummy-key-for-ci")
+                config.api_key = SecretStr("dummy-key-for-ci")
             else:
                 raise ConfigurationError(
                     "OpenAI 引擎配置错误: 缺少 API 密钥 (TH_OPENAI_API_KEY)。"
                 )
-        assert self.config.openai_api_key is not None
+        assert config.api_key is not None
         timeout = httpx.Timeout(30.0, connect=5.0)
         self.client: AsyncOpenAI = _AsyncOpenAIClient(
-            api_key=self.config.openai_api_key.get_secret_value(),
-            base_url=str(self.config.openai_endpoint),
+            api_key=config.api_key.get_secret_value(),
+            base_url=str(config.endpoint),
             timeout=timeout,
             max_retries=2,
         )
 
     async def initialize(self) -> None:
-        assert self.config.openai_api_key is not None
-        if self.config.openai_api_key.get_secret_value() == "dummy-key-for-ci":
+        assert self.config.api_key is not None
+        if self.config.api_key.get_secret_value() == "dummy-key-for-ci":
             logger.warning("OpenAI 引擎处于CI/测试模式, 跳过健康检查。")
             return
         logger.info(
             "OpenAI 引擎正在初始化并执行健康检查...",
-            endpoint=str(self.config.openai_endpoint),
+            endpoint=str(self.config.endpoint),
         )
         try:
             await self.client.models.list(timeout=10)
@@ -130,7 +129,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             ) from e
         except APIConnectionError as e:
             raise ConfigurationError(
-                f"无法连接到 OpenAI 端点 '{self.config.openai_endpoint}': {e}"
+                f"无法连接到 OpenAI 端点 '{self.config.endpoint}': {e}"
             ) from e
         except Exception as e:
             raise ConfigurationError(f"OpenAI 引擎初始化失败: {e}") from e
@@ -159,11 +158,10 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         prompt_template = context_config.get(
             "prompt_template", self.config.default_prompt_template
         )
-        model = context_config.get("model", self.config.openai_model)
-        temperature = context_config.get("temperature", self.config.openai_temperature)
+        model = context_config.get("model", self.config.model)
+        temperature = context_config.get("temperature", self.config.temperature)
         system_prompt = context_config.get("system_prompt")
 
-        # --- 最终修复：使用精确的类型 ---
         messages: list[ChatCompletionMessageParam] = []
         if system_prompt:
             messages.append(

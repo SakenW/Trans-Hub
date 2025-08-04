@@ -1,5 +1,8 @@
 # trans_hub/policies/processing.py
-"""本模块定义并实现了具体的翻译处理策略。"""
+"""
+本模块定义并实现了具体的翻译处理策略。
+v3.0.0 重大更新：适配结构化载荷（payload）和新的核心类型。
+"""
 
 import asyncio
 from typing import Any, Optional, Protocol, Union
@@ -7,8 +10,7 @@ from typing import Any, Optional, Protocol, Union
 import structlog
 
 from trans_hub.context import ProcessingContext
-from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
-from trans_hub.types import (
+from trans_hub.core import (
     ContentItem,
     EngineError,
     EngineSuccess,
@@ -16,6 +18,7 @@ from trans_hub.types import (
     TranslationResult,
     TranslationStatus,
 )
+from trans_hub.engines.base import BaseContextModel, BaseTranslationEngine
 from trans_hub.utils import get_context_hash
 
 logger = structlog.get_logger(__name__)
@@ -50,6 +53,8 @@ class ProcessingPolicy(Protocol):
 class DefaultProcessingPolicy(ProcessingPolicy):
     """默认的翻译处理策略，实现了包含缓存、重试和DLQ的完整工作流。"""
 
+    PAYLOAD_TEXT_KEY = "text"  # 定义结构化载荷中待翻译文本的键
+
     async def process_batch(
         self,
         batch: list[ContentItem],
@@ -77,6 +82,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         initial_backoff: float,
     ) -> list[TranslationResult]:
         """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
+        # ... (上下文验证逻辑保持不变) ...
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
             raw_context_dict = batch[0].context if batch else None
@@ -105,6 +111,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         dlq_tasks: list[asyncio.Task[None]] = []
 
         for attempt in range(max_retries + 1):
+            if not items_to_process:
+                break
+
             (
                 processed_results,
                 retryable_items,
@@ -188,11 +197,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         uncached_items: list[ContentItem] = []
         for item in batch:
             request = TranslationRequest(
-                source_text=item.value,
+                source_payload=item.source_payload,
                 source_lang=p_context.config.source_lang,
                 target_lang=target_lang,
                 context_hash=get_context_hash(item.context),
             )
+            # 假设缓存结果是字符串
             cached_text = await p_context.cache.get_cached_result(request)
             if cached_text:
                 result = self._build_translation_result(
@@ -215,8 +225,13 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         if p_context.rate_limiter:
             await p_context.rate_limiter.acquire(len(items))
 
+        # 从 payload 中提取待翻译文本
+        texts_to_translate = [
+            item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in items
+        ]
+
         return await active_engine.atranslate_batch(
-            texts=[item.value for item in items],
+            texts=texts_to_translate,
             target_lang=target_lang,
             source_lang=p_context.config.source_lang,
             context=engine_context,
@@ -231,19 +246,22 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             if (
                 res.status == TranslationStatus.TRANSLATED
                 and not res.from_cache
-                and res.translated_content
+                and res.translated_payload
             ):
                 request = TranslationRequest(
-                    source_text=res.original_content,
+                    source_payload=res.original_payload,
                     source_lang=p_context.config.source_lang,
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )
-                tasks.append(
-                    p_context.cache.cache_translation_result(
-                        request, res.translated_content
+                # 缓存时，我们缓存翻译后的文本字符串
+                translated_text = res.translated_payload.get(self.PAYLOAD_TEXT_KEY, "")
+                if translated_text:
+                    tasks.append(
+                        p_context.cache.cache_translation_result(
+                            request, translated_text
+                        )
                     )
-                )
         if tasks:
             await asyncio.gather(*tasks)
 
@@ -267,8 +285,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         if final_error:
             return TranslationResult(
                 translation_id=item.translation_id,
-                original_content=item.value,
-                translated_content=None,
+                original_payload=item.source_payload,
+                translated_payload=None,
                 target_lang=target_lang,
                 status=TranslationStatus.FAILED,
                 engine=active_engine_name,
@@ -277,28 +295,33 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 context_hash=context_hash,
                 business_id=item.business_id,
             )
+
+        translated_text: Optional[str] = None
+        from_cache = False
         if cached_text is not None:
-            return TranslationResult(
-                translation_id=item.translation_id,
-                original_content=item.value,
-                translated_content=cached_text,
-                target_lang=target_lang,
-                status=TranslationStatus.TRANSLATED,
-                from_cache=True,
-                engine=f"{active_engine_name} (mem-cached)",
-                context_hash=context_hash,
-                business_id=item.business_id,
-            )
-        if isinstance(engine_output, EngineSuccess):
-            return TranslationResult(
-                translation_id=item.translation_id,
-                original_content=item.value,
-                translated_content=engine_output.translated_text,
-                target_lang=target_lang,
-                status=TranslationStatus.TRANSLATED,
-                engine=active_engine_name,
-                from_cache=engine_output.from_cache,
-                context_hash=context_hash,
-                business_id=item.business_id,
-            )
-        raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
+            translated_text = cached_text
+            from_cache = True
+            engine = f"{active_engine_name} (mem-cached)"
+        elif isinstance(engine_output, EngineSuccess):
+            translated_text = engine_output.translated_text
+            from_cache = engine_output.from_cache
+            engine = active_engine_name
+        else:
+            raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
+
+        # 将翻译后的文本重新包装为 payload 格式
+        # 这里采用一个简单的策略：复制源 payload，然后更新文本字段
+        translated_payload = dict(item.source_payload)
+        translated_payload[self.PAYLOAD_TEXT_KEY] = translated_text
+
+        return TranslationResult(
+            translation_id=item.translation_id,
+            original_payload=item.source_payload,
+            translated_payload=translated_payload,
+            target_lang=target_lang,
+            status=TranslationStatus.TRANSLATED,
+            engine=engine,
+            from_cache=from_cache,
+            context_hash=context_hash,
+            business_id=item.business_id,
+        )

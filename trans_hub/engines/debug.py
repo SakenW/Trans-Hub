@@ -1,13 +1,13 @@
 # trans_hub/engines/debug.py
 """提供一个用于开发和测试的调试翻译引擎。"""
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import BaseEngineConfig, BaseTranslationEngine
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
 class DebugEngineConfig(BaseSettings, BaseEngineConfig):
@@ -16,7 +16,7 @@ class DebugEngineConfig(BaseSettings, BaseEngineConfig):
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
     fail_on_text: Optional[str] = Field(default=None)
     fail_is_retryable: bool = Field(default=True)
-    translation_map: dict[str, str] = Field(default_factory=dict)
+    translation_map: Dict[str, str] = Field(default_factory=dict)
 
 
 class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
@@ -25,7 +25,6 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
     CONFIG_MODEL = DebugEngineConfig
     VERSION = "2.1.0"
 
-    # --- 核心变更：重命名方法 ---
     async def _execute_single_translation(
         self,
         text: str,

@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any, Optional
 
-from trans_hub.types import GLOBAL_CONTEXT_SENTINEL
+from trans_hub.core.types import GLOBAL_CONTEXT_SENTINEL
 
 
 def get_context_hash(context: Optional[dict[str, Any]]) -> str:

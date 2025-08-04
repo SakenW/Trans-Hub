@@ -1,7 +1,7 @@
 # trans_hub/engines/base.py
 """
 本模块定义了所有翻译引擎插件必须继承的抽象基类（ABC）。
-v3.0.2.dev 更新：引入速率限制和并发控制。
+v3.1.0 修复: 彻底解耦引擎与主配置。
 """
 
 import asyncio
@@ -10,8 +10,8 @@ from typing import Any, Generic, Optional, TypeVar, Union
 
 from pydantic import BaseModel, Field
 
+from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.rate_limiter import RateLimiter
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 _ConfigType = TypeVar("_ConfigType", bound="BaseEngineConfig")
 
@@ -49,7 +49,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self._rate_limiter: Optional[RateLimiter] = None
         self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
 
-        # 基于配置初始化速率限制器
         if config.rpm:
             self._rate_limiter = RateLimiter(
                 refill_rate=config.rpm / 60, capacity=config.rpm
@@ -59,7 +58,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
                 refill_rate=config.rps, capacity=config.rps
             )
 
-        # 基于配置初始化并发信号量
         if config.max_concurrency:
             self._concurrency_semaphore = asyncio.Semaphore(config.max_concurrency)
 
@@ -105,20 +103,15 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
     ) -> EngineBatchItemResult:
         """
         [模板方法] 执行单次翻译，应用并发和速率限制。
-
-        这是一个 final 方法，子类不应覆盖它。
         """
-        # 如果定义了并发信号量，则在信号量保护下执行
         if self._concurrency_semaphore:
             async with self._concurrency_semaphore:
-                # 如果定义了速率限制器，则在执行前获取令牌
                 if self._rate_limiter:
                     await self._rate_limiter.acquire()
                 return await self._execute_single_translation(
                     text, target_lang, source_lang, context_config
                 )
         else:
-            # 如果没有并发限制，只应用速率限制
             if self._rate_limiter:
                 await self._rate_limiter.acquire()
             return await self._execute_single_translation(

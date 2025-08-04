@@ -2,21 +2,19 @@
 """
 针对 `trans_hub.cache` 模块的单元测试。
 """
-from typing import Callable
-
 import pytest
 from cachetools import TTLCache
 from pytest_mock import MockerFixture
 
 from trans_hub.cache import CacheConfig, TranslationCache
-from trans_hub.types import TranslationRequest
+from trans_hub.core.types import TranslationRequest
 
 
 @pytest.fixture
 def sample_request() -> TranslationRequest:
     """提供一个可复用的翻译请求对象。"""
     return TranslationRequest(
-        source_text="Hello",
+        source_payload={"text": "Hello"},
         source_lang="en",
         target_lang="de",
         context_hash="__GLOBAL__",
@@ -27,7 +25,7 @@ def sample_request() -> TranslationRequest:
 def another_request() -> TranslationRequest:
     """提供另一个不同的翻译请求对象。"""
     return TranslationRequest(
-        source_text="World",
+        source_payload={"text": "World"},
         source_lang="en",
         target_lang="de",
         context_hash="__GLOBAL__",
@@ -54,17 +52,13 @@ async def test_ttl_expiration(
     def timer() -> float:
         return current_time
 
-    # v3.1 修复：在构造时注入 timer，而不是事后修补
     config = CacheConfig(maxsize=10, ttl=1, cache_type="ttl")
     cache = TranslationCache(config)
-    # 直接替换内部的 cache 对象
     cache.cache = TTLCache(maxsize=config.maxsize, ttl=config.ttl, timer=timer)
 
     await cache.cache_translation_result(sample_request, "Hallo")
     assert await cache.get_cached_result(sample_request) == "Hallo"
 
-    # 模拟时间流逝超过 TTL
     current_time += 1.1
 
-    # 验证缓存已过期
     assert await cache.get_cached_result(sample_request) is None

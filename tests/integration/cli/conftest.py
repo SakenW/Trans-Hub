@@ -1,4 +1,5 @@
 # tests/integration/cli/conftest.py
+# (此文件无需修改，保持原样)
 """为 CLI 集成测试提供专用的、基于 mock 的 Fixtures。"""
 
 from collections.abc import Generator
@@ -28,9 +29,6 @@ def mock_cli_config() -> Generator[TransHubConfig, None, None]:
 def patch_cli_config(mocker: MockerFixture, mock_cli_config: TransHubConfig) -> None:
     """
     自动为所有 CLI 测试修补配置加载。
-
-    v3.1 最终修复：恢复 `autouse=True`，但此 fixture 现在只负责修补配置，
-    确保所有 CLI 测试都有一个稳定的、可预测的配置基础。
     """
     mocker.patch("trans_hub.cli.main.TransHubConfig", return_value=mock_cli_config)
 
@@ -45,12 +43,6 @@ def mock_coordinator(mocker: MockerFixture) -> Generator[AsyncMock, None, None]:
 def mock_cli_backend(mocker: MockerFixture, mock_coordinator: AsyncMock) -> None:
     """
     修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。
-
-    此 fixture 必须在测试中被显式请求。
-
-    Args:
-        mocker: pytest-mock 提供的 mocker fixture。
-        mock_coordinator: 来自 `mock_coordinator` fixture 的实例。
     """
     mocker.patch(
         "trans_hub.cli.utils.create_coordinator", return_value=mock_coordinator

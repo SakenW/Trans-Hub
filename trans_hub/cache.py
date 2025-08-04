@@ -2,12 +2,13 @@
 """本模块提供灵活的内存缓存机制，用于减少重复的翻译请求。"""
 
 import asyncio
+import json
 from typing import Optional, Union
 
 from cachetools import LRUCache, TTLCache
 from pydantic import BaseModel
 
-from trans_hub.types import TranslationRequest
+from trans_hub.core.types import TranslationRequest
 
 
 class CacheConfig(BaseModel):
@@ -35,9 +36,10 @@ class TranslationCache:
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
         """为翻译请求生成一个唯一的、确定性的缓存键。"""
+        payload_str = json.dumps(request.source_payload, sort_keys=True)
         return "|".join(
             [
-                request.source_text,
+                payload_str,
                 request.source_lang or "auto",
                 request.target_lang,
                 request.context_hash,

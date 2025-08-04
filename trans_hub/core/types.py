@@ -1,7 +1,7 @@
-# trans_hub/types.py
+# trans_hub/core/types.py
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
-v3.0.dev 更新：为 TranslationResult 添加 translation_id 以优化持久化。
+v3.0.0 更新：全面转向结构化载荷（payload），并与新的数据库 Schema 对齐。
 """
 
 from enum import Enum
@@ -40,7 +40,7 @@ EngineBatchItemResult = Union[EngineSuccess, EngineError]
 class TranslationRequest(BaseModel):
     """表示一个内部传递或用于缓存查找的翻译请求单元。"""
 
-    source_text: str
+    source_payload: dict[str, Any]
     source_lang: Optional[str]
     target_lang: str
     context_hash: str
@@ -49,18 +49,15 @@ class TranslationRequest(BaseModel):
 class TranslationResult(BaseModel):
     """由 Coordinator 返回给最终用户的综合结果对象。"""
 
-    # --- 核心变更：添加 translation_id ---
     translation_id: str
-    # ------------------------------------
-
-    original_content: str
-    translated_content: Optional[str] = None
+    business_id: Optional[str] = Field(default=None)
+    original_payload: dict[str, Any]
+    translated_payload: Optional[dict[str, Any]] = None
     target_lang: str
     status: TranslationStatus
     engine: Optional[str] = None
     from_cache: bool
     error: Optional[str] = None
-    business_id: Optional[str] = Field(default=None)
     context_hash: str
 
     @model_validator(mode="after")
@@ -77,9 +74,9 @@ class TranslationResult(BaseModel):
         """
         if (
             self.status == TranslationStatus.TRANSLATED
-            and self.translated_content is None
+            and self.translated_payload is None
         ):
-            raise ValueError("TRANSLATED 状态的结果必须包含 translated_content。")
+            raise ValueError("TRANSLATED 状态的结果必须包含 translated_payload。")
         if self.status == TranslationStatus.FAILED and self.error is None:
             raise ValueError("FAILED 状态的结果必须包含 error 信息。")
         return self
@@ -89,10 +86,10 @@ class ContentItem(BaseModel):
     """在内部处理流程中，代表一个从数据库取出的、准备进行翻译处理的原子任务。"""
 
     translation_id: str
-    business_id: Optional[str]
+    business_id: str  # business_id 在核心流程中是必须的
     content_id: str
     context_id: Optional[str]
-    value: str
+    source_payload: dict[str, Any]
     context: Optional[dict[str, Any]]
 
 

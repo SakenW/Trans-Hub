@@ -6,14 +6,15 @@ from typing import Any, Optional
 
 import structlog
 
+from trans_hub.core.exceptions import APIError
+from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import (
     BaseContextModel,
     BaseEngineConfig,
     BaseTranslationEngine,
 )
-from trans_hub.exceptions import APIError
-from trans_hub.types import EngineBatchItemResult, EngineError, EngineSuccess
 
+# 修复：添加 logger 定义
 logger = structlog.get_logger(__name__)
 
 
@@ -54,12 +55,11 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         except ImportError as e:
             raise ImportError(
                 "要使用 TranslatorsEngine, 请安装 'translators' 库: "
-                'pip install "trans-hub[translators]"'
+                '"pip install "trans-hub[translators]"'
             ) from e
         except Exception as e:
             raise APIError(f"Translators 库初始化失败: {e}") from e
 
-    # --- 核心变更：重命名方法 ---
     async def _execute_single_translation(
         self,
         text: str,

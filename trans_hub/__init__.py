@@ -8,9 +8,13 @@ __version__ = "3.0.0.dev0"
 
 from .config import EngineName, TransHubConfig
 from .coordinator import Coordinator
+from .core import TranslationStatus
 from .engines.base import BaseContextModel
-from .persistence import DefaultPersistenceHandler, create_persistence_handler
-from .types import TranslationStatus
+from .persistence import (
+    DefaultPersistenceHandler,
+    PersistenceHandler,
+    create_persistence_handler,
+)
 
 __all__ = [
     "__version__",
@@ -19,6 +23,7 @@ __all__ = [
     "EngineName",
     "TranslationStatus",
     "BaseContextModel",
+    "PersistenceHandler",
     "DefaultPersistenceHandler",
     "create_persistence_handler",
 ]

@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from trans_hub.cache import TranslationCache
 from trans_hub.config import TransHubConfig
-from trans_hub.interfaces import PersistenceHandler
+from trans_hub.core.interfaces import PersistenceHandler
 from trans_hub.rate_limiter import RateLimiter
 
 
@@ -21,4 +22,4 @@ class ProcessingContext:
     cache: TranslationCache
 
     # 可选依赖组件
-    rate_limiter: RateLimiter | None = None
+    rate_limiter: Optional[RateLimiter] = None
