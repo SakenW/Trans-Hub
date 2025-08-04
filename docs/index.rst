@@ -1,4 +1,4 @@
-.. # docs/index.rst (Final Version)
+.. # docs/index.rst
 
 ==================================================
 欢迎使用 Trans-Hub: 智能本地化后端引擎
@@ -49,16 +49,17 @@
    guides/testing_strategy
    guides/multilingual_support
    CHANGELOG
+
+.. toctree::
+   :hidden:
+
+   Indices and tables <self>
    RELEASE_SOP
    ROADMAP
    README
    RELEASE_NOTES
    CONTRIBUTING
 
-.. toctree::
-   :hidden:
-
-   Indices and tables <self>
 
 * :ref:`genindex`
 * :ref:`modindex`

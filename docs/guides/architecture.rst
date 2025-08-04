@@ -1,104 +1,66 @@
-.. # docs/guides/architecture.rst (Final Merged Version)
+.. # docs/guides/architecture.rst
 
 ==================
 Trans-Hub 架构概述
 ==================
 
-:文档目的: 本文档旨在提供一个关于 `Trans-Hub` 系统架构、设计原则和核心工作流程的全面概览。它是理解“系统如何工作”的起点。
+:文档目的: 本文档旨在提供一个关于 `Trans-Hub v3.0` 系统架构、设计原则和核心工作流程的概览。
 
 设计哲学与核心原则
 --------------------
 
-`Trans-Hub` 是一个**异步优先**、可嵌入 Python 应用的、带持久化存储的智能本地化后端引擎。其架构遵循以下核心原则：
+`Trans-Hub v3.0` 的架构遵循以下核心原则：
 
-- **异步优先 (Async-First)**: 整个核心库被设计为纯异步，以实现最大的 I/O 并发性能。
-- **职责明确 (Clear Separation of Concerns)**: 各组件职责高度内聚，确保高内聚、低耦合。
-- **依赖注入与抽象 (Dependency Injection & Abstraction)**: 核心组件通过接口 (`typing.Protocol`) 交互，松耦合，易于测试。
-- **可扩展性 (Extensibility)**: 通过插件化的引擎子系统和抽象的持久化层，支持轻松扩展。
-- **健壮性 (Robustness)**: 内置重试、缓存、并发控制和详细的错误处理机制。
-- **结构化配置 (Structured Configuration)**: 所有配置项均通过 Pydantic 模型进行定义和验证。
+- **异步优先**: 整个核心库被设计为纯异步。
+- **分层与解耦**: 通过`核心(core)`包、服务层抽象和可插拔的持久化/引擎层，实现高度解耦。
+- **稳定引用**: 通过 `business_id` 将内容的身份与其具体值分离。
+- **结构化优先**: 原生支持 JSON 格式的结构化内容。
+- **配置与实现分离**: 核心配置不依赖于具体实现，提高了系统的可扩展性。
 
 系统架构
 --------
 
-`Trans-Hub` 采用模块化的分层架构和**依赖倒置**的注册模式，确保各组件职责单一、高度解耦。
-
 .. mermaid::
 
    graph TD
-       subgraph "上层应用 (User Application)"
-           A["异步应用逻辑 (e.g., FastAPI)"]
-           G[".env 文件"]
+       subgraph "应用层 (Application Layer)"
+           CLI["CLI (Typer)"]
+           WebApp["Web App (e.g., FastAPI)"]
        end
 
        subgraph "核心库: Trans-Hub"
-           B["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
-           U1["<b>配置模型 (TransHubConfig)</b><br/>单一事实来源"]
-           D["<b>持久化处理器 (PersistenceHandler)</b><br/>数据库 I/O 抽象<br/><i>(内置并发写锁)</i>"]
-           F["统一数据库 (SQLite)"]
+           Coordinator["<b>主协调器 (Coordinator)</b><br/>编排工作流、应用策略"]
+           Config["<b>配置 (Config)</b><br/>加载原始配置"]
            
-           subgraph "插件化引擎子系统"
-               E_meta["<b>引擎元数据注册表 (meta.py)</b><br/>解耦中心"]
-               C3["<b>引擎加载器 (engine_registry.py)</b><br/>动态发现"]
-               E_impl["<b>引擎实现</b><br/>(e.g., OpenAIEngine)"]
+           subgraph "核心契约 (trans_hub.core)"
+               style Core fill:#e6f3ff,stroke:#36c
+               CoreTypes["<b>核心类型 (types.py)</b><br/>Pydantic DTOs"]
+               CoreInterfaces["<b>接口 (interfaces.py)</b><br/>PersistenceHandler Protocol"]
+               CoreExceptions["<b>异常 (exceptions.py)</b>"]
            end
 
-           subgraph "核心机制"
-               C1["内存缓存 (Cache)"]
-               C2["重试/速率限制"]
+           subgraph "服务与策略"
+                Policies["处理策略 (ProcessingPolicy)"]
+                Cache["内存缓存 (Cache)"]
            end
-       end
 
-       G -- "加载环境变量" --> U1
-       A -- "创建" --> U1
-       A -- "实例化并调用" --> B
-       
-       B -- "使用" --> C1 & C2
-       B -- "依赖于" --> D
-       
-       subgraph "初始化/发现流程"
-           style C3 fill:#e6f3ff,stroke:#36c
-           style E_impl fill:#e6f3ff,stroke:#36c
-           style E_meta fill:#e6f3ff,stroke:#36c
+           subgraph "可插拔层 (Pluggable Layers)"
+               Persistence["<b>持久化层 (Persistence)</b><br/>(SQLite 实现)"]
+               Engines["<b>引擎层 (Engines)</b><br/>(Debug, OpenAI...)"]
+           end
            
-           U1 -- "1. 查询配置类型" --> E_meta
-           B -- "2. 使用引擎名查询" --> C3
-           C3 -- "3. 导入模块, 触发" --> E_impl
-           E_impl -- "4. 自我注册 Config" --> E_meta
+           DB["数据库 (SQLite)"]
        end
+
+       CLI & WebApp --> Coordinator
+       Coordinator -- uses --> Policies & Cache
+       Coordinator -- depends on --> CoreInterfaces
+       Policies -- depends on --> CoreTypes
        
-       D -- "操作" --> F
+       Persistence -- implements --> CoreInterfaces
+       Persistence -- interacts with --> DB
+       
+       Coordinator -- uses --> Engines
+       Engines -- depends on --> CoreTypes & CoreExceptions
 
-核心工作流详解
---------------
-
-`Trans-Hub` 的核心是异步的，其工作流的核心是 `Coordinator.process_pending_translations` 方法。
-
-.. mermaid::
-   :caption: `process_pending_translations` 核心时序图
-
-   sequenceDiagram
-       participant App as 上层应用 (Worker)
-       participant Coord as Coordinator
-       participant Cache as TranslationCache
-       participant Handler as PersistenceHandler
-       participant Engine as TranslationEngine
-
-       App->>+Coord: process_pending_translations('zh-CN')
-       Coord->>+Handler: stream_translatable_items('zh-CN', ...)
-       Note over Handler: (获取写锁)<br>事务1: 锁定一批待办任务<br>(状态->TRANSLATING)<br>(释放写锁)
-       Handler-->>-Coord: yield batch_of_items
-
-       loop 针对每个翻译批次
-           Coord->>+Cache: 检查内存缓存
-           Cache-->>-Coord: cached_results, uncached_items
-           opt 如果有未缓存的项目
-               Coord->>+Engine: atranslate_batch(uncached_items)
-               Engine-->>-Coord: List<EngineBatchItemResult>
-               Coord->>+Cache: 缓存新翻译结果
-           end
-           Coord->>+Handler: save_translations(all_results)
-           Note over Handler: (获取写锁)<br>事务2: 原子更新翻译记录<br>(释放写锁)
-           Handler-->>-Coord: (数据库更新完成)
-           Coord-->>App: yield TranslationResult
-       end
+       Config --> Coordinator

@@ -13,7 +13,7 @@
 
 .. autoclass:: TransHubConfig
    :members:
-   :undoc-members: false
+   :undoc-members:
    :show-inheritance:
    :inherited-members: BaseSettings
 
@@ -21,25 +21,17 @@
 ------------
 .. autoclass:: EngineName
    :members:
-   :undoc-members: false
-
-引擎配置集合
-------------
-
-.. autoclass:: EngineConfigs
-   :members:
-   :undoc-members: false
-   :show-inheritance:
+   :undoc-members:
 
 其他配置模型
 --------------
 
 .. autoclass:: LoggingConfig
    :members:
-   :undoc-members: false
+   :undoc-members:
    :show-inheritance:
 
 .. autoclass:: RetryPolicyConfig
    :members:
-   :undoc-members: false
+   :undoc-members:
    :show-inheritance:

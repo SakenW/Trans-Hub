@@ -4,7 +4,7 @@
 自定义异常 (Exceptions)
 =========================
 
-.. currentmodule:: trans_hub.exceptions
+.. currentmodule:: trans_hub.core.exceptions
 
 `Trans-Hub` 定义了一系列语义化的自定义异常，以便进行精确的错误处理。所有自定义异常都继承自基类 ``TransHubError``，这使得捕获所有项目相关的预期错误变得简单。
 
