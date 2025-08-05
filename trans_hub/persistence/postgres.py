@@ -6,6 +6,7 @@
 为 Trans-Hub 提供了高性能、高并发的生产级数据后端。
 """
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -30,6 +31,9 @@ logger = structlog.get_logger(__name__)
 class PostgresPersistenceHandler(PersistenceHandler):
     """`PersistenceHandler` 协议的 PostgreSQL 实现。"""
 
+    SUPPORTS_NOTIFICATIONS = True
+    NOTIFICATION_CHANNEL = "new_translation_task"
+
     def __init__(self, dsn: str):
         self.dsn = dsn
         self._pool: Optional[asyncpg.Pool] = None
@@ -49,6 +53,58 @@ class PostgresPersistenceHandler(PersistenceHandler):
         except (asyncpg.PostgresError, OSError) as e:
             logger.error("连接 PostgreSQL 数据库失败", exc_info=True)
             raise DatabaseError(f"数据库连接失败: {e}") from e
+
+    def listen_for_notifications(self) -> AsyncGenerator[str, None]:
+        async def _internal_generator() -> AsyncGenerator[str, None]:
+            if not self.SUPPORTS_NOTIFICATIONS:
+                if False:
+                    yield
+                return
+
+            conn: Optional[asyncpg.Connection] = None
+            q: asyncio.Queue[str] = asyncio.Queue()
+
+            class CallbackHandler:
+                def __init__(self, queue: asyncio.Queue[str]):
+                    self.queue = queue
+
+                async def __call__(
+                    self,
+                    connection: asyncpg.Connection,
+                    pid: int,
+                    channel: str,
+                    payload: str,
+                ) -> None:
+                    await self.queue.put(payload)
+
+            callback_handler = CallbackHandler(q)
+
+            while True:
+                try:
+                    conn = await self.pool.acquire()
+                    await conn.add_listener(self.NOTIFICATION_CHANNEL, callback_handler)
+                    logger.info(
+                        "数据库通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
+                    )
+
+                    while True:
+                        payload = await q.get()
+                        yield payload
+                except (asyncpg.PostgresError, OSError) as e:
+                    logger.error("通知监听器连接丢失，将在5秒后重试...", error=e)
+                    await asyncio.sleep(5)
+                finally:
+                    if conn:
+                        try:
+                            await conn.remove_listener(
+                                self.NOTIFICATION_CHANNEL, callback_handler
+                            )
+                        except asyncpg.InterfaceError:
+                            pass
+                        await self.pool.release(conn)
+                        conn = None
+
+        return _internal_generator()
 
     async def close(self) -> None:
         """关闭 PostgreSQL 数据库连接池。"""

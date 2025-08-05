@@ -19,6 +19,8 @@ class PersistenceHandler(Protocol):
     定义了持久化处理器的纯异步接口协议。
     """
 
+    SUPPORTS_NOTIFICATIONS: bool = False
+
     async def connect(self) -> None:
         """建立与数据库的连接。"""
         ...
@@ -27,34 +29,28 @@ class PersistenceHandler(Protocol):
         """关闭与数据库的连接。"""
         ...
 
+    def listen_for_notifications(self) -> AsyncGenerator[str, None]:
+        """[可选] 监听数据库通知，返回通知的负载。"""
+        ...
+
     async def reset_stale_tasks(self) -> None:
         """在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
         ...
 
-    async def stream_translatable_items(
+    def stream_translatable_items(
         self,
         lang_code: str,
         statuses: list[TranslationStatus],
         batch_size: int,
         limit: Optional[int] = None,
-    ) -> AsyncGenerator[list[ContentItem], None]:
-        """
-        以流式方式获取待处理的翻译任务批次。
-        """
-        # 协议方法的实现由具体类提供
-        if False:  # noqa: B012
-            yield []
+    ) -> AsyncGenerator[list[ContentItem], None]: ...
 
     async def ensure_content_and_context(
         self,
         business_id: str,
         source_payload: dict[str, Any],
         context: Optional[dict[str, Any]],
-    ) -> tuple[str, Optional[str]]:
-        """
-        确保源内容和上下文已存在于数据库中，并返回它们的内部ID。
-        """
-        ...
+    ) -> tuple[str, Optional[str]]: ...
 
     async def create_pending_translations(
         self,
@@ -64,39 +60,23 @@ class PersistenceHandler(Protocol):
         source_lang: Optional[str],
         engine_version: str,
         force_retranslate: bool = False,
-    ) -> None:
-        """
-        为给定的内容和上下文创建待处理的翻译任务。
-        """
-        ...
+    ) -> None: ...
 
     async def save_translation_results(
         self,
         results: list[TranslationResult],
-    ) -> None:
-        """
-        将一批已完成的翻译结果保存到数据库。
-        """
-        ...
+    ) -> None: ...
 
     async def find_translation(
         self,
         business_id: str,
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]:
-        """
-        根据稳定引用ID、目标语言和上下文，查找一个已完成的翻译。
-        """
-        ...
+    ) -> Optional[TranslationResult]: ...
 
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
-    ) -> dict[str, int]:
-        """
-        执行垃圾回收，清理过期的、无关联的旧数据。
-        """
-        ...
+    ) -> dict[str, int]: ...
 
     async def move_to_dlq(
         self,
@@ -105,6 +85,4 @@ class PersistenceHandler(Protocol):
         error_message: str,
         engine_name: str,
         engine_version: str,
-    ) -> None:
-        """将一个无法处理的任务移动到死信队列。"""
-        ...
+    ) -> None: ...

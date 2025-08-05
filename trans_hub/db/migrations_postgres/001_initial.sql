@@ -88,3 +88,28 @@ CREATE TABLE IF NOT EXISTS th_audit_logs (
     details_json JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_record ON th_audit_logs(table_name, record_id);
+
+
+-- =============================================================================
+-- v4.0 事件驱动 Worker 支持 (LISTEN/NOTIFY)
+-- =============================================================================
+
+-- 1. 创建一个函数，用于发送 NOTIFY 事件
+CREATE OR REPLACE FUNCTION notify_new_translation_task()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- 我们发送一个简单的负载 'new'，可以扩展为发送 lang_code 等
+    -- PERFORM pg_notify('new_translation_task', NEW.lang_code);
+    PERFORM pg_notify('new_translation_task', 'new');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 2. 创建一个触发器，在插入新任务时调用该函数
+-- 只有在插入新的、状态为 PENDING 的任务时才触发
+DROP TRIGGER IF EXISTS on_new_translation_task ON th_translations;
+CREATE TRIGGER on_new_translation_task
+    AFTER INSERT ON th_translations
+    FOR EACH ROW
+    WHEN (NEW.status = 'PENDING')
+    EXECUTE FUNCTION notify_new_translation_task();

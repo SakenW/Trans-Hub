@@ -10,8 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.cache import CacheConfig
 
-# 不再导入任何引擎配置类
-
 
 class EngineName(str, enum.Enum):
     DEBUG = "debug"
@@ -43,9 +41,12 @@ class TransHubConfig(BaseSettings):
     batch_size: int = Field(default=50)
     source_lang: Optional[str] = Field(default=None)
     gc_retention_days: int = Field(default=90)
+    # v4.0 新增: Worker 轮询间隔
+    worker_poll_interval: int = Field(
+        default=10, description="Worker在轮询模式下的等待间隔（秒）"
+    )
 
     cache_config: CacheConfig = Field(default_factory=CacheConfig)
-    # engine_configs 现在是一个通用的字典
     engine_configs: Dict[str, Any] = Field(default_factory=dict)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -54,7 +55,7 @@ class TransHubConfig(BaseSettings):
     def db_path(self) -> str:
         parsed_url = urlparse(self.database_url)
         if parsed_url.scheme != "sqlite":
-            raise ValueError("目前只支持 'sqlite' 数据库 URL。")
+            raise ValueError("db_path 属性仅在 database_url 为 'sqlite' 时可用。")
         path = parsed_url.netloc + parsed_url.path
         if path.startswith("/") and ":" not in path:
             return path[1:]
