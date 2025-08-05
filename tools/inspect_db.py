@@ -9,22 +9,23 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# v3.7 修复：将 sys.path 修改逻辑置于顶部，并添加 noqa
 try:
     project_root = Path(__file__).resolve().parent.parent
     if str(project_root) not in sys.path:
-        sys.path.append(str(project_root))
-    from trans_hub.logging_config import setup_logging
+        sys.path.insert(0, str(project_root))
+    from trans_hub.logging_config import setup_logging  # noqa: E402
 except (ImportError, IndexError):
     print("错误: 无法将项目根目录添加到 sys.path。请确保此脚本位于 'tools' 目录下。")
     sys.exit(1)
 
-import aiosqlite
-import structlog
-from rich.console import Console, Group, RenderableType
-from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.text import Text
+import aiosqlite  # noqa: E402
+import structlog  # noqa: E402
+from rich.console import Console, Group  # noqa: E402
+from rich.panel import Panel  # noqa: E402
+from rich.syntax import Syntax  # noqa: E402
+from rich.table import Table  # noqa: E402
+from rich.text import Text  # noqa: E402
 
 log = structlog.get_logger(__name__)
 
@@ -97,17 +98,25 @@ class DatabaseInspector:
         """查询并以富文本格式详细打印每一条翻译记录。"""
         assert self.conn is not None
         self.console.print(Panel("[bold cyan]详细翻译记录[/bold cyan]", expand=False))
+        # v3.7 修复：更新 SQL 查询以匹配 v3.0 Schema
         query = """
         SELECT
-            tr.id AS translation_id, tr.lang_code, tr.status, tr.translation_content,
-            tr.engine, tr.engine_version, tr.last_updated_at, c.value AS original_content,
-            ctx.value AS context_json, j.business_id, j.last_requested_at
-        FROM th_translations tr
-        JOIN th_content c ON tr.content_id = c.id
-        LEFT JOIN th_contexts ctx ON tr.context_id = ctx.id
-        LEFT JOIN th_jobs j ON tr.content_id = j.content_id
-            AND COALESCE(tr.context_id, '') = COALESCE(j.context_id, '')
-        ORDER BY tr.last_updated_at DESC;
+            t.id AS translation_id,
+            t.lang_code,
+            t.status,
+            t.translation_payload_json,
+            t.engine,
+            t.engine_version,
+            t.last_updated_at,
+            c.source_payload_json,
+            ctx.context_payload_json,
+            c.business_id,
+            j.last_requested_at
+        FROM th_translations t
+        JOIN th_content c ON t.content_id = c.id
+        LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+        LEFT JOIN th_jobs j ON t.content_id = j.content_id
+        ORDER BY t.last_updated_at DESC;
         """
         async with self.conn.cursor() as cursor:
             await cursor.execute(query)
@@ -121,139 +130,64 @@ class DatabaseInspector:
 
     def _build_single_record_panel(self, index: int, row: aiosqlite.Row) -> Panel:
         """为单条记录构建一个包含所有信息的、结构化的 Rich Panel。"""
-        # 状态符号映射
-        status_symbols = {
-            "TRANSLATED": "✔",
-            "APPROVED": "✔",
-            "PENDING": "⏳",
-            "TRANSLATING": "⏳",
-            "FAILED": "✖",
-        }
-        # 状态颜色映射
         status_colors = {
-            "TRANSLATED": "green",
-            "APPROVED": "bright_green",
-            "PENDING": "yellow",
-            "TRANSLATING": "cyan",
-            "FAILED": "red",
+            "TRANSLATED": "green", "APPROVED": "bright_green",
+            "PENDING": "yellow", "TRANSLATING": "cyan", "FAILED": "red",
         }
-        
-        status_symbol = status_symbols.get(row["status"], "?" )
         status_color = status_colors.get(row["status"], "default")
+
+        # --- 主要内容 ---
+        original_payload = json.loads(row["source_payload_json"])
+        original_text = original_payload.get("text", str(original_payload))
         
-        # 主要内容表格 (原文/译文)
+        translated_text = "[dim]N/A[/dim]"
+        if row["translation_payload_json"]:
+            translated_payload = json.loads(row["translation_payload_json"])
+            translated_text = translated_payload.get("text", str(translated_payload))
+
         content_table = Table(box=None, show_header=False, padding=(0, 1))
         content_table.add_column(style="dim", width=12)
         content_table.add_column()
+        content_table.add_row("原文:", f"[cyan]{original_text}[/cyan]")
+        content_table.add_row("译文:", f"[cyan]{translated_text}[/cyan]")
         
-        # 原文和译文使用青色显示
-        content_table.add_row("原文:", f"[cyan]{row['original_content']}[/cyan]")
-        if row["translation_content"]:
-            content_table.add_row("译文:", f"[cyan]{row['translation_content']}[/cyan]")
-        
-        # 元数据表格
+        # --- 元数据 ---
         meta_table = Table(show_header=False, box=None, padding=(0, 1))
         meta_table.add_column(style="dim", width=12)
         meta_table.add_column()
-        
-        # 业务ID使用蓝色显示
         if row["business_id"]:
-            meta_table.add_row("业务 :", f"[blue]{row['business_id']}[/blue]")
-        
-        # 时间格式化函数
-        from datetime import datetime
-        
-        def format_timestamp(ts_str: str) -> str:
+            meta_table.add_row("业务 ID:", f"[blue]{row['business_id']}[/blue]")
+        meta_table.add_row("更新于:", row['last_updated_at'].split('.')[0])
+        meta_table.add_row("引擎:", f"{row['engine']} [dim](v{row['engine_version']})[/dim]")
+
+        # --- 上下文 ---
+        context_renderable = None
+        if row["context_payload_json"]:
             try:
-                dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                return ts_str
-        
-        # 时间信息
-        formatted_updated_at = format_timestamp(row['last_updated_at'])
-        meta_table.add_row("时间 :", formatted_updated_at)
-        
-        # 引擎信息，版本号使用灰色显示
-        meta_table.add_row("引擎 :", f"{row['engine']} [dim](v{row['engine_version']})[/dim]")
-        
-        # 使用 Group 组织内容
-        renderables: list[RenderableType] = [content_table, meta_table]
-        
-        # 上下文面板 (如果存在)
-        context_panel: Optional[Panel] = None
-        if row["context_json"]:
-            try:
-                parsed_context = json.loads(row["context_json"])
-                context_str = json.dumps(parsed_context, indent=2, ensure_ascii=False)
-                syntax = Syntax(context_str, "json", theme="monokai", line_numbers=False)
-                context_panel = Panel(
-                    syntax,
-                    title="[dim]▼ 关联上下文[/dim]",
-                    border_style="dim",
-                    title_align="left",
-                    padding=(0, 1),
-                )
-                renderables.append(context_panel)
+                parsed = json.loads(row["context_payload_json"])
+                pretty_json = json.dumps(parsed, indent=2, ensure_ascii=False)
+                context_renderable = Syntax(pretty_json, "json", theme="monokai")
             except json.JSONDecodeError:
-                context_panel = Panel(
-                    row["context_json"],
-                    title="[dim]▼ 关联上下文 (原始文本)[/dim]",
-                    border_style="red",
-                    title_align="left",
-                    padding=(0, 1),
-                )
-                renderables.append(context_panel)
+                context_renderable = Text(row["context_payload_json"])
+
+        renderables = [content_table, meta_table]
+        if context_renderable:
+            renderables.append(Panel(
+                context_renderable, title="[dim]关联上下文[/dim]",
+                border_style="dim", title_align="left"
+            ))
+
+        render_group = Group(*renderables)
         
-        # 原文和译文框线面板
-        original_panel = Panel(
-            f"[cyan]{row['original_content']}[/cyan]",
-            title="[dim]原文[/dim]",
-            border_style="dim",
-            title_align="left",
-            padding=(0, 1),
+        title = Text.from_markup(
+            f"记录 #{index} | 状态: [{status_color}]{row['status']}[/{status_color}] | "
+            f"目标: [magenta]{row['lang_code']}[/magenta]"
         )
-        
-        translation_panel = None
-        if row["translation_content"]:
-            translation_panel = Panel(
-                f"[cyan]{row['translation_content']}[/cyan]",
-                title="[dim]译文[/dim]",
-                border_style="dim",
-                title_align="left",
-                padding=(0, 1),
-            )
-        
-        # 构建最终显示组
-        final_renderables: list[RenderableType] = [
-            Text.from_markup(f"[green]{status_symbol} 记录 #{index}[/green] [dim]|[/dim] 状态: [{status_color}]{row['status']}[/{status_color}] [dim]|[/dim] 目标: [magenta]{row['lang_code']}[/magenta]"),
-            Text(""),  # 空行
-            Text.from_markup(f"[yellow]ID :[/yellow] [blue]{row['translation_id']}[/blue]"),
-        ]
-        
-        if row["business_id"]:
-            final_renderables.append(Text.from_markup(f"[yellow]业务 :[/yellow] [blue]{row['business_id']}[/blue]"))
-        
-        final_renderables.extend([
-            Text.from_markup(f"[yellow]时间 :[/yellow] {formatted_updated_at}"),
-            Text.from_markup(f"[yellow]引擎 :[/yellow] {row['engine']} [dim](v{row['engine_version']})[/dim]"),
-            Text(""),  # 空行
-            original_panel,
-        ])
-        
-        if translation_panel:
-            final_renderables.append(translation_panel)
-        
-        if context_panel:
-            final_renderables.append(Text(""))  # 空行
-            final_renderables.append(context_panel)
-        
-        render_group = Group(*final_renderables)
-        
+        subtitle = Text.from_markup(f"[dim]ID: {row['translation_id']}[/dim]")
+
         return Panel(
-            render_group,
-            border_style="bright_blue",
-            padding=(1, 2),
+            render_group, title=title, subtitle=subtitle,
+            border_style="bright_blue", padding=(1, 2), subtitle_align="right"
         )
 
 
@@ -281,7 +215,6 @@ def main() -> None:
         asyncio.run(inspector.inspect())
     except Exception:
         console.print("[bold red]执行过程中发生意外错误：[/bold red]")
-        # --- 核心升级：使用 Rich 打印漂亮的 Traceback ---
         console.print_exception(show_locals=True, width=console.width)
         sys.exit(1)
     except KeyboardInterrupt:

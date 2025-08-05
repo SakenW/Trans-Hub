@@ -150,6 +150,15 @@ class Coordinator:
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
 
+    def process_pending_translations(
+        self,
+        target_lang: str,
+        batch_size: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> AsyncGenerator[TranslationResult, None]:
+        """[公共] 返回一个异步生成器来处理待处理任务。"""
+        return self._process_and_track(target_lang, batch_size, limit)
+
     async def _process_and_track(
         self,
         target_lang: str,
@@ -166,16 +175,6 @@ class Coordinator:
         except asyncio.CancelledError:
             logger.warning("处理任务被取消。", lang=target_lang)
             raise
-
-    def process_pending_translations(
-        self,
-        target_lang: str,
-        batch_size: Optional[int] = None,
-        limit: Optional[int] = None,
-    ) -> AsyncGenerator[TranslationResult, None]:
-        """[公共] 返回一个异步生成器来处理待处理任务。"""
-        # v3.5.6 修复：移除有误导性的注释
-        return self._process_and_track(target_lang, batch_size, limit)
 
     async def _internal_process_pending(
         self,
@@ -203,7 +202,7 @@ class Coordinator:
             if not batch:
                 continue
 
-            batch.sort(key=lambda item: item.context_id or "")
+            # v3.7 优化：移除 Python 端排序，因为数据已由数据库排序
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
                 batch_results = await self.processing_policy.process_batch(

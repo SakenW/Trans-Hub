@@ -39,12 +39,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def connect(self) -> None:
         """建立与 SQLite 数据库的连接。"""
         try:
-            # 修复：确保在内存数据库时不启用 WAL 模式
             is_memory_db = self.db_path == ":memory:"
             self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row
             await self._conn.execute("PRAGMA foreign_keys = ON")
-            # v3.6 优化：为文件数据库启用 WAL 模式以提升并发性能
             if not is_memory_db:
                 await self._conn.execute("PRAGMA journal_mode=WAL")
                 logger.info("SQLite WAL 模式已启用。")
@@ -206,7 +204,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
         """[实现] 为给定的内容和上下文创建待处理的翻译任务。"""
         now_iso = datetime.now(timezone.utc).isoformat()
         async with self._transaction() as tx:
-            # v3.6 功能：实现 force_retranslate 逻辑
             if force_retranslate and target_langs:
                 placeholders = ",".join("?" for _ in target_langs)
                 update_params: list[Any] = [
@@ -215,7 +212,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     engine_version,
                     content_id,
                 ]
-                # context_id 可以是 NULL，需要特殊处理
                 if context_id is None:
                     context_clause = "context_id IS NULL"
                 else:
@@ -278,10 +274,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
             batch_items: list[ContentItem] = []
             async with self._transaction() as tx:
                 status_placeholders = ",".join("?" for _ in statuses)
+                # v3.7 优化：在 SQL 中排序，为 Coordinator 中的 groupby 做准备
                 find_ids_sql = (
                     f"SELECT id FROM th_translations "
                     f"WHERE lang_code = ? AND status IN ({status_placeholders}) "
-                    "ORDER BY last_updated_at ASC LIMIT ?"
+                    "ORDER BY context_id, last_updated_at ASC LIMIT ?"
                 )
                 params = (
                     [lang_code] + [s.value for s in statuses] + [current_batch_size]
@@ -314,6 +311,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     JOIN th_content c ON t.content_id = c.id
                     LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
                     WHERE t.id IN ({id_placeholders})
+                    ORDER BY t.context_id, t.last_updated_at ASC
                 """
                 details_cursor = await tx.execute(find_details_sql, batch_ids)
                 detail_rows = await details_cursor.fetchall()
