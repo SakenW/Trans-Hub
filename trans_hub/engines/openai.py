@@ -64,6 +64,10 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
         "or quotes.\n\n"
         'Text to translate: "{text}"'
     )
+    # v3.8 修复：将硬编码的网络参数配置化
+    timeout_total: float = 30.0
+    timeout_connect: float = 5.0
+    max_retries: int = 2
 
     @field_validator("endpoint", mode="before")
     @classmethod
@@ -98,19 +102,20 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     "OpenAI 引擎配置错误: 缺少 API 密钥 (TH_OPENAI_API_KEY)。"
                 )
         assert config.api_key is not None
-        timeout = httpx.Timeout(30.0, connect=5.0)
+        # v3.8 修复：使用配置化的网络参数
+        timeout = httpx.Timeout(config.timeout_total, connect=config.timeout_connect)
         self.client: AsyncOpenAI = _AsyncOpenAIClient(
             api_key=config.api_key.get_secret_value(),
             base_url=str(config.endpoint),
             timeout=timeout,
-            max_retries=2,
+            max_retries=config.max_retries,
         )
 
     async def initialize(self) -> None:
         assert self.config.api_key is not None
         if self.config.api_key.get_secret_value() == "dummy-key-for-ci":
             logger.warning("OpenAI 引擎处于CI/测试模式, 跳过健康检查。")
-            await super().initialize()  # v3.5.1 修复：必须调用父类方法来设置状态
+            await super().initialize()
             return
         logger.info(
             "OpenAI 引擎正在初始化并执行健康检查...",
@@ -135,7 +140,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         except Exception as e:
             raise ConfigurationError(f"OpenAI 引擎初始化失败: {e}") from e
 
-        await super().initialize()  # v3.5.1 修复：必须调用父类方法来设置状态
+        await super().initialize()
 
     async def close(self) -> None:
         if not self.client.is_closed():
@@ -149,7 +154,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     )
                 else:
                     raise
-        await super().close()  # v3.5.1 修复：调用父类方法来重置状态
+        await super().close()
 
     async def _execute_single_translation(
         self,

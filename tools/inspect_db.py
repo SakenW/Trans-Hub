@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # v3.7 修复：将 sys.path 修改逻辑置于顶部，并添加 noqa
 try:
@@ -21,7 +21,8 @@ except (ImportError, IndexError):
 
 import aiosqlite  # noqa: E402
 import structlog  # noqa: E402
-from rich.console import Console, Group  # noqa: E402
+# v3.9 修复：导入 RenderableType 以解决 Mypy 错误
+from rich.console import Console, Group, RenderableType  # noqa: E402
 from rich.panel import Panel  # noqa: E402
 from rich.syntax import Syntax  # noqa: E402
 from rich.table import Table  # noqa: E402
@@ -98,7 +99,6 @@ class DatabaseInspector:
         """查询并以富文本格式详细打印每一条翻译记录。"""
         assert self.conn is not None
         self.console.print(Panel("[bold cyan]详细翻译记录[/bold cyan]", expand=False))
-        # v3.7 修复：更新 SQL 查询以匹配 v3.0 Schema
         query = """
         SELECT
             t.id AS translation_id,
@@ -161,7 +161,8 @@ class DatabaseInspector:
         meta_table.add_row("引擎:", f"{row['engine']} [dim](v{row['engine_version']})[/dim]")
 
         # --- 上下文 ---
-        context_renderable = None
+        # v3.9 修复：使用 RenderableType 作为通用类型
+        context_renderable: Optional[RenderableType] = None
         if row["context_payload_json"]:
             try:
                 parsed = json.loads(row["context_payload_json"])
@@ -170,7 +171,8 @@ class DatabaseInspector:
             except json.JSONDecodeError:
                 context_renderable = Text(row["context_payload_json"])
 
-        renderables = [content_table, meta_table]
+        # v3.9 修复：使用 List[RenderableType] 作为通用列表类型
+        renderables: List[RenderableType] = [content_table, meta_table]
         if context_renderable:
             renderables.append(Panel(
                 context_renderable, title="[dim]关联上下文[/dim]",
