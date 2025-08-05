@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS th_translations (
     content_id UUID NOT NULL REFERENCES th_content(id) ON DELETE CASCADE,
     context_id UUID REFERENCES th_contexts(id) ON DELETE CASCADE,
     lang_code TEXT NOT NULL,
+    -- v4.0 修复：增加 source_lang 字段以支持多源语言
+    source_lang TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
     
     translation_payload_json JSONB,
@@ -61,11 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_translations_status_lang ON th_translations(statu
 
 CREATE TABLE IF NOT EXISTS th_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    content_id UUID NOT NULL REFERENCES th_content(id) ON DELETE CASCADE,
-    last_requested_at TIMESTAMPTZ NOT NULL,
-    
-    -- 为约束明确命名，提高可维护性
-    CONSTRAINT uq_jobs_content_id UNIQUE (content_id)
+    content_id UUID NOT NULL UNIQUE REFERENCES th_content(id) ON DELETE CASCADE,
+    last_requested_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS th_dead_letter_queue (
@@ -92,24 +91,18 @@ CREATE TABLE IF NOT EXISTS th_audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_record ON th_audit_logs(table_name, record_id);
 
-
 -- =============================================================================
--- v4.0 事件驱动 Worker 支持 (LISTEN/NOTIFY)
+-- 事件驱动 Worker 支持 (LISTEN/NOTIFY)
 -- =============================================================================
 
--- 1. 创建一个函数，用于发送 NOTIFY 事件
 CREATE OR REPLACE FUNCTION notify_new_translation_task()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- 我们发送一个简单的负载 'new'，可以扩展为发送 lang_code 等
-    -- PERFORM pg_notify('new_translation_task', NEW.lang_code);
     PERFORM pg_notify('new_translation_task', 'new');
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- 2. 创建一个触发器，在插入新任务时调用该函数
--- 只有在插入新的、状态为 PENDING 的任务时才触发
 DROP TRIGGER IF EXISTS on_new_translation_task ON th_translations;
 CREATE TRIGGER on_new_translation_task
     AFTER INSERT ON th_translations

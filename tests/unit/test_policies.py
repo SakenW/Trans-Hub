@@ -27,7 +27,6 @@ def mock_config() -> MagicMock:
     mock_retry_policy = MagicMock(spec=RetryPolicyConfig)
     mock_retry_policy.max_attempts = 2
     mock_retry_policy.initial_backoff = 0.01
-    # v3.5.1 修复：为 mock 对象添加 max_backoff 属性
     mock_retry_policy.max_backoff = 10.0
     mock.retry_policy = mock_retry_policy
     mock_active_engine_enum = MagicMock()
@@ -45,7 +44,6 @@ def mock_handler() -> AsyncMock:
     return mock
 
 
-# v3.5.2 修复：修正拼写错误 ficture -> fixture
 @pytest.fixture
 def mock_cache() -> AsyncMock:
     """创建一个缓存对象的 mock。"""
@@ -90,6 +88,8 @@ def sample_batch() -> list[ContentItem]:
             context_id="uuid-context-1",
             source_payload={"text": "Hello", "metadata": "do_not_touch"},
             context={"domain": "testing"},
+            # v4.0 修复：为 ContentItem 添加 source_lang 字段
+            source_lang="en",
         )
     ]
 

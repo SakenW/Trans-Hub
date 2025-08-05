@@ -63,12 +63,16 @@ async def test_pg_create_pending_translations_and_force_retranslate(
     # 模拟 Worker 拉取任务，状态变为 TRANSLATING
     handler = postgres_handler
     assert isinstance(handler, PostgresPersistenceHandler)
-    async with handler.pool.acquire() as conn:
+    async with handler._transaction() as conn:
         await conn.execute(
             "UPDATE th_translations SET status = $1 WHERE id = $2",
             TranslationStatus.TRANSLATING.value,
             result1.translation_id,
         )
+    # 验证状态确实已更新为 TRANSLATING
+    result_translating = await postgres_handler.find_translation(business_id, "de")
+    assert result_translating is not None
+    assert result_translating.status == TranslationStatus.TRANSLATING
 
     # 模拟翻译完成
     result_to_save = TranslationResult(
@@ -82,6 +86,10 @@ async def test_pg_create_pending_translations_and_force_retranslate(
         context_hash="__GLOBAL__",
         engine="test-engine",
     )
+    # 在保存结果之前，再次检查数据库中的状态
+    result_before_save = await postgres_handler.find_translation(business_id, "de")
+    assert result_before_save is not None
+    assert result_before_save.status == TranslationStatus.TRANSLATING, f"Status before save is {result_before_save.status}, expected TRANSLATING"
     await postgres_handler.save_translation_results([result_to_save])
     
     result_saved = await postgres_handler.find_translation(business_id, "de")

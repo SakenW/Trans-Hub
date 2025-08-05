@@ -10,7 +10,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, List, Optional, cast
 
 import aiosqlite
 import structlog
@@ -122,7 +122,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
         batch_size: int,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
-        # This is now a regular generator that yields an async generator
         async def _internal_generator() -> AsyncGenerator[list[ContentItem], None]:
             processed_count = 0
             while limit is None or processed_count < limit:
@@ -161,6 +160,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                             c.business_id,
                             t.content_id,
                             t.context_id,
+                            t.source_lang,
                             c.source_payload_json,
                             ctx.context_payload_json
                         FROM th_translations t
@@ -183,6 +183,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                                 if r["context_payload_json"]
                                 else None
                             ),
+                            source_lang=r["source_lang"],
                         )
                         for r in detail_rows
                     ]
@@ -291,10 +292,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as tx:
             if force_retranslate and target_langs:
                 placeholders = ",".join("?" for _ in target_langs)
-                update_params: list[Any] = [
+                update_params: List[Any] = [
                     TranslationStatus.PENDING.value,
                     now_iso,
                     engine_version,
+                    source_lang,
                     content_id,
                 ]
                 if context_id is None:
@@ -309,6 +311,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     SET status = ?,
                         last_updated_at = ?,
                         engine_version = ?,
+                        source_lang = ?,
                         translation_payload_json = NULL,
                         error = NULL
                     WHERE content_id = ?
@@ -319,9 +322,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
 
             insert_sql = (
                 "INSERT OR IGNORE INTO th_translations "
-                "(id, content_id, context_id, lang_code, engine_version, "
+                "(id, content_id, context_id, lang_code, source_lang, engine_version, "
                 "created_at, last_updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
             params = [
                 (
@@ -329,6 +332,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     content_id,
                     context_id,
                     lang,
+                    source_lang,
                     engine_version,
                     now_iso,
                     now_iso,

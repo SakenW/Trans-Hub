@@ -64,13 +64,6 @@ class TranslationResult(BaseModel):
     def check_consistency(self) -> "TranslationResult":
         """
         验证模型状态的一致性。
-
-        Returns:
-            TranslationResult: 验证后的模型实例。
-
-        Raises:
-            ValueError: 如果状态与内容不一致。
-
         """
         if (
             self.status == TranslationStatus.TRANSLATED
@@ -86,11 +79,13 @@ class ContentItem(BaseModel):
     """在内部处理流程中，代表一个从数据库取出的、准备进行翻译处理的原子任务。"""
 
     translation_id: str
-    business_id: str  # business_id 在核心流程中是必须的
+    business_id: str
     content_id: str
     context_id: Optional[str]
     source_payload: dict[str, Any]
     context: Optional[dict[str, Any]]
+    # v4.0 修复：增加 source_lang 字段
+    source_lang: Optional[str]
 
 
 GLOBAL_CONTEXT_SENTINEL = "__GLOBAL__"
