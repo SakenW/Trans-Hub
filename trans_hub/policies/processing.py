@@ -53,7 +53,7 @@ class ProcessingPolicy(Protocol):
 class DefaultProcessingPolicy(ProcessingPolicy):
     """默认的翻译处理策略，实现了包含缓存、重试和DLQ的完整工作流。"""
 
-    PAYLOAD_TEXT_KEY = "text"  # 定义结构化载荷中待翻译文本的键
+    PAYLOAD_TEXT_KEY = "text"
 
     async def process_batch(
         self,
@@ -84,7 +84,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         max_backoff: float,
     ) -> list[TranslationResult]:
         """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
-        # ... (上下文验证逻辑保持不变) ...
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
             raw_context_dict = batch[0].context if batch else None
@@ -137,7 +136,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 error_message = "达到最大重试次数"
                 for item in retryable_items:
-                    # v3.5 修复：向 move_to_dlq 传递 target_lang
                     task = p_context.handler.move_to_dlq(
                         item=item,
                         target_lang=target_lang,
@@ -149,7 +147,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 break
 
             items_to_process = retryable_items
-            # v3.5 修复：应用 max_backoff 限制最大等待时间
             backoff_time = min(initial_backoff * (2**attempt), max_backoff)
             logger.warning(
                 f"小组中包含可重试错误，将在 {backoff_time:.2f}s 后重试。",
@@ -179,6 +176,24 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_outputs = await self._translate_uncached_items(
             uncached_items, target_lang, p_context, active_engine, engine_context
         )
+
+        # v3.10 修复：校验引擎返回结果数量是否与输入一致
+        if len(engine_outputs) != len(uncached_items):
+            error_msg = (
+                f"引擎返回结果数量 ({len(engine_outputs)}) "
+                f"与输入数量 ({len(uncached_items)}) 不匹配。"
+            )
+            logger.error(error_msg)
+            # 将整个未缓存批次标记为失败
+            engine_error = EngineError(error_message=error_msg, is_retryable=False)
+            failed_results = [
+                self._build_translation_result(
+                    item, target_lang, p_context, engine_output=engine_error
+                )
+                for item in uncached_items
+            ]
+            return cached_results + failed_results, []
+
         processed_results: list[TranslationResult] = list(cached_results)
         retryable_items: list[ContentItem] = []
 
@@ -207,9 +222,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 target_lang=target_lang,
                 context_hash=get_context_hash(item.context),
             )
-            # 假设缓存结果是字符串
             cached_text = await p_context.cache.get_cached_result(request)
-            # v3.5 修复：允许缓存空字符串，检查 None 而不是布尔值
             if cached_text is not None:
                 result = self._build_translation_result(
                     item, target_lang, p_context, cached_text=cached_text
@@ -228,10 +241,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
-        if p_context.rate_limiter:
-            await p_context.rate_limiter.acquire(len(items))
-
-        # 从 payload 中提取待翻译文本
         texts_to_translate = [
             item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in items
         ]
@@ -252,7 +261,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             if (
                 res.status == TranslationStatus.TRANSLATED
                 and not res.from_cache
-                and res.translated_payload
+                and res.translated_payload is not None
             ):
                 request = TranslationRequest(
                     source_payload=res.original_payload,
@@ -260,12 +269,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )
-                # 缓存时，我们缓存翻译后的文本字符串
-                translated_text = res.translated_payload.get(self.PAYLOAD_TEXT_KEY, "")
-                if translated_text:
+                # v3.10 修复：允许缓存翻译结果为空字符串的情况
+                if self.PAYLOAD_TEXT_KEY in res.translated_payload:
+                    translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
                     tasks.append(
                         p_context.cache.cache_translation_result(
-                            request, translated_text
+                            request, str(translated_text)
                         )
                     )
         if tasks:
@@ -315,8 +324,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         else:
             raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
 
-        # 将翻译后的文本重新包装为 payload 格式
-        # 这里采用一个简单的策略：复制源 payload，然后更新文本字段
         translated_payload = dict(item.source_payload)
         translated_payload[self.PAYLOAD_TEXT_KEY] = translated_text
 

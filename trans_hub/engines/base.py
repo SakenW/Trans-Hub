@@ -48,8 +48,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self.config = config
         self._rate_limiter: Optional[RateLimiter] = None
         self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
-
-        # v3.5.1 修复：明确定义 initialized 状态属性
         self.initialized: bool = False
 
         if config.rpm:
@@ -66,12 +64,10 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
     async def initialize(self) -> None:
         """引擎的异步初始化钩子，用于设置连接池等。"""
-        # v3.5.1 修复：在初始化成功后设置状态
         self.initialized = True
 
     async def close(self) -> None:
         """引擎的异步关闭钩子，用于安全释放资源。"""
-        # v3.5.1 修复：在关闭后重置状态
         self.initialized = False
 
     @abstractmethod
@@ -109,16 +105,17 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         """
         [模板方法] 执行单次翻译，应用并发和速率限制。
         """
+        # v3.10 修复：调整顺序，先等待速率限制，再获取并发槽位
+        # 这样可以避免在等待令牌时长时间占用一个宝贵的并发槽位
+        if self._rate_limiter:
+            await self._rate_limiter.acquire()
+
         if self._concurrency_semaphore:
             async with self._concurrency_semaphore:
-                if self._rate_limiter:
-                    await self._rate_limiter.acquire()
                 return await self._execute_single_translation(
                     text, target_lang, source_lang, context_config
                 )
         else:
-            if self._rate_limiter:
-                await self._rate_limiter.acquire()
             return await self._execute_single_translation(
                 text, target_lang, source_lang, context_config
             )

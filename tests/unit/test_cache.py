@@ -6,7 +6,8 @@ import pytest
 from cachetools import TTLCache
 from pytest_mock import MockerFixture
 
-from trans_hub.cache import CacheConfig, TranslationCache
+# v3.11 修复：导入 CacheType 以用于测试
+from trans_hub.cache import CacheConfig, CacheType, TranslationCache
 from trans_hub.core.types import TranslationRequest
 
 
@@ -52,7 +53,8 @@ async def test_ttl_expiration(
     def timer() -> float:
         return current_time
 
-    config = CacheConfig(maxsize=10, ttl=1, cache_type="ttl")
+    # v3.11 修复：使用 CacheType.TTL 枚举成员而不是字符串
+    config = CacheConfig(maxsize=10, ttl=1, cache_type=CacheType.TTL)
     cache = TranslationCache(config)
     cache.cache = TTLCache(maxsize=config.maxsize, ttl=config.ttl, timer=timer)
 

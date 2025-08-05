@@ -4,6 +4,7 @@
 import asyncio
 import hashlib
 import json
+from enum import Enum
 from typing import Optional, Union
 
 from cachetools import LRUCache, TTLCache
@@ -12,12 +13,20 @@ from pydantic import BaseModel
 from trans_hub.core.types import TranslationRequest
 
 
+# v3.10 修复：使用枚举来约束缓存类型，增强配置的健壮性
+class CacheType(str, Enum):
+    """定义了支持的缓存类型。"""
+
+    TTL = "ttl"
+    LRU = "lru"
+
+
 class CacheConfig(BaseModel):
     """缓存配置模型。"""
 
     maxsize: int = 1000
     ttl: int = 3600
-    cache_type: str = "ttl"
+    cache_type: CacheType = CacheType.TTL
 
 
 class TranslationCache:
@@ -30,14 +39,13 @@ class TranslationCache:
         self._lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:
-        if self.config.cache_type == "ttl":
+        if self.config.cache_type is CacheType.TTL:
             self.cache = TTLCache(maxsize=self.config.maxsize, ttl=self.config.ttl)
-        else:
+        else:  # 默认为 LRU
             self.cache = LRUCache(maxsize=self.config.maxsize)
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
         """为翻译请求生成一个唯一的、确定性的缓存键。"""
-        # v3.6 优化：使用紧凑的 JSON 序列化和 SHA-256 哈希来优化缓存键
         payload_str = json.dumps(
             request.source_payload,
             sort_keys=True,
