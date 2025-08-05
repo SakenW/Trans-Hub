@@ -101,6 +101,7 @@ class PersistenceHandler(Protocol):
     async def move_to_dlq(
         self,
         item: ContentItem,
+        target_lang: str,
         error_message: str,
         engine_name: str,
         engine_version: str,

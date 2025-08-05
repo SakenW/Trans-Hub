@@ -10,7 +10,7 @@ v3.0.0 重大更新：
 import asyncio
 from collections.abc import AsyncGenerator
 from itertools import groupby
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Set
 
 import structlog
 
@@ -59,9 +59,7 @@ class Coordinator:
             self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
 
         self._shutting_down = False
-        self._active_processors = 0
-        self._processor_lock = asyncio.Lock()
-        self._shutdown_complete_event = asyncio.Event()
+        self._active_tasks: Set[asyncio.Task[Any]] = set()
 
         self.processing_context = ProcessingContext(
             config=self.config,
@@ -71,9 +69,15 @@ class Coordinator:
         )
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
+    def _check_is_active(self) -> None:
+        """检查协调器是否处于活动状态。"""
+        if self._shutting_down or not self.initialized:
+            raise RuntimeError("Coordinator is not active (closed or not initialized).")
+
     @property
     def active_engine(self) -> "BaseTranslationEngine[Any]":
         """获取当前活动的翻译引擎实例。"""
+        self._check_is_active()
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
@@ -102,8 +106,9 @@ class Coordinator:
             logger.info("引擎实例创建成功。", engine_name=engine_name)
         return self._engine_instances[engine_name]
 
-    def switch_engine(self, engine_name: str) -> None:
+    async def switch_engine(self, engine_name: str) -> None:
         """切换当前的活动翻译引擎。"""
+        self._check_is_active()
         if engine_name == self.config.active_engine.value:
             return
 
@@ -113,6 +118,9 @@ class Coordinator:
         new_engine_instance = self._get_or_create_engine_instance(engine_name)
         if new_engine_instance.REQUIRES_SOURCE_LANG and not self.config.source_lang:
             raise ConfigurationError(f"切换失败：引擎 '{engine_name}' 需要提供源语言。")
+
+        if not new_engine_instance.initialized:
+            await new_engine_instance.initialize()
 
         self.config.active_engine = EngineName(engine_name)
         logger.info("成功切换活动引擎。", new_engine=self.config.active_engine.value)
@@ -124,24 +132,58 @@ class Coordinator:
         logger.info("协调器初始化开始...")
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
+
         init_tasks = [
-            instance.initialize() for instance in self._engine_instances.values()
+            instance.initialize()
+            for instance in self._engine_instances.values()
+            if not instance.initialized
         ]
+        active_engine_instance = self._get_or_create_engine_instance(
+            self.config.active_engine.value
+        )
+        if not active_engine_instance.initialized:
+            init_tasks.append(active_engine_instance.initialize())
+
         if init_tasks:
-            await asyncio.gather(*init_tasks)
+            await asyncio.gather(*list(set(init_tasks)))
+
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
 
-    async def process_pending_translations(
+    async def _process_and_track(
+        self,
+        target_lang: str,
+        batch_size: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> AsyncGenerator[TranslationResult, None]:
+        """[内部] 包装 process_pending_translations 以传播取消信号。"""
+        self._check_is_active()
+        try:
+            async for result in self._internal_process_pending(
+                target_lang, batch_size, limit
+            ):
+                yield result
+        except asyncio.CancelledError:
+            logger.warning("处理任务被取消。", lang=target_lang)
+            raise
+
+    def process_pending_translations(
+        self,
+        target_lang: str,
+        batch_size: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> AsyncGenerator[TranslationResult, None]:
+        """[公共] 返回一个异步生成器来处理待处理任务。"""
+        # v3.5.6 修复：移除有误导性的注释
+        return self._process_and_track(target_lang, batch_size, limit)
+
+    async def _internal_process_pending(
         self,
         target_lang: str,
         batch_size: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> AsyncGenerator[TranslationResult, None]:
         """[解析层] 处理指定语言的待处理翻译任务。"""
-        if self._shutting_down:
-            return
-
         active_engine = self.active_engine
         engine_batch_policy = getattr(
             active_engine.config, "max_batch_size", self.config.batch_size
@@ -158,36 +200,21 @@ class Coordinator:
         )
 
         async for batch in content_batches:
-            if self._shutting_down:
-                logger.warning("检测到停机信号，翻译工作进程将不再处理新批次。")
-                break
-
             if not batch:
                 continue
 
-            # 按上下文ID对批次进行分组，以优化API调用
             batch.sort(key=lambda item: item.context_id or "")
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
-
-                async with self._processor_lock:
-                    self._active_processors += 1
-
-                try:
-                    batch_results = await self.processing_policy.process_batch(
-                        items_group,
-                        target_lang,
-                        self.processing_context,
-                        active_engine,
-                    )
-                    await self.handler.save_translation_results(batch_results)
-                    for result in batch_results:
-                        yield result
-                finally:
-                    async with self._processor_lock:
-                        self._active_processors -= 1
-                        if self._shutting_down and self._active_processors == 0:
-                            self._shutdown_complete_event.set()
+                batch_results = await self.processing_policy.process_batch(
+                    items_group,
+                    target_lang,
+                    self.processing_context,
+                    active_engine,
+                )
+                await self.handler.save_translation_results(batch_results)
+                for result in batch_results:
+                    yield result
 
     async def request(
         self,
@@ -201,9 +228,7 @@ class Coordinator:
         """
         [操作层入口] 提交一个新的翻译请求。
         """
-        if self._shutting_down:
-            logger.warning("系统正在停机，已拒绝新的翻译请求。")
-            return
+        self._check_is_active()
 
         op = self._execute_request_operation(
             business_id=business_id,
@@ -254,6 +279,7 @@ class Coordinator:
         """
         [解析层] 直接获取一个翻译结果。
         """
+        self._check_is_active()
         return await self.handler.find_translation(
             business_id=business_id,
             target_lang=target_lang,
@@ -264,34 +290,34 @@ class Coordinator:
         self, expiration_days: Optional[int] = None, dry_run: bool = False
     ) -> dict[str, int]:
         """运行垃圾回收，清理旧的、无关联的数据。"""
+        self._check_is_active()
         days = expiration_days or self.config.gc_retention_days
         return await self.handler.garbage_collect(retention_days=days, dry_run=dry_run)
 
+    def track_task(self, task: asyncio.Task[Any]) -> None:
+        """[公共] 允许外部调用者（如 worker CLI）注册其任务以进行优雅停机。"""
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
+
     async def close(self) -> None:
         """优雅地关闭协调器和所有相关资源。"""
-        if not self.initialized:
+        if self._shutting_down or not self.initialized:
             return
 
         logger.info("开始优雅停机...")
-        async with self._processor_lock:
-            self._shutting_down = True
-            active_count = self._active_processors
+        self._shutting_down = True
 
-        if active_count > 0:
-            logger.info(f"等待 {active_count} 个正在进行的批次处理完成...")
-            try:
-                await asyncio.wait_for(
-                    self._shutdown_complete_event.wait(), timeout=10.0
-                )
-            except asyncio.TimeoutError:
-                logger.error("优雅停机超时！部分任务可能未完成。")
+        if self._active_tasks:
+            logger.info(f"正在取消 {len(self._active_tasks)} 个活动任务...")
+            for task in list(self._active_tasks):
+                task.cancel()
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
 
-        logger.info("所有批次处理完成，正在关闭底层资源...")
+        logger.info("所有活动任务已处理完毕，正在关闭底层资源...")
         close_tasks = [instance.close() for instance in self._engine_instances.values()]
         if close_tasks:
-            # 使用 return_exceptions=True 来防止一个引擎关闭失败导致整个过程崩溃
             await asyncio.gather(*close_tasks, return_exceptions=True)
-        await asyncio.sleep(0.1)
+
         await self.handler.close()
         self.initialized = False
         logger.info("优雅停机完成。")

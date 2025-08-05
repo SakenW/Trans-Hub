@@ -39,9 +39,15 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def connect(self) -> None:
         """建立与 SQLite 数据库的连接。"""
         try:
+            # 修复：确保在内存数据库时不启用 WAL 模式
+            is_memory_db = self.db_path == ":memory:"
             self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
             self._conn.row_factory = aiosqlite.Row
             await self._conn.execute("PRAGMA foreign_keys = ON")
+            # v3.6 优化：为文件数据库启用 WAL 模式以提升并发性能
+            if not is_memory_db:
+                await self._conn.execute("PRAGMA journal_mode=WAL")
+                logger.info("SQLite WAL 模式已启用。")
             logger.info("SQLite 数据库连接已建立", db_path=self.db_path)
         except aiosqlite.Error as e:
             logger.error("连接 SQLite 数据库失败", exc_info=True)
@@ -200,9 +206,36 @@ class SQLitePersistenceHandler(PersistenceHandler):
         """[实现] 为给定的内容和上下文创建待处理的翻译任务。"""
         now_iso = datetime.now(timezone.utc).isoformat()
         async with self._transaction() as tx:
-            if force_retranslate:
-                # ...
-                pass
+            # v3.6 功能：实现 force_retranslate 逻辑
+            if force_retranslate and target_langs:
+                placeholders = ",".join("?" for _ in target_langs)
+                update_params: list[Any] = [
+                    TranslationStatus.PENDING.value,
+                    now_iso,
+                    engine_version,
+                    content_id,
+                ]
+                # context_id 可以是 NULL，需要特殊处理
+                if context_id is None:
+                    context_clause = "context_id IS NULL"
+                else:
+                    context_clause = "context_id = ?"
+                    update_params.append(context_id)
+                update_params.extend(target_langs)
+
+                await tx.execute(
+                    f"""
+                    UPDATE th_translations
+                    SET
+                        status = ?,
+                        last_updated_at = ?,
+                        engine_version = ?,
+                        translation_payload_json = NULL,
+                        error = NULL
+                    WHERE content_id = ? AND {context_clause} AND lang_code IN ({placeholders})
+                    """,
+                    tuple(update_params),
+                )
 
             insert_sql = (
                 "INSERT OR IGNORE INTO th_translations "
@@ -465,10 +498,37 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def move_to_dlq(
         self,
         item: ContentItem,
+        target_lang: str,
         error_message: str,
         engine_name: str,
         engine_version: str,
     ) -> None:
         """[实现] 将任务移至死信队列。"""
-        # (此方法实现保持不变)
-        pass
+        async with self._transaction() as tx:
+            await tx.execute(
+                """
+                INSERT INTO th_dead_letter_queue (
+                    translation_id, original_payload_json, context_payload_json,
+                    target_lang_code, last_error_message, failed_at,
+                    engine_name, engine_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item.translation_id,
+                    json.dumps(item.source_payload, ensure_ascii=False),
+                    (
+                        json.dumps(item.context, ensure_ascii=False)
+                        if item.context
+                        else None
+                    ),
+                    target_lang,
+                    error_message,
+                    datetime.now(timezone.utc).isoformat(),
+                    engine_name,
+                    engine_version,
+                ),
+            )
+            await tx.execute(
+                "DELETE FROM th_translations WHERE id = ?", (item.translation_id,)
+            )
+        logger.info("任务已成功移至死信队列", translation_id=item.translation_id)

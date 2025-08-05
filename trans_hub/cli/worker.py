@@ -53,9 +53,9 @@ async def _run_worker_loop(
         while not shutdown_event.is_set():
             try:
                 processed_count = 0
+                # v3.5.5 修复：Worker 循环现在是可取消的
                 async for result in coordinator.process_pending_translations(lang):
                     processed_count += 1
-                    # 从 payload 中提取要记录的文本，这里我们约定使用 'text' 键
                     original_text = result.original_payload.get(
                         "text", str(result.original_payload)
                     )
@@ -67,28 +67,36 @@ async def _run_worker_loop(
                         original=f"'{str(original_text)[:20]}...'",
                         error=result.error,
                     )
-                if processed_count == 0:
+                if processed_count == 0 and not shutdown_event.is_set():
                     try:
                         poll_interval = (
                             coordinator.config.logging.level.lower() == "debug"
                             and 5
                             or 10
                         )
-                        await asyncio.wait_for(
-                            shutdown_event.wait(), timeout=poll_interval
-                        )
-                    except asyncio.TimeoutError:
-                        continue  # 正常轮询
+                        await asyncio.sleep(poll_interval)
+                    except asyncio.CancelledError:
+                        break  # 如果在 sleep 期间被取消，则退出循环
+            except asyncio.CancelledError:
+                logger.info("Worker 任务被取消。", lang=lang)
+                break
             except Exception:
-                logger.error(
-                    "Worker 循环中发生未知错误，5秒后重试...", lang=lang, exc_info=True
-                )
-                await asyncio.sleep(5)
+                if not shutdown_event.is_set():
+                    logger.error(
+                        "Worker 循环中发生未知错误，5秒后重试...",
+                        lang=lang,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(5)
 
     worker_tasks = [
         asyncio.create_task(process_language(lang)) for lang in target_langs
     ]
-    await asyncio.gather(*worker_tasks, return_exceptions=True)
+    # v3.5.5 修复：将 worker 任务注册到 coordinator 以便优雅停机
+    for task in worker_tasks:
+        coordinator.track_task(task)
+
+    await shutdown_event.wait()
 
 
 @worker_app.command("start")

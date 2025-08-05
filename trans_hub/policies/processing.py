@@ -70,6 +70,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             active_engine,
             max_retries=retry_policy.max_attempts,
             initial_backoff=retry_policy.initial_backoff,
+            max_backoff=retry_policy.max_backoff,
         )
 
     async def _process_batch_with_retry_logic(
@@ -80,6 +81,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         max_retries: int,
         initial_backoff: float,
+        max_backoff: float,
     ) -> list[TranslationResult]:
         """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
         # ... (上下文验证逻辑保持不变) ...
@@ -135,8 +137,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 error_message = "达到最大重试次数"
                 for item in retryable_items:
+                    # v3.5 修复：向 move_to_dlq 传递 target_lang
                     task = p_context.handler.move_to_dlq(
                         item=item,
+                        target_lang=target_lang,
                         error_message=error_message,
                         engine_name=p_context.config.active_engine.value,
                         engine_version=active_engine.VERSION,
@@ -145,7 +149,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 break
 
             items_to_process = retryable_items
-            backoff_time = initial_backoff * (2**attempt)
+            # v3.5 修复：应用 max_backoff 限制最大等待时间
+            backoff_time = min(initial_backoff * (2**attempt), max_backoff)
             logger.warning(
                 f"小组中包含可重试错误，将在 {backoff_time:.2f}s 后重试。",
                 retry_count=len(items_to_process),
@@ -204,7 +209,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
             # 假设缓存结果是字符串
             cached_text = await p_context.cache.get_cached_result(request)
-            if cached_text:
+            # v3.5 修复：允许缓存空字符串，检查 None 而不是布尔值
+            if cached_text is not None:
                 result = self._build_translation_result(
                     item, target_lang, p_context, cached_text=cached_text
                 )

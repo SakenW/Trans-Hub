@@ -49,6 +49,9 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self._rate_limiter: Optional[RateLimiter] = None
         self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
 
+        # v3.5.1 修复：明确定义 initialized 状态属性
+        self.initialized: bool = False
+
         if config.rpm:
             self._rate_limiter = RateLimiter(
                 refill_rate=config.rpm / 60, capacity=config.rpm
@@ -63,11 +66,13 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
     async def initialize(self) -> None:
         """引擎的异步初始化钩子，用于设置连接池等。"""
-        pass
+        # v3.5.1 修复：在初始化成功后设置状态
+        self.initialized = True
 
     async def close(self) -> None:
         """引擎的异步关闭钩子，用于安全释放资源。"""
-        pass
+        # v3.5.1 修复：在关闭后重置状态
+        self.initialized = False
 
     @abstractmethod
     async def _execute_single_translation(

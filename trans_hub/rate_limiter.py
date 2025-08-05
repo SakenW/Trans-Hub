@@ -30,11 +30,18 @@ class RateLimiter:
         """异步获取指定数量的令牌，如果令牌不足则等待。"""
         if tokens_needed > self.capacity:
             raise ValueError("请求的令牌数不能超过桶的容量")
-        async with self._lock:
-            self._refill()
-            while self.tokens < tokens_needed:
+
+        # v3.5 修复：重构锁的获取和释放，避免在 sleep 时持有锁，以提高并发效率
+        while True:
+            async with self._lock:
+                self._refill()
+                if self.tokens >= tokens_needed:
+                    self.tokens -= tokens_needed
+                    return  # 成功获取令牌，退出
+
+                # 在锁内计算等待时间
                 required = tokens_needed - self.tokens
                 wait_time = required / self.refill_rate
-                await asyncio.sleep(wait_time)
-                self._refill()
-            self.tokens -= tokens_needed
+
+            # 在锁外等待，允许其他协程并发地计算和进入等待状态
+            await asyncio.sleep(wait_time)

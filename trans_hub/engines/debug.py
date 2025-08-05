@@ -4,7 +4,7 @@
 from typing import Any, Dict, Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import BaseEngineConfig, BaseTranslationEngine
@@ -12,6 +12,9 @@ from trans_hub.engines.base import BaseEngineConfig, BaseTranslationEngine
 
 class DebugEngineConfig(BaseSettings, BaseEngineConfig):
     """Debug 引擎的配置模型。"""
+
+    # v3.6 优化：使其可从环境变量加载
+    model_config = SettingsConfigDict(env_prefix="TH_DEBUG_", extra="ignore")
 
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
     fail_on_text: Optional[str] = Field(default=None)

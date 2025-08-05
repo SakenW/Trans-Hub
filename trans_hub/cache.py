@@ -2,6 +2,7 @@
 """本模块提供灵活的内存缓存机制，用于减少重复的翻译请求。"""
 
 import asyncio
+import hashlib
 import json
 from typing import Optional, Union
 
@@ -36,10 +37,18 @@ class TranslationCache:
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
         """为翻译请求生成一个唯一的、确定性的缓存键。"""
-        payload_str = json.dumps(request.source_payload, sort_keys=True)
+        # v3.6 优化：使用紧凑的 JSON 序列化和 SHA-256 哈希来优化缓存键
+        payload_str = json.dumps(
+            request.source_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        payload_hash = hashlib.sha256(payload_str).hexdigest()
+
         return "|".join(
             [
-                payload_str,
+                payload_hash,
                 request.source_lang or "auto",
                 request.target_lang,
                 request.context_hash,

@@ -110,6 +110,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         assert self.config.api_key is not None
         if self.config.api_key.get_secret_value() == "dummy-key-for-ci":
             logger.warning("OpenAI 引擎处于CI/测试模式, 跳过健康检查。")
+            await super().initialize()  # v3.5.1 修复：必须调用父类方法来设置状态
             return
         logger.info(
             "OpenAI 引擎正在初始化并执行健康检查...",
@@ -134,6 +135,8 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         except Exception as e:
             raise ConfigurationError(f"OpenAI 引擎初始化失败: {e}") from e
 
+        await super().initialize()  # v3.5.1 修复：必须调用父类方法来设置状态
+
     async def close(self) -> None:
         if not self.client.is_closed():
             try:
@@ -146,6 +149,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     )
                 else:
                     raise
+        await super().close()  # v3.5.1 修复：调用父类方法来重置状态
 
     async def _execute_single_translation(
         self,

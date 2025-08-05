@@ -53,7 +53,7 @@ async def test_full_workflow_with_debug_engine(coordinator: Coordinator) -> None
 @pytest.mark.asyncio
 async def test_openai_engine_workflow(coordinator: Coordinator) -> None:
     """测试 OpenAI 引擎的翻译流程（需要 API 密钥）。"""
-    coordinator.switch_engine(EngineName.OPENAI.value)
+    await coordinator.switch_engine(EngineName.OPENAI.value)
     business_id = "test.openai.star"
     source_payload = {"text": "Star"}
     target_lang = "fr"
@@ -75,7 +75,7 @@ async def test_openai_engine_workflow(coordinator: Coordinator) -> None:
 @pytest.mark.asyncio
 async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
     """测试 Translators 引擎的翻译流程。"""
-    coordinator.switch_engine(EngineName.TRANSLATORS.value)
+    await coordinator.switch_engine(EngineName.TRANSLATORS.value)
     business_id = "test.translators.moon"
     source_payload = {"text": "Moon"}
     target_lang = "de"
@@ -127,7 +127,6 @@ async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
     report1 = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
     assert report1.get("deleted_jobs", 0) == 1
 
-    # 修复：手动删除 translation 记录，使 content 真正孤立
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             "DELETE FROM th_translations WHERE content_id = (SELECT id FROM th_content WHERE business_id = 'item.stale')"
@@ -140,7 +139,7 @@ async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_graceful_shutdown(coordinator: Coordinator) -> None:
-    """测试优雅停机能否等待正在进行的任务完成。"""
+    """测试优雅停机能否正确取消正在进行的任务并安全关闭。"""
     business_id = "test.slow.translation"
     source_payload = {"text": "slow translation"}
     target_lang = "fr"
@@ -151,40 +150,37 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     )
 
     processing_started = asyncio.Event()
-    processing_can_finish = asyncio.Event()
-
+    
     original_process_batch = coordinator.processing_policy.process_batch
 
     async def slow_process_batch(*args: Any, **kwargs: Any) -> list[TranslationResult]:
         processing_started.set()
-        await processing_can_finish.wait()
+        await asyncio.sleep(5)
         original_callable = cast(
             Callable[..., Awaitable[list[TranslationResult]]], original_process_batch
         )
         return await original_callable(*args, **kwargs)
 
     async def consume_worker() -> None:
+        # v3.5.6 修复：移除 try/except，让 CancelledError 自然传播
         _ = [res async for res in coordinator.process_pending_translations(target_lang)]
 
     with patch.object(
         coordinator.processing_policy, "process_batch", side_effect=slow_process_batch
     ):
         worker_task = asyncio.create_task(consume_worker())
+        coordinator.track_task(worker_task)
+        
         await processing_started.wait()
 
         close_task = asyncio.create_task(coordinator.close())
-        await asyncio.sleep(0.1)
-        assert not close_task.done()
-
-        processing_can_finish.set()
-        await worker_task
-
-        final_result = await coordinator.handler.find_translation(
-            business_id, target_lang
-        )
-        assert final_result is not None
-        assert final_result.status == TranslationStatus.TRANSLATED
-
+        
+        # v3.5.6 修复：等待 close() 完成，它会负责取消和等待 worker
         await close_task
+        
+        assert worker_task.done()
+        assert worker_task.cancelled()
         assert close_task.done()
         
+        with pytest.raises(RuntimeError):
+            await coordinator.get_translation(business_id, target_lang)
