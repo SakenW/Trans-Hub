@@ -7,6 +7,7 @@ import shutil
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -19,16 +20,21 @@ from trans_hub.engine_registry import discover_engines
 from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import create_persistence_handler
 
-# v3.15 修复：使用延迟导入和 TYPE_CHECKING 来处理可选依赖
 if TYPE_CHECKING:
     import asyncpg
 
-# 在测试收集阶段初始化日志和引擎发现
 load_dotenv()
 setup_logging(log_level=os.getenv("TEST_LOG_LEVEL", "INFO"), log_format="console")
 discover_engines()
 
 TEST_DIR = Path(__file__).parent.parent / "test_output"
+
+# v3.25 修复：从主环境变量决定是否跳过 PG 测试
+PG_DATABASE_URL = os.getenv("TH_DATABASE_URL", "")
+requires_postgres = pytest.mark.skipif(
+    not PG_DATABASE_URL.startswith("postgres"),
+    reason="需要设置 TH_DATABASE_URL 为 PostgreSQL 连接字符串以运行此测试",
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -69,29 +75,28 @@ async def coordinator(
     await coord.close()
 
 
-@pytest.fixture(scope="session")
-def postgres_dsn() -> str:
-    """从环境变量获取 PostgreSQL DSN，如果不存在则跳过测试。"""
-    dsn = os.getenv("TH_TEST_POSTGRESS_DSN")
-    if not dsn:
-        pytest.skip("需要设置 TH_TEST_POSTGRES_DSN 环境变量以运行 PostgreSQL 测试")
-    return dsn
-
-
 @pytest_asyncio.fixture
-async def postgres_handler(
-    postgres_dsn: str,
-) -> AsyncGenerator[PersistenceHandler, None]:
-    """提供一个连接到测试数据库并应用了 Schema 的 PostgresPersistenceHandler。"""
+@requires_postgres
+async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
+    """
+    提供一个连接到临时测试数据库并应用了 Schema 的 PostgresPersistenceHandler。
+    """
     import asyncpg  # 延迟导入
 
+    # 从主 DSN 解析出用于连接主服务器的 DSN
+    main_dsn = PG_DATABASE_URL
+    parsed = urlparse(main_dsn)
     db_name = f"test_db_{os.urandom(4).hex()}"
-    conn = await asyncpg.connect(postgres_dsn)
+    # DSN to connect to the server, but not a specific database
+    server_dsn = parsed._replace(path="").geturl()
+    
+    conn = await asyncpg.connect(dsn=server_dsn)
+    # 使用 force 选项来处理 CI 环境中可能存在的连接残留
     await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
     await conn.execute(f'CREATE DATABASE "{db_name}"')
     await conn.close()
 
-    test_db_dsn = f"{postgres_dsn.rsplit('/', 1)[0]}/{db_name}"
+    test_db_dsn = parsed._replace(path=f"/{db_name}").geturl()
 
     schema_path = (
         Path(__file__).parent.parent.parent
@@ -107,6 +112,6 @@ async def postgres_handler(
     yield handler
     await handler.close()
 
-    conn = await asyncpg.connect(postgres_dsn)
+    conn = await asyncpg.connect(dsn=server_dsn)
     await conn.execute(f'DROP DATABASE "{db_name}" WITH (FORCE)')
     await conn.close()

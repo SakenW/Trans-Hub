@@ -62,7 +62,10 @@ CREATE INDEX IF NOT EXISTS idx_translations_status_lang ON th_translations(statu
 CREATE TABLE IF NOT EXISTS th_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content_id UUID NOT NULL REFERENCES th_content(id) ON DELETE CASCADE,
-    last_requested_at TIMESTAMPTZ NOT NULL
+    last_requested_at TIMESTAMPTZ NOT NULL,
+    
+    -- 为约束明确命名，提高可维护性
+    CONSTRAINT uq_jobs_content_id UNIQUE (content_id)
 );
 
 CREATE TABLE IF NOT EXISTS th_dead_letter_queue (

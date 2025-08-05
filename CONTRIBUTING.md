@@ -485,27 +485,104 @@ Thank you again for your contribution! We look forward to building `Trans-Hub` t
 
 ### **测试**
 
-1.  **全面测试:** 所有新功能或 Bug 修复都必须附带相应的单元测试或集成测试。我们鼓励使用测试驱动开发（TDD）的模式。
-2.  **测试覆盖率:** 核心业务逻辑的目标覆盖率 > 90%。
-3.  **模拟外部依赖:** 测试中必须模拟所有外部服务（如 API 调用），以确保测试的稳定性和速度。推荐使用 `unittest.mock.patch`。
+Trans-Hub 采用分层测试策略，确保代码质量和功能正确性。
 
-4.  **测试代码编写准则**:
-    -   **职责分离**: 测试代码的职责是**验证**核心代码的功能。它**不应该**包含任何用于“修复”或“变通”核心库设计缺陷的逻辑。如果测试很难写，通常意味着核心代码需要重构。
-    -   **Fixture 设计**:
-        -   **简化 Fixture**: `pytest` 的 fixture (特别是 `test_config`) 应该尽可能地**简单**，只负责提供最基本的、符合用户常规使用场景的配置。
-        -   **信赖核心逻辑**: 不要为了测试而去手动构建复杂的内部状态。应该信赖被测试组件（如 `Coordinator`）的初始化逻辑来正确地组装其依赖。
-    -   **测试应关注行为，而非实现细节**: 我们的测试应该验证“当我调用 `coordinator.switch_engine('openai')` 时，它是否能正常工作”，而不是去验证“`config.engine_configs.openai` 是否被正确创建”。后者是 `Coordinator` 的实现细节。
-    -   **处理动态模型与 MyPy 的冲突**:
-        - **情景**: `Trans-Hub` 的某些 Pydantic 模型（如 `EngineConfigs`）被设计为动态的 (`extra="allow"`)。这可能导致 `mypy` 在静态分析时，抱怨向这些模型传递了它在静态定义中看不到的字段或类型。
-        - **解决方案**: 在这种特定情况下，为了保持核心代码的纯粹性，我们允许在**测试代码**中使用 `# type: ignore` 来抑制 `mypy` 的 `[arg-type]` 或 `[call-arg]` 错误。这是在不污染核心库实现的情况下，解决静态分析器局限性的最佳实践。
-        ```python
-        # 好的实践：在测试代码中，用 type: ignore 解决动态模型问题
-        engine_configs_dict = {"dynamic_field": SomeConfig()}
-        
-        config = TransHubConfig(
-            engine_configs=engine_configs_dict,  # type: ignore[arg-type]
-        )
-        ```
+### 测试结构
+
+- **单元测试 (Unit Tests)**: 位于 `tests/unit/`，专注于测试单个函数或类的行为，通常使用 `unittest.mock` 模拟外部依赖。
+- **集成测试 (Integration Tests)**: 位于 `tests/integration/`，测试组件间的交互，例如数据库持久化层或真实翻译引擎。
+- **端到端测试 (End-to-End Tests)**: 位于 `tests/e2e/`，模拟真实用户场景，验证整个系统的行为。
+
+### 测试覆盖率
+
+我们的目标是保持测试覆盖率在 90% 以上。CI 流水线会自动检查覆盖率，并在覆盖率不足时失败。
+
+### 外部依赖模拟
+
+为了确保测试的稳定性和速度，我们使用 `unittest.mock` 模拟所有外部依赖，如网络请求、文件系统操作等。这确保了单元测试可以在任何环境中运行，无需配置外部服务。
+
+### 运行测试
+
+要运行所有测试，请执行：
+
+```bash
+poetry run pytest
+```
+
+要运行特定测试文件或测试函数，可以使用标准的 `pytest` 语法：
+
+```bash
+# 运行特定文件
+poetry run pytest tests/unit/test_coordinator.py
+
+# 运行特定函数
+poetry run pytest tests/unit/test_coordinator.py::test_coordinator_initialization
+```
+
+### 运行PostgreSQL集成测试
+
+某些集成测试需要真实的PostgreSQL数据库。这些测试默认被跳过，除非设置了`TH_TEST_POSTGRES_DSN`环境变量。
+
+要在本地运行PostgreSQL集成测试：
+
+1. 安装PostgreSQL依赖：
+
+   ```bash
+   poetry install --with dev --all-extras
+   ```
+
+   或者，如果您只想安装PostgreSQL相关的依赖：
+
+   ```bash
+   poetry install --with dev -E postgres
+   ```
+
+2. 启动一个PostgreSQL数据库实例（可以通过Docker）：
+
+   ```bash
+   docker run -d --name transhub-postgres -p 5432:5432 -e POSTGRES_USER=user -e POSTGRES_PASSWORD=password -e POSTGRES_DB=transhub_test postgres:15
+   ```
+
+3. 在项目根目录创建`.env`文件，并添加以下内容：
+
+   ```env
+   TH_TEST_POSTGRES_DSN=postgresql://user:password@localhost:5432/transhub_test
+   ```
+
+4. 运行测试：
+
+   ```bash
+   poetry run pytest
+   ```
+
+在CI环境中，PostgreSQL服务会自动启动并配置，无需手动设置。
+
+### 测试代码指南
+
+1. 所有测试函数必须以 `test_` 开头。
+2. 测试函数应具有描述性的名称，清晰地表达测试的意图。
+3. 每个测试应专注于验证一个特定的行为或场景。
+4. 使用 `pytest` 的 `tmp_path` fixture 来处理临时文件，而不是手动创建和清理。
+5. 使用 `capsys`、`caplog` 等 pytest 内置 fixture 来捕获输出和日志。
+6. 对于异步测试，使用 `pytest-asyncio` 提供的 `@pytest.mark.asyncio` 装饰器。
+7. 为测试编写清晰的断言消息，以便在测试失败时能够快速理解问题所在。
+8. 避免在测试中使用硬编码的值，优先使用常量或 fixture。
+
+### 测试环境检查工具
+
+项目提供了一个简单的环境检查脚本 `tools/check_env.py`，用于验证开发环境是否配置正确。在运行测试之前，可以执行此脚本来确保所有必需的依赖项都已安装。
+
+```bash
+poetry run python tools/check_env.py
+```
+
+### 数据库检查工具
+
+项目还提供了一个数据库检查工具 `tools/inspect_db.py`，用于检查数据库连接和表结构。这对于调试数据库相关的问题非常有用。
+
+```bash
+poetry run python tools/inspect_db.py
+```
 
 ### **其他关键约定**
 

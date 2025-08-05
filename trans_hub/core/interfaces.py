@@ -5,6 +5,7 @@ v3.0.0.dev: 重构以适应新的数据模型，并为可插拔的持久层设�
 """
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 from trans_hub.core.types import (
@@ -12,6 +13,19 @@ from trans_hub.core.types import (
     TranslationResult,
     TranslationStatus,
 )
+
+
+@dataclass
+class TranslationNotification:
+    """表示一个翻译任务通知。"""
+
+    translation_id: str
+    content_id: str
+    target_lang: str
+    source_payload: dict[str, Any]
+    business_id: Optional[str] = None
+    context_id: Optional[str] = None
+    context: Optional[dict[str, Any]] = None
 
 
 class PersistenceHandler(Protocol):

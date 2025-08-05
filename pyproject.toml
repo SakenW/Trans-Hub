@@ -18,14 +18,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
 [tool.poetry.scripts]
-trans-hub = "trans_hub.cli:app"
+trans-hub = "trans_hub.cli.main:app"
 
 # --- 核心依赖 (保持最精简) ---
 [tool.poetry.dependencies]
@@ -37,23 +36,20 @@ aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
 
 # --- 可选功能与工具依赖 ---
-# 翻译引擎
 translators = { version = ">=6.0.1", optional = true }
 openai = { version = ">=1.37.0", optional = true }
 httpx = { version = ">=0.28.1", optional = true } 
-# 指标
 prometheus-client = { version = ">=0.20.0", optional = true }
-# 应用层 (CLI, API)
 typer = { version = ">=0.12.3", optional = true }
 rich = { version = ">=13.0.0", optional = true }
 fastapi = { version = ">=0.111.0", optional = true }
 uvicorn = { version = ">=0.30.1", extras = ["standard"], optional = true }
-# 文档工具
-docutils = { version = "<0.21", optional = true }
-markdown-it-py = { version = ">=3.0.0", optional = true }
-# v3.0.0 新增：PostgreSQL 驱动
+docutils = { version = "<0.21", optional = true } # For docs only
+markdown-it-py = { version = ">=3.0.0", optional = true } # For tools/docs
 asyncpg = { version = ">=0.29.0", optional = true }
+questionary = { version = "^2.0.1", optional = true } # For CLI
 
+# --- 可选依赖分组 (Extras) ---
 [tool.poetry.extras]
 translators = ["translators"]
 openai = ["openai", "httpx"]
@@ -62,17 +58,14 @@ cli = ["typer", "rich", "questionary"]
 api = ["fastapi", "uvicorn"]
 postgres = ["asyncpg"]
 tools = ["typer", "rich", "markdown-it-py", "openai", "httpx", "questionary"]
+# 优化：'all' extra 不应包含纯文档构建工具
 all = [
     "translators", "openai", "httpx", "prometheus-client", 
     "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary",
-    "sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints", "docutils",
     "asyncpg"
 ]
 
 # --- 依赖组 ---
-[tool.poetry.group.docs]
-optional = true
-
 [tool.poetry.group.docs.dependencies]
 sphinx = "*"
 sphinx-rtd-theme = "*"
@@ -88,6 +81,8 @@ myst_parser = "^2.0.0"
 sphinx-intl = "^2.3.1"
 
 # --- 开发依赖 ---
+# 优化：dev 组只包含纯粹的开发/测试工具
+# 其他功能性依赖应通过 'poetry install --all-extras --with dev' 安装
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.4.0"
 mypy = ">=1.5"
@@ -95,23 +90,14 @@ pytest = ">=7.4"
 pytest-cov = ">=4.1"
 pytest-asyncio = ">=0.21.0"
 types-cachetools = ">=5.3.1"
+types-asyncpg = "^0.29.0"
+types-asyncpg-exceptions = "^0.1.0"
 pytest-mock = "^3.14.1"
-
-# 开发环境直接安装所有可选依赖
-translators = "*"
-openai = "*"
-httpx = "*"
-prometheus-client = "*"
-typer = { version = "*", extras = ["rich"] }
-fastapi = "*"
-uvicorn = { version = "*", extras = ["standard"] }
-markdown-it-py = "*"
-questionary = "*"
-asyncpg = "*"
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+# 优化：将目标版本与项目支持的最低版本对齐
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "D", "UP", "B", "C4", "A", "ASYNC"]
@@ -119,11 +105,12 @@ ignore = [
     "E501", 
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
     "D400", "D401", "D415", "D203", "D212", "D205",
-    "UP007",
+    "UP007", # 建议使用 X | Y，但我们为了兼容旧版本注解，暂时忽略
 ]
 
 [tool.mypy]
-python_version = "3.9"
+# 优化：将目标版本与项目支持的最低版本对齐
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 strict = true
@@ -135,7 +122,9 @@ module = [
     "translators",
     "markdown_it",
     "prometheus_client",
-    "asyncpg.*",
+    "questionary", # questionary 也没有类型提示
+    "asyncpg",
+    "asyncpg.exceptions"
 ]
 ignore_missing_imports = true
 
