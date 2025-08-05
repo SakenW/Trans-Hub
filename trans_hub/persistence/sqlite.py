@@ -228,7 +228,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
                         engine_version = ?,
                         translation_payload_json = NULL,
                         error = NULL
-                    WHERE content_id = ? AND {context_clause} AND lang_code IN ({placeholders})
+                    WHERE content_id = ? 
+                    AND {context_clause} 
+                    AND lang_code IN ({placeholders})
                     """,
                     tuple(update_params),
                 )
