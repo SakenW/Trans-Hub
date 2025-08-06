@@ -82,10 +82,7 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
     # 1. 设置
     stale_bid = "test.pg.stale_item"
     fresh_bid = "test.pg.fresh_item"
-    
-    # 修复：使用确定性的时间戳进行比较
-    now_for_test = datetime.now(timezone.utc)
-    stale_timestamp = now_for_test - timedelta(days=2)
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
 
     # 创建 stale 和 fresh content, job, translation
     stale_content_id, _ = await postgres_handler.ensure_content_and_context(
@@ -105,7 +102,7 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
             # 手动将 stale job 的时间戳设为过期
             await conn.execute(
                 "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = $2",
-                stale_timestamp, stale_content_id
+                two_days_ago, stale_content_id
             )
 
     # 2. 第一次 GC: 删除过期的 job
@@ -139,28 +136,80 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
 
 
 @pytest.mark.asyncio
+async def test_pg_garbage_collect_respects_date_boundary(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """为 PostgreSQL 精确测试垃圾回收（GC）的日期边界条件。"""
+    retention_days = 2
+    now_for_test = datetime(2024, 1, 5, 12, 0, 0, tzinfo=timezone.utc)
+    
+    stale_bid = "pg.item.stale"
+    stale_timestamp = now_for_test - timedelta(days=retention_days + 1)
+
+    fresh_bid = "pg.item.fresh"
+    fresh_timestamp = now_for_test - timedelta(days=retention_days)
+
+    # 第一步：创建所有数据
+    for bid in [stale_bid, fresh_bid]:
+        await postgres_handler.ensure_content_and_context(
+            business_id=bid,
+            source_payload={"text": bid},
+            context=None,
+        )
+
+    # 第二步：手动更新时间戳
+    PostgresHandlerImpl = __import__("trans_hub.persistence.postgres").persistence.postgres.PostgresPersistenceHandler
+    assert isinstance(postgres_handler, PostgresHandlerImpl)
+    async with postgres_handler._pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = "
+            "(SELECT id FROM th_content WHERE business_id = $2)",
+            stale_timestamp, stale_bid
+        )
+        await conn.execute(
+            "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = "
+            "(SELECT id FROM th_content WHERE business_id = $2)",
+            fresh_timestamp, fresh_bid
+        )
+
+    # WHEN: 运行垃圾回收，并注入确定的 "now" 时间
+    report = await postgres_handler.garbage_collect(
+        retention_days=retention_days, dry_run=False, _now=now_for_test
+    )
+
+    # THEN: 验证只有过期的任务被删除
+    assert report.get("deleted_jobs", 0) == 1
+    
+    # 验证数据库状态
+    async with postgres_handler._pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM th_jobs")
+        assert count == 1
+        
+        remaining_bid = await conn.fetchval(
+            "SELECT c.business_id FROM th_jobs j JOIN th_content c ON j.content_id = c.id"
+        )
+        assert remaining_bid == fresh_bid
+
+
+@pytest.mark.asyncio
 async def test_pg_listen_notify_workflow(postgres_handler: PersistenceHandler) -> None:
     """测试 PostgreSQL 的 LISTEN/NOTIFY 事件驱动机制。"""
-    # 1. 启动一个监听器任务
-    # 修复：为 Future 添加类型注解
     notification_future: asyncio.Future[str] = asyncio.Future()
 
     async def listener_task() -> None:
         try:
             async for payload in postgres_handler.listen_for_notifications():
                 notification_future.set_result(payload)
-                break  # 获取第一个通知后即退出
+                break
         except Exception as e:
             if not notification_future.done():
                 notification_future.set_exception(e)
 
     task = asyncio.create_task(listener_task())
 
-    # 给监听器一点时间来启动和注册
     await asyncio.sleep(0.1)
     assert not notification_future.done()
 
-    # 2. 触发一个会产生通知的数据库操作（创建 PENDING 任务）
     business_id = "test.pg.notify"
     content_id, _ = await postgres_handler.ensure_content_and_context(
         business_id, {"text": "notify me"}, None
@@ -169,12 +218,9 @@ async def test_pg_listen_notify_workflow(postgres_handler: PersistenceHandler) -
         content_id, None, ["de"], "en", "1.0"
     )
 
-    # 3. 等待并验证通知结果
     try:
-        # 设置超时以防止测试无限期挂起
         received_payload = await asyncio.wait_for(notification_future, timeout=2.0)
         assert received_payload is not None
-        # 验证 payload 是一个 UUID 字符串 (trans_id)
         from uuid import UUID
         assert isinstance(UUID(received_payload), UUID)
     finally:
