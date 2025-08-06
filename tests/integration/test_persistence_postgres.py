@@ -5,6 +5,7 @@
 这些测试需要在 .env 文件或环境变量中将 TH_DATABASE_URL 设置为
 一个可用的 PostgreSQL 连接字符串来运行。
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -81,7 +82,10 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
     # 1. 设置
     stale_bid = "test.pg.stale_item"
     fresh_bid = "test.pg.fresh_item"
-    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    
+    # 修复：使用确定性的时间戳进行比较
+    now_for_test = datetime.now(timezone.utc)
+    stale_timestamp = now_for_test - timedelta(days=2)
 
     # 创建 stale 和 fresh content, job, translation
     stale_content_id, _ = await postgres_handler.ensure_content_and_context(
@@ -101,7 +105,7 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
             # 手动将 stale job 的时间戳设为过期
             await conn.execute(
                 "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = $2",
-                two_days_ago, stale_content_id
+                stale_timestamp, stale_content_id
             )
 
     # 2. 第一次 GC: 删除过期的 job
@@ -132,3 +136,47 @@ async def test_pg_garbage_collect_cleans_up_old_data_correctly(
             )
             assert stale_content is None
             assert fresh_content is not None
+
+
+@pytest.mark.asyncio
+async def test_pg_listen_notify_workflow(postgres_handler: PersistenceHandler) -> None:
+    """测试 PostgreSQL 的 LISTEN/NOTIFY 事件驱动机制。"""
+    # 1. 启动一个监听器任务
+    # 修复：为 Future 添加类型注解
+    notification_future: asyncio.Future[str] = asyncio.Future()
+
+    async def listener_task() -> None:
+        try:
+            async for payload in postgres_handler.listen_for_notifications():
+                notification_future.set_result(payload)
+                break  # 获取第一个通知后即退出
+        except Exception as e:
+            if not notification_future.done():
+                notification_future.set_exception(e)
+
+    task = asyncio.create_task(listener_task())
+
+    # 给监听器一点时间来启动和注册
+    await asyncio.sleep(0.1)
+    assert not notification_future.done()
+
+    # 2. 触发一个会产生通知的数据库操作（创建 PENDING 任务）
+    business_id = "test.pg.notify"
+    content_id, _ = await postgres_handler.ensure_content_and_context(
+        business_id, {"text": "notify me"}, None
+    )
+    await postgres_handler.create_pending_translations(
+        content_id, None, ["de"], "en", "1.0"
+    )
+
+    # 3. 等待并验证通知结果
+    try:
+        # 设置超时以防止测试无限期挂起
+        received_payload = await asyncio.wait_for(notification_future, timeout=2.0)
+        assert received_payload is not None
+        # 验证 payload 是一个 UUID 字符串 (trans_id)
+        from uuid import UUID
+        assert isinstance(UUID(received_payload), UUID)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

@@ -35,6 +35,11 @@ class TranslationCache:
         self.config = config or CacheConfig()
         self.cache: Union[LRUCache[str, str], TTLCache[str, str]]
         self._initialize_cache()
+        # 修复：为锁机制添加文档说明。
+        # 当前使用单一全局锁来保证所有操作（包括读、写、清空）的绝对原子性和线程安全。
+        # 虽然这在极高并发的读取场景下可能不是性能最优的，但它提供了最强的安全保证，
+        # 避免了在实现复杂的异步读写锁时可能引入的错误。
+        # 未来的性能优化可以考虑引入一个成熟的异步读写锁库。
         self._lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:

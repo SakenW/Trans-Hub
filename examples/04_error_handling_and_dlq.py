@@ -30,12 +30,12 @@ from trans_hub import Coordinator, EngineName, TransHubConfig  # noqa: E402
 from trans_hub.config import RetryPolicyConfig  # noqa: E402
 from trans_hub.core import TranslationResult  # noqa: E402
 from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+# 修复：将此 import 移至文件顶部
+from trans_hub.logging_config import setup_logging  # noqa: E402
 from trans_hub.persistence import create_persistence_handler  # noqa: E402
 
 # --- 日志配置 ---
-# v3.7 优化：在示例中，使用 debug 级别日志以观察详细的重试过程
-# from trans_hub.logging_config import setup_logging
-# setup_logging(log_level="DEBUG")
+# 修复：移除在示例中配置日志的逻辑，它应在 main 中被调用
 log = structlog.get_logger("trans_hub")
 
 # --- 准备测试环境 ---
@@ -83,7 +83,6 @@ async def main() -> None:
         await process_translations(coordinator, [target_lang])
 
         log.info("🔍 步骤 3: 自动验证任务是否已进入死信队列...")
-        # v3.7 优化：自动化验证，不再需要手动查询
         await verify_dlq_entry()
         log.info("🎉 验证通过！任务已成功进入死信队列。")
 
@@ -118,7 +117,7 @@ async def verify_dlq_entry() -> None:
 
 
 if __name__ == "__main__":
-    # 动态导入并配置日志，以避免在导入时产生副作用
-    from trans_hub.logging_config import setup_logging
+    # 修复：调用日志配置的正确位置是在执行入口处，而不是在导入时。
+    # 这种方式完全符合“无副作用导入”原则。
     setup_logging(log_level="INFO")
     asyncio.run(main())

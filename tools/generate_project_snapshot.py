@@ -4,66 +4,49 @@
 import os
 from pathlib import Path
 
+# 修复：定义需要排除的目录和文件
+EXCLUDED_DIRS = {
+    'docs', '__pycache__', '.git', '.pytest_cache', 
+    '.mypy_cache', '.vscode', '.github', 'dist'
+}
+EXCLUDED_SUFFIXES = {'.db', '.db-wal', '.db-shm'}
 
-def should_include_file(file_path: Path) -> bool:
-    """判断是否应该包含该文件在快照中。
-
-    Args:
-        file_path: 文件路径。
-
-    Returns:
-        True表示包含，False表示排除。
-    """
+def should_include(path: Path) -> bool:
+    """判断是否应该包含该文件或目录在快照中。"""
     # 排除隐藏文件和目录
-    if any(part.startswith('.') for part in file_path.parts):
+    if any(part.startswith('.') for part in path.parts):
         return False
-
     # 排除特定目录
-    excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
-    if any(part in excluded_dirs for part in file_path.parts):
+    if any(part in EXCLUDED_DIRS for part in path.parts):
         return False
-
-    # 包含特定类型的文件
-    included_extensions = {'.py', '.sql', '.toml', '.yml', '.yaml', '.rst', '.sh', '.json'}
-    return file_path.suffix in included_extensions
-
+    # 排除特定文件类型
+    if path.suffix in EXCLUDED_SUFFIXES:
+        return False
+    return True
 
 def generate_snapshot(root_path: str = ".", output_file: str = "project_snapshot.txt") -> None:
-    """生成项目快照文件。
-
-    Args:
-        root_path: 项目根目录路径。
-        output_file: 输出文件名。
-    """
+    """生成项目快照文件。"""
     root = Path(root_path)
-    output_path = root / "tools" / output_file
-
+    # 修正输出路径，确保脚本在任何地方运行都能找到正确位置
+    output_path = root / "project_snapshot.txt" 
+    
     with open(output_path, 'w', encoding='utf-8') as f:
-        # 写入标题
         f.write("# Trans-Hub 项目完整快照\n\n")
 
         # 获取并写入目录结构
         f.write("## 目录结构\n\n")
-        for path in sorted(root.rglob('*')):
-            # 跳过输出文件本身
+        all_paths = sorted(root.rglob('*'))
+        
+        for path in all_paths:
             if path.resolve() == output_path.resolve():
                 continue
-
-            # 排除隐藏文件和目录
-            if any(part.startswith('.') for part in path.parts):
+            if not should_include(path):
                 continue
-
-            # 排除特定目录
-            excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
-            if any(part in excluded_dirs for part in path.parts):
-                continue
-
-            # 计算相对于根目录的层级
+            
             relative_path = path.relative_to(root)
             depth = len(relative_path.parts) - 1
             indent = "  " * depth
-
-            # 写入目录或文件
+            
             if path.is_dir():
                 f.write(f"{indent}- {path.name}/\n")
             else:
@@ -71,26 +54,18 @@ def generate_snapshot(root_path: str = ".", output_file: str = "project_snapshot
 
         # 写入文件内容
         f.write("\n## 文件内容\n\n")
-
-        # 收集所有需要包含的文件
-        included_files = []
-        for path in sorted(root.rglob('*')):
-            # 跳过输出文件本身
-            if path.resolve() == output_path.resolve():
+        
+        for file_path in all_paths:
+            if file_path.resolve() == output_path.resolve():
+                continue
+            if not file_path.is_file() or not should_include(file_path):
                 continue
 
-            if path.is_file() and should_include_file(path):
-                included_files.append(path)
-
-        # 写入每个文件的内容
-        for file_path in included_files:
             relative_path = file_path.relative_to(root)
             f.write(f"### {relative_path}\n\n")
-
+            
             try:
-                # 尝试以文本方式读取文件
                 content = file_path.read_text(encoding='utf-8')
-                # 规范化换行符
                 content = content.replace('\r\n', '\n').replace('\r', '\n')
                 f.write(f"``````\n{content}\n``````\n\n")
             except Exception as e:
@@ -102,8 +77,9 @@ def generate_snapshot(root_path: str = ".", output_file: str = "project_snapshot
 def main() -> None:
     """主函数。"""
     print("正在生成项目快照...")
-    generate_snapshot()
-
+    # 修正：从脚本所在目录的上级目录开始生成
+    project_root = Path(__file__).parent.parent
+    generate_snapshot(str(project_root))
 
 if __name__ == "__main__":
     main()

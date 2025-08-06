@@ -38,12 +38,14 @@ class TransHubConfig(BaseSettings):
 
     database_url: str = "sqlite:///transhub.db"
     active_engine: EngineName = EngineName.TRANSLATORS
-    batch_size: int = Field(default=50)
+    # 修复：增加 gt=0 约束，确保 batch_size 必须为正数
+    batch_size: int = Field(default=50, gt=0)
     source_lang: Optional[str] = Field(default=None)
-    gc_retention_days: int = Field(default=90)
-    # v4.0 新增: Worker 轮询间隔
+    # 修复：增加 gt=0 约束，确保 gc_retention_days 必须为正数
+    gc_retention_days: int = Field(default=90, gt=0)
+    # 修复：增加 gt=0 约束，确保 worker_poll_interval 必须为正数
     worker_poll_interval: int = Field(
-        default=10, description="Worker在轮询模式下的等待间隔（秒）"
+        default=10, description="Worker在轮询模式下的等待间隔（秒）", gt=0
     )
 
     cache_config: CacheConfig = Field(default_factory=CacheConfig)

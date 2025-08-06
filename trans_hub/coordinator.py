@@ -24,7 +24,9 @@ from .core import (
     TranslationResult,
     TranslationStatus,
 )
-from .engine_registry import ENGINE_REGISTRY, discover_engines
+
+# 修复：移除此处的 discover_engines 导入
+from .engine_registry import ENGINE_REGISTRY
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 
@@ -47,7 +49,8 @@ class Coordinator:
         """
         初始化 Coordinator。
         """
-        discover_engines()
+        # 修复：移除此处的 discover_engines() 调用。
+        # 引擎发现应在应用程序的最高入口点（如CLI）执行一次。
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)

@@ -58,9 +58,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-                # v3.x 最终修复: 编解码器必须是同步函数。
+                # 修复：确保 json 序列化时保留非 ASCII 字符
                 def _jsonb_encoder(value: Any) -> str:
-                    return json.dumps(value)
+                    return json.dumps(value, ensure_ascii=False)
 
                 def _jsonb_decoder(value: str) -> Any:
                     return json.loads(value)
@@ -83,9 +83,20 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def close(self) -> None:
         """关闭数据库连接池和所有相关连接。"""
-        if self._notification_listener_conn:
+        # 修复：在关闭连接前，先移除监听器，确保资源被正确释放
+        if (
+            self._notification_listener_conn
+            and not self._notification_listener_conn.is_closed()
+        ):
+            try:
+                await self._notification_listener_conn.remove_listener(
+                    self.NOTIFICATION_CHANNEL, self._notification_callback
+                )
+            except asyncpg.PostgresError as e:
+                logger.warning("移除 PostgreSQL 监听器时出错", error=e)
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
+
         if self._pool:
             await self._pool.close()
             self._pool = None
@@ -379,25 +390,28 @@ class PostgresPersistenceHandler(PersistenceHandler):
     ) -> dict[str, int]:
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
+
+        # 修复：在 Python 端计算精确的 cutoff_date
+        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
-        cutoff_date = (
-            datetime.now(timezone.utc) - timedelta(days=retention_days)
-        ).date()
+
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # 修复：在 SQL 中直接使用 TIMESTAMPTZ 类型进行比较
                     del_jobs_sql = """
                         DELETE FROM th_jobs
-                        WHERE DATE(last_requested_at) < $1
+                        WHERE last_requested_at < $1
                         RETURNING id;
                     """
                     if dry_run:
                         del_jobs_sql = """
                             SELECT id FROM th_jobs
-                            WHERE DATE(last_requested_at) < $1;
+                            WHERE last_requested_at < $1;
                         """
                     stats["deleted_jobs"] = len(
-                        await conn.fetch(del_jobs_sql, cutoff_date)
+                        await conn.fetch(del_jobs_sql, cutoff_datetime)
                     )
 
                     del_content_sql = """

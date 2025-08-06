@@ -170,18 +170,23 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         cached_results, uncached_items = await self._separate_cached_items(
             batch, target_lang, p_context
         )
-        if not uncached_items:
-            return cached_results, []
 
-        engine_outputs = await self._translate_uncached_items(
-            uncached_items, target_lang, p_context, active_engine, engine_context
+        # 修复：在调用引擎前，先校验 payload 结构，分离出无效项
+        valid_items, payload_error_results = self._validate_payload_structure(
+            uncached_items, target_lang, p_context
         )
 
-        # v3.x 修复：增加对引擎返回数量的严格校验，防止任务静默丢失
-        if len(engine_outputs) != len(uncached_items):
+        if not valid_items:
+            return cached_results + payload_error_results, []
+
+        engine_outputs = await self._translate_uncached_items(
+            valid_items, target_lang, p_context, active_engine, engine_context
+        )
+
+        if len(engine_outputs) != len(valid_items):
             error_msg = (
                 f"引擎返回结果数量 ({len(engine_outputs)}) "
-                f"与输入数量 ({len(uncached_items)}) 不匹配。"
+                f"与输入数量 ({len(valid_items)}) 不匹配。"
             )
             logger.error(
                 error_msg,
@@ -189,19 +194,20 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 lang=target_lang,
             )
             engine_error = EngineError(error_message=error_msg, is_retryable=False)
-            failed_results = [
+            mismatch_results = [
                 self._build_translation_result(
                     item, target_lang, p_context, engine_output=engine_error
                 )
-                for item in uncached_items
+                for item in valid_items
             ]
-            return cached_results + failed_results, []
+            return cached_results + payload_error_results + mismatch_results, []
 
         processed_results: list[TranslationResult] = list(cached_results)
+        processed_results.extend(payload_error_results)
         retryable_items: list[ContentItem] = []
         item_map = {item.translation_id: item for item in batch}
 
-        for item, output in zip(uncached_items, engine_outputs):
+        for item, output in zip(valid_items, engine_outputs):
             if isinstance(output, EngineError) and output.is_retryable:
                 retryable_items.append(item)
             else:
@@ -212,6 +218,34 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
         await self._cache_new_results(processed_results, p_context, item_map)
         return processed_results, retryable_items
+
+    def _validate_payload_structure(
+        self,
+        items: list[ContentItem],
+        target_lang: str,
+        p_context: ProcessingContext,
+    ) -> tuple[list[ContentItem], list[TranslationResult]]:
+        """[新增] 校验 payload 结构，分离有效和无效项。"""
+        valid_items: list[ContentItem] = []
+        failed_results: list[TranslationResult] = []
+        for item in items:
+            if self.PAYLOAD_TEXT_KEY not in item.source_payload:
+                error_msg = (
+                    f"源载荷 (source_payload) 缺少必需的 '{self.PAYLOAD_TEXT_KEY}' 键。"
+                )
+                logger.warning(
+                    error_msg,
+                    business_id=item.business_id,
+                    payload=item.source_payload,
+                )
+                engine_error = EngineError(error_message=error_msg, is_retryable=False)
+                result = self._build_translation_result(
+                    item, target_lang, p_context, engine_output=engine_error
+                )
+                failed_results.append(result)
+            else:
+                valid_items.append(item)
+        return valid_items, failed_results
 
     async def _separate_cached_items(
         self, batch: list[ContentItem], target_lang: str, p_context: ProcessingContext
@@ -245,8 +279,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
+        # 此处已假设 item 经过了 _validate_payload_structure 的校验
         texts_to_translate = [
-            item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in items
+            str(item.source_payload.get(self.PAYLOAD_TEXT_KEY)) for item in items
         ]
 
         source_langs = {item.source_lang for item in items}
@@ -299,7 +334,16 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                         )
                     )
         if tasks:
-            await asyncio.gather(*tasks)
+            # 修复：使用 return_exceptions=True 实现容错的缓存写入
+            cache_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, result in enumerate(cache_results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "写入翻译缓存时发生错误，主流程不受影响。",
+                        error=result,
+                        translation_id=results[i].translation_id,
+                        exc_info=False,
+                    )
 
     def _build_translation_result(
         self,

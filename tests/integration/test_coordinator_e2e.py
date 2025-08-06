@@ -135,49 +135,67 @@ async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
 
 
 @pytest.mark.asyncio
-async def test_garbage_collection_workflow(coordinator: Coordinator) -> None:
-    """测试垃圾回收（GC）能否正确清理过期和无关联的数据。"""
-    await coordinator.request(
-        business_id="item.fresh",
-        source_payload={"text": "fresh item"},
-        target_langs=["zh-CN"],
-    )
-    await coordinator.request(
-        business_id="item.stale",
-        source_payload={"text": "stale item"},
-        target_langs=["zh-CN"],
-    )
-    _ = [res async for res in coordinator.process_pending_translations("zh-CN")]
+async def test_garbage_collection_respects_date_boundary(
+    coordinator: Coordinator,
+) -> None:
+    """测试垃圾回收（GC）能精确地根据日期边界清理过期数据，且不依赖 mock 时间。"""
+    # GIVEN: 两个翻译任务，一个将被设置为刚好过期，一个刚好未过期
+    retention_days = 2
+    
+    # 模拟“现在”是某个固定时间点
+    now_for_test = datetime.now(timezone.utc)
+    
+    # last_requested_at < now - retention_days，所以它应该被删除。
+    stale_bid = "item.stale"
+    stale_timestamp = now_for_test - timedelta(days=retention_days, seconds=1)
 
+    # last_requested_at >= now - retention_days，所以它应该被保留。
+    fresh_bid = "item.fresh"
+    fresh_timestamp = now_for_test - timedelta(days=retention_days, seconds=-1)
+
+    # 创建数据
+    for bid in [stale_bid, fresh_bid]:
+        await coordinator.request(
+            business_id=bid,
+            source_payload={"text": bid},
+            target_langs=["de"],
+        )
+    _ = [res async for res in coordinator.process_pending_translations("de")]
+    
+    # 手动更新时间戳以模拟过期
     handler = coordinator.handler
     assert isinstance(handler, SQLitePersistenceHandler)
     db_path = handler.db_path
     async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "UPDATE th_jobs SET last_requested_at = ? WHERE content_id = "
+            "(SELECT id FROM th_content WHERE business_id = ?)",
+            (stale_timestamp.isoformat(), stale_bid),
+        )
+        await db.execute(
+            "UPDATE th_jobs SET last_requested_at = ? WHERE content_id = "
+            "(SELECT id FROM th_content WHERE business_id = ?)",
+            (fresh_timestamp.isoformat(), fresh_bid),
+        )
+        await db.commit()
+    
+    # WHEN: 运行垃圾回收
+    report = await coordinator.run_garbage_collection(dry_run=False, expiration_days=retention_days)
+
+    # THEN: 验证只有过期的任务被删除
+    assert report.get("deleted_jobs", 0) == 1
+    
+    # 验证数据库状态
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM th_jobs")
+        row = await cursor.fetchone()
+        assert row is not None and row[0] == 1 # 应该只剩一个 job
+        
         cursor = await db.execute(
-            "SELECT id FROM th_content WHERE business_id = 'item.stale'"
+            "SELECT c.business_id FROM th_jobs j JOIN th_content c ON j.content_id = c.id"
         )
         row = await cursor.fetchone()
-        assert row is not None
-        stale_content_id = row[0]
-
-        two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        await db.execute(
-            "UPDATE th_jobs SET last_requested_at = ? WHERE content_id = ?",
-            (two_days_ago, stale_content_id),
-        )
-        await db.commit()
-
-    report1 = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
-    assert report1.get("deleted_jobs", 0) == 1
-
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            "DELETE FROM th_translations WHERE content_id = (SELECT id FROM th_content WHERE business_id = 'item.stale')"
-        )
-        await db.commit()
-
-    report2 = await coordinator.run_garbage_collection(dry_run=False, expiration_days=1)
-    assert report2.get("deleted_content", 0) == 1
+        assert row is not None and row[0] == fresh_bid # 剩下的必须是 fresh_bid
 
 
 @pytest.mark.asyncio

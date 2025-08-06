@@ -57,35 +57,26 @@ async def check_translation_status() -> None:
     await handler.connect()
     
     try:
-        # 查找测试用例创建的翻译任务
-        business_id = "test.pg.force"
+        # 修复：查询一个在测试中真实存在的 business_id，如 'test.pg.stale_item'
+        business_id = "test.pg.stale_item"
         target_lang = "de"
+        print(f"\nQuerying for business_id='{business_id}', target_lang='{target_lang}'")
         
-        # 使用PostgreSQL特定的方法获取连接
-        # 由于这是工具脚本，我们可以直接访问PostgreSQL实现的内部方法
-        if hasattr(handler, '_transaction'):
-            async with handler._transaction() as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT t.id, t.status, t.translation_payload_json 
-                    FROM th_translations t 
-                    JOIN th_content c ON t.content_id = c.id 
-                    WHERE c.business_id = $1 AND t.lang_code = $2
-                    """,
-                    business_id,
-                    target_lang
-                )
-        else:
-            # 对于其他实现，使用通用方法
-            # 这里简化处理，直接返回
-            row = None
+        # 修复：使用更健壮的 find_translation 公共接口，而不是直接执行 SQL
+        result = await handler.find_translation(
+            business_id=business_id,
+            target_lang=target_lang,
+            context=None
+        )
             
-        if row:
-            print(f"Translation ID: {row['id']}")
-            print(f"Status: {row['status']}")
-            print(f"Translation Payload: {row['translation_payload_json']}")
+        if result:
+            print(f"Translation ID: {result.translation_id}")
+            print(f"Status: {result.status.value}")
+            print(f"Original Payload: {result.original_payload}")
+            print(f"Translation Payload: {result.translated_payload}")
+            print(f"Error: {result.error}")
         else:
-            print("No translation found for the test case")
+            print(f"No translation found for business_id='{business_id}' and lang='{target_lang}'")
     finally:
         await handler.close()
 

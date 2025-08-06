@@ -425,15 +425,17 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
     ) -> dict[str, int]:
-        cutoff_date = (
-            datetime.now(timezone.utc) - timedelta(days=retention_days)
-        ).isoformat()
+        # 修复：在 Python 端计算精确的 cutoff_date ISO 字符串
+        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_iso_string = cutoff_datetime.isoformat()
+
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
+            # 修复：在 SQL 中直接使用 ISO 字符串比较，不再依赖数据库的 DATE() 函数
             cursor = await tx.execute(
-                "SELECT id FROM th_jobs WHERE DATE(last_requested_at) < DATE(?)",
-                (cutoff_date,),
+                "SELECT id FROM th_jobs WHERE last_requested_at < ?",
+                (cutoff_iso_string,),
             )
             expired_job_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
