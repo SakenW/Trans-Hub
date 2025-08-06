@@ -31,6 +31,12 @@ from trans_hub.utils import get_context_hash
 logger = structlog.get_logger(__name__)
 
 
+class _DryRunExit(Exception):
+    """一个内部异常，用于在 dry_run 模式下安全地回滚事务。"""
+
+    pass
+
+
 class PostgresPersistenceHandler(PersistenceHandler):
     """`PersistenceHandler` 协议的 PostgreSQL 实现。"""
 
@@ -52,8 +58,23 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
+                # v3.x 最终修复: 编解码器必须是同步函数。
+                def _jsonb_encoder(value: Any) -> str:
+                    return json.dumps(value)
+
+                def _jsonb_decoder(value: str) -> Any:
+                    return json.loads(value)
+
                 self._pool = await asyncpg.create_pool(
-                    self.dsn, min_size=5, max_size=20
+                    self.dsn,
+                    min_size=5,
+                    max_size=20,
+                    init=lambda conn: conn.set_type_codec(
+                        "jsonb",
+                        encoder=_jsonb_encoder,
+                        decoder=_jsonb_decoder,
+                        schema="pg_catalog",
+                    ),
                 )
                 logger.info("已连接到 PostgreSQL 数据库并创建连接池")
             except asyncpg.PostgresError as e:
@@ -194,7 +215,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     RETURNING id;
                 """
                 content_row = await conn.fetchrow(
-                    content_sql, business_id, json.dumps(source_payload)
+                    content_sql, business_id, source_payload
                 )
                 content_id = str(content_row["id"])
 
@@ -207,9 +228,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         ON CONFLICT (context_hash) DO NOTHING
                         RETURNING id;
                     """
-                    ctx_row = await conn.fetchrow(
-                        context_sql, context_hash, json.dumps(context)
-                    )
+                    ctx_row = await conn.fetchrow(context_sql, context_hash, context)
                     if not ctx_row:
                         ctx_row = await conn.fetchrow(
                             "SELECT id FROM th_contexts WHERE context_hash = $1",
@@ -286,7 +305,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         params = [
             (
                 res.status.value,
-                json.dumps(res.translated_payload),
+                res.translated_payload,
                 res.engine,
                 res.error,
                 res.translation_id,
@@ -297,7 +316,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
             UPDATE th_translations
             SET
                 status = $1,
-                translation_payload_json = $2::jsonb,
+                translation_payload_json = $2,
                 engine = $3,
                 error = $4,
                 last_updated_at = (now() at time zone 'utc')
@@ -421,9 +440,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     stats["deleted_contexts"] = len(await conn.fetch(del_contexts_sql))
 
                     if dry_run:
-                        raise asyncpg.exceptions.RollbackTransactionError("Dry run")
+                        raise _DryRunExit()
             return stats
-        except asyncpg.exceptions.RollbackTransactionError:
+        except _DryRunExit:
             logger.info("垃圾回收 (dry run) 完成，事务已回滚。")
             return stats
         except asyncpg.PostgresError as e:
@@ -451,8 +470,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         item.translation_id,
-                        json.dumps(item.source_payload),
-                        json.dumps(item.context) if item.context else None,
+                        item.source_payload,
+                        item.context,
                         target_lang,
                         error_message,
                         engine_name,

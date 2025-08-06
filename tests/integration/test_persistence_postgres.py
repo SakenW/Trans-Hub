@@ -1,109 +1,134 @@
-# tools/generate_project_snapshot.py
-"""生成项目完整快照的工具，用于快速分享给AI协作伙伴。"""
+# tests/integration/test_persistence_postgres.py
+"""
+针对 `trans_hub.persistence.postgres` 的集成测试。
 
-import os
-from pathlib import Path
+这些测试需要在 .env 文件或环境变量中将 TH_DATABASE_URL 设置为
+一个可用的 PostgreSQL 连接字符串来运行。
+"""
+from datetime import datetime, timedelta, timezone
 
+import pytest
 
-def should_include_file(file_path: Path) -> bool:
-    """判断是否应该包含该文件在快照中。
+from trans_hub.core.interfaces import PersistenceHandler
+from trans_hub.core.types import TranslationStatus
+from tests.integration.conftest import requires_postgres
 
-    Args:
-        file_path: 文件路径。
-
-    Returns:
-        True表示包含，False表示排除。
-    """
-    # 排除隐藏文件和目录
-    if any(part.startswith('.') for part in file_path.parts):
-        return False
-
-    # 排除特定目录
-    excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
-    if any(part in excluded_dirs for part in file_path.parts):
-        return False
-
-    # 包含特定类型的文件
-    included_extensions = {'.py', '.sql', '.toml', '.yml', '.yaml', '.rst', '.sh', '.json'}
-    return file_path.suffix in included_extensions
+# 将标记应用到整个模块的所有测试
+pytestmark = requires_postgres
 
 
-def generate_snapshot(root_path: str = ".", output_file: str = "project_snapshot.txt") -> None:
-    """生成项目快照文件。
+@pytest.mark.asyncio
+async def test_pg_ensure_content_and_context_creates_all_entities(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """测试 ensure_content_and_context 是否能正确创建所有实体。"""
+    business_id = "test.pg.hello"
+    source_payload = {"text": "Hello PG"}
+    context = {"domain": "testing"}
 
-    Args:
-        root_path: 项目根目录路径。
-        output_file: 输出文件名。
-    """
-    root = Path(root_path)
-    output_path = root / "tools" / output_file
+    content_id, context_id = await postgres_handler.ensure_content_and_context(
+        business_id=business_id,
+        source_payload=source_payload,
+        context=context,
+    )
+    assert content_id is not None
+    assert context_id is not None
 
-    with open(output_path, 'w', encoding='utf-8') as f:
-        # 写入标题
-        f.write("# Trans-Hub 项目完整快照\n\n")
-
-        # 获取并写入目录结构
-        f.write("## 目录结构\n\n")
-        for path in sorted(root.rglob('*')):
-            # 跳过输出文件本身
-            if path.resolve() == output_path.resolve():
-                continue
-
-            # 排除隐藏文件和目录
-            if any(part.startswith('.') for part in path.parts):
-                continue
-
-            # 排除特定目录
-            excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
-            if any(part in excluded_dirs for part in path.parts):
-                continue
-
-            # 计算相对于根目录的层级
-            relative_path = path.relative_to(root)
-            depth = len(relative_path.parts) - 1
-            indent = "  " * depth
-
-            # 写入目录或文件
-            if path.is_dir():
-                f.write(f"{indent}- {path.name}/\n")
-            else:
-                f.write(f"{indent}- {path.name}\n")
-
-        # 写入文件内容
-        f.write("\n## 文件内容\n\n")
-
-        # 收集所有需要包含的文件
-        included_files = []
-        for path in sorted(root.rglob('*')):
-            # 跳过输出文件本身
-            if path.resolve() == output_path.resolve():
-                continue
-
-            if path.is_file() and should_include_file(path):
-                included_files.append(path)
-
-        # 写入每个文件的内容
-        for file_path in included_files:
-            relative_path = file_path.relative_to(root)
-            f.write(f"### {relative_path}\n\n")
-
-            try:
-                # 尝试以文本方式读取文件
-                content = file_path.read_text(encoding='utf-8')
-                # 规范化换行符
-                content = content.replace('\r\n', '\n').replace('\r', '\n')
-                f.write(f"``````\n{content}\n``````\n\n")
-            except Exception as e:
-                f.write(f"``````\n[无法读取文件内容: {e}]\n``````\n\n")
-
-    print(f"项目快照已生成: {output_path}")
+    source_payload_updated = {"text": "Hello PG Updated"}
+    content_id2, context_id2 = await postgres_handler.ensure_content_and_context(
+        business_id=business_id,
+        source_payload=source_payload_updated,
+        context=context,
+    )
+    assert content_id == content_id2
+    assert context_id == context_id2
 
 
-def main() -> None:
-    """主函数。"""
-    print("正在生成项目快照...")
-    generate_snapshot()
+@pytest.mark.asyncio
+async def test_pg_stream_translatable_items_fetches_and_updates_status(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """测试 stream_translatable_items 能否正确获取 PENDING 任务并将其状态更新为 TRANSLATING。"""
+    business_id = "test.pg.stream"
+    content_id, _ = await postgres_handler.ensure_content_and_context(
+        business_id, {"text": "stream me"}, None
+    )
+    target_langs = ["de", "fr", "es"]
+    await postgres_handler.create_pending_translations(
+        content_id, None, target_langs, "en", "1.0"
+    )
+
+    stream_de = postgres_handler.stream_translatable_items(
+        "de", [TranslationStatus.PENDING], batch_size=2
+    )
+    items_de = [item async for batch in stream_de for item in batch]
+
+    assert len(items_de) == 1
+    assert items_de[0].business_id == business_id
+
+    res_de = await postgres_handler.find_translation(business_id, "de")
+    assert res_de and res_de.status == TranslationStatus.TRANSLATING
+
+    res_es = await postgres_handler.find_translation(business_id, "es")
+    assert res_es and res_es.status == TranslationStatus.PENDING
 
 
-if __name__ == "__main__":
-    main()
+@pytest.mark.asyncio
+async def test_pg_garbage_collect_cleans_up_old_data_correctly(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """测试 garbage_collect 能否正确清理一个完整的孤立内容生命周期。"""
+    # 1. 设置
+    stale_bid = "test.pg.stale_item"
+    fresh_bid = "test.pg.fresh_item"
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+
+    # 创建 stale 和 fresh content, job, translation
+    stale_content_id, _ = await postgres_handler.ensure_content_and_context(
+        stale_bid, {"text": "stale"}, None
+    )
+    await postgres_handler.create_pending_translations(
+        stale_content_id, None, ["de"], "en", "1.0"
+    )
+
+    fresh_content_id, _ = await postgres_handler.ensure_content_and_context(
+        fresh_bid, {"text": "fresh"}, None
+    )
+
+    PostgresHandlerImpl = __import__("trans_hub.persistence.postgres").persistence.postgres.PostgresPersistenceHandler
+    if isinstance(postgres_handler, PostgresHandlerImpl):
+        async with postgres_handler._pool.acquire() as conn:
+            # 手动将 stale job 的时间戳设为过期
+            await conn.execute(
+                "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = $2",
+                two_days_ago, stale_content_id
+            )
+
+    # 2. 第一次 GC: 删除过期的 job
+    report1 = await postgres_handler.garbage_collect(retention_days=1, dry_run=False)
+    assert report1["deleted_jobs"] == 1
+    # 此时 stale_content 因为还有 translation 关联，不应被删除
+    assert report1["deleted_content"] == 0
+
+    # 3. 手动删除 stale_content 的关联翻译，使其彻底孤立
+    if isinstance(postgres_handler, PostgresHandlerImpl):
+        async with postgres_handler._pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM th_translations WHERE content_id = $1", stale_content_id
+            )
+
+    # 4. 第二次 GC: 删除已彻底孤立的 content
+    report2 = await postgres_handler.garbage_collect(retention_days=1, dry_run=False)
+    assert report2["deleted_content"] == 1
+
+    # 5. 最终验证
+    if isinstance(postgres_handler, PostgresHandlerImpl):
+        async with postgres_handler._pool.acquire() as conn:
+            stale_content = await conn.fetchrow(
+                "SELECT 1 FROM th_content WHERE id = $1", stale_content_id
+            )
+            fresh_content = await conn.fetchrow(
+                "SELECT 1 FROM th_content WHERE id = $1", fresh_content_id
+            )
+            assert stale_content is None
+            assert fresh_content is not None
