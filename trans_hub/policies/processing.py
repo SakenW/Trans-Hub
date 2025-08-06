@@ -228,7 +228,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         failed_results: list[TranslationResult] = []
         for item in items:
             text_value = item.source_payload.get(self.PAYLOAD_TEXT_KEY)
-            # 修复：同时检查类型和是否为空字符串
             if not isinstance(text_value, str) or not text_value.strip():
                 error_msg = (
                     f"源载荷 (source_payload) 中的 '{self.PAYLOAD_TEXT_KEY}' 字段"
@@ -284,7 +283,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             str(item.source_payload.get(self.PAYLOAD_TEXT_KEY)) for item in items
         ]
 
-        # 修复：在推断源语言时过滤掉 None 值
         source_langs = {
             item.source_lang for item in items if item.source_lang is not None
         }
@@ -313,8 +311,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         p_context: ProcessingContext,
     ) -> None:
         """[私有] 将新获得的成功翻译结果存入缓存。"""
-        # 修复：构建一个包含任务和其对应翻译ID的元组列表
-        tasks_with_ids: List[Tuple[asyncio.Task, str]] = []
+        # 修复：为 Task 添加 [None] 类型参数以满足 mypy --strict
+        tasks_with_ids: List[Tuple[asyncio.Task[None], str]] = []
 
         for res in results:
             if (
@@ -324,7 +322,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             ):
                 request = TranslationRequest(
                     source_payload=res.original_payload,
-                    source_lang=p_context.config.source_lang,  # 简化处理，因为缓存键已足够独特
+                    source_lang=p_context.config.source_lang,  # 简化处理，因为缓存键已足够独特 # noqa: E501
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )
@@ -342,7 +340,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             cache_results = await asyncio.gather(*tasks, return_exceptions=True)
             for i, result in enumerate(cache_results):
                 if isinstance(result, Exception):
-                    # 修复：使用正确的 translation_id
                     translation_id = tasks_with_ids[i][1]
                     logger.warning(
                         "写入翻译缓存时发生错误，主流程不受影响。",
