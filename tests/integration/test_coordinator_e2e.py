@@ -152,7 +152,8 @@ async def test_garbage_collection_respects_date_boundary(
     # 第二步：使用 handler 自身的连接和事务来更新时间戳
     handler = coordinator.handler
     assert isinstance(handler, SQLitePersistenceHandler)
-    async with handler._transaction() as db: # type: ignore
+    # 修复：移除多余的 type: ignore
+    async with handler._transaction() as db:
         await db.execute(
             "UPDATE th_jobs SET last_requested_at = ? WHERE content_id = "
             "(SELECT id FROM th_content WHERE business_id = ?)",
@@ -174,7 +175,8 @@ async def test_garbage_collection_respects_date_boundary(
     assert report.get("deleted_jobs", 0) == 1
     
     # 优化：使用 handler 的连接进行验证，确保单一连接
-    async with handler._transaction() as db: # type: ignore
+    # 修复：移除多余的 type: ignore
+    async with handler._transaction() as db:
         cursor = await db.execute("SELECT COUNT(*) FROM th_jobs")
         row = await cursor.fetchone()
         assert row is not None and row[0] == 1
