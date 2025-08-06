@@ -50,7 +50,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
             )
         self.dsn = dsn
         self._pool: Optional["asyncpg.Pool"] = None
-        self._notification_listener_conn: Optional["asyncpg.Connection"] = None
         self._notification_queue: Optional["asyncio.Queue[str]"] = None
         logger.info("PostgreSQL 持久层已配置")
 
@@ -83,19 +82,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def close(self) -> None:
         """关闭数据库连接池和所有相关连接。"""
-        if (
-            self._notification_listener_conn
-            and not self._notification_listener_conn.is_closed()
-        ):
-            try:
-                await self._notification_listener_conn.remove_listener(
-                    self.NOTIFICATION_CHANNEL, self._notification_callback
-                )
-            except asyncpg.PostgresError as e:
-                logger.warning("移除 PostgreSQL 监听器时出错", error=e)
-            await self._notification_listener_conn.close()
-            self._notification_listener_conn = None
-
         if self._pool:
             await self._pool.close()
             self._pool = None
@@ -504,7 +490,11 @@ class PostgresPersistenceHandler(PersistenceHandler):
         self, connection: "asyncpg.Connection", pid: int, channel: str, payload: str
     ) -> None:
         if self._notification_queue:
-            await self._notification_queue.put(payload)
+            # 使用 try-except 避免在队列已满或关闭时抛出异常
+            try:
+                self._notification_queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                logger.warning("通知队列已满，一个通知被丢弃。")
 
     async def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[实现] 使用 `LISTEN/NOTIFY` 监听数据库通知。"""
@@ -514,7 +504,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         listener_conn = None
         try:
             listener_conn = await self._pool.acquire()
-            self._notification_queue = asyncio.Queue()
+            self._notification_queue = asyncio.Queue(maxsize=100)
             await listener_conn.add_listener(
                 self.NOTIFICATION_CHANNEL, self._notification_callback
             )
@@ -529,6 +519,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
         except asyncio.CancelledError:
             logger.info("通知监听器被取消。")
         finally:
+            # 修复：确保在生成器退出时清理所有相关资源
+            self._notification_queue = None
             if listener_conn:
                 try:
                     await listener_conn.remove_listener(

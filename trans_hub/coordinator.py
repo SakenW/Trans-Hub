@@ -9,11 +9,9 @@ v3.0.0 重大更新：
 
 import asyncio
 from collections.abc import AsyncGenerator
-
-# 修复：为依赖注入导入 datetime
 from datetime import datetime
 from itertools import groupby
-from typing import TYPE_CHECKING, Any, Optional, Set
+from typing import TYPE_CHECKING, Any, List, Optional, Set
 
 import structlog
 
@@ -202,16 +200,30 @@ class Coordinator:
             if not batch:
                 continue
 
+            # 修复：并行处理不同上下文的小组
+            processing_tasks: List[asyncio.Task[List[TranslationResult]]] = []
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
-                batch_results = await self.processing_policy.process_batch(
-                    items_group,
-                    target_lang,
-                    self.processing_context,
-                    active_engine,
+                task = asyncio.create_task(
+                    self.processing_policy.process_batch(
+                        items_group,
+                        target_lang,
+                        self.processing_context,
+                        active_engine,
+                    )
                 )
-                await self.handler.save_translation_results(batch_results)
-                for result in batch_results:
+                processing_tasks.append(task)
+
+            # 等待所有上下文小组处理完成
+            grouped_results: List[List[TranslationResult]] = await asyncio.gather(
+                *processing_tasks
+            )
+
+            # 将结果扁平化并保存
+            all_results = [result for group in grouped_results for result in group]
+            if all_results:
+                await self.handler.save_translation_results(all_results)
+                for result in all_results:
                     yield result
 
     async def request(
@@ -288,13 +300,11 @@ class Coordinator:
         self,
         expiration_days: Optional[int] = None,
         dry_run: bool = False,
-        # 修复：为依赖注入添加 _now 参数
         _now: Optional[datetime] = None,
     ) -> dict[str, int]:
         """运行垃圾回收，清理旧的、无关联的数据。"""
         self._check_is_active()
         days = expiration_days or self.config.gc_retention_days
-        # 修复：将 _now 参数传递给 handler
         return await self.handler.garbage_collect(
             retention_days=days, dry_run=dry_run, _now=_now
         )

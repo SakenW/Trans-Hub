@@ -426,62 +426,77 @@ class SQLitePersistenceHandler(PersistenceHandler):
         dry_run: bool = False,
         _now: Optional[datetime] = None,
     ) -> dict[str, int]:
-        # 修复：恢复到逻辑清晰的版本
         now = _now or datetime.now(timezone.utc)
         cutoff_date = (now - timedelta(days=retention_days)).date()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            cursor = await tx.execute(
-                "SELECT id FROM th_jobs WHERE DATE(last_requested_at) < ?",
-                (cutoff_date.isoformat(),),
-            )
-            expired_job_ids = [row[0] for row in await cursor.fetchall()]
-            await cursor.close()
-            stats["deleted_jobs"] = len(expired_job_ids)
-
-            if not dry_run and expired_job_ids:
-                placeholders = ",".join("?" * len(expired_job_ids))
-                await tx.execute(
-                    f"DELETE FROM th_jobs WHERE id IN ({placeholders})",
-                    expired_job_ids,
+            # 修复：使用单条 DELETE 语句并从 rowcount 获取计数，以降低内存占用
+            delete_jobs_sql = "DELETE FROM th_jobs WHERE DATE(last_requested_at) < ?"
+            if dry_run:
+                delete_jobs_sql = (
+                    "SELECT COUNT(*) FROM th_jobs WHERE DATE(last_requested_at) < ?"
                 )
 
-            cursor = await tx.execute(
-                """
+            cursor = await tx.execute(delete_jobs_sql, (cutoff_date.isoformat(),))
+            stats["deleted_jobs"] = (
+                row[0]
+                if dry_run and (row := await cursor.fetchone())
+                else cursor.rowcount
+            )
+            await cursor.close()
+
+            # 对于孤立项，使用 COUNT(*) 避免加载ID，并使用子查询进行删除
+            orphan_content_sql_select = """
                 SELECT c.id FROM th_content c
-                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                WHERE
+                  NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
                   AND NOT EXISTS (
-                      SELECT 1 FROM th_translations t WHERE t.content_id = c.id
+                    SELECT 1 FROM th_translations t WHERE t.content_id = c.id
                   )
-                """
-            )
-            orphan_content_ids = [row[0] for row in await cursor.fetchall()]
-            await cursor.close()
-            stats["deleted_content"] = len(orphan_content_ids)
-            if not dry_run and orphan_content_ids:
-                placeholders = ",".join("?" * len(orphan_content_ids))
-                await tx.execute(
-                    f"DELETE FROM th_content WHERE id IN ({placeholders})",
-                    orphan_content_ids,
+            """
+            if dry_run:
+                orphan_content_sql = (
+                    f"SELECT COUNT(*) FROM ({orphan_content_sql_select})"
                 )
-            cursor = await tx.execute(
-                """
+            else:
+                orphan_content_sql = (
+                    f"DELETE FROM th_content WHERE id IN ({orphan_content_sql_select})"
+                )
+
+            cursor = await tx.execute(orphan_content_sql)
+            stats["deleted_content"] = (
+                row[0]
+                if dry_run and (row := await cursor.fetchone())
+                else cursor.rowcount
+            )
+            await cursor.close()
+
+            orphan_contexts_sql_select = """
                 SELECT ctx.id FROM th_contexts ctx
-                WHERE NOT EXISTS (
+                WHERE
+                  NOT EXISTS (
                     SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
+                  )
+            """
+            if dry_run:
+                orphan_contexts_sql = (
+                    f"SELECT COUNT(*) FROM ({orphan_contexts_sql_select})"
                 )
-                """
+            else:
+                orphan_contexts_sql = (
+                    f"DELETE FROM th_contexts "
+                    f"WHERE id IN ({orphan_contexts_sql_select})"
+                )
+
+            cursor = await tx.execute(orphan_contexts_sql)
+            stats["deleted_contexts"] = (
+                row[0]
+                if dry_run and (row := await cursor.fetchone())
+                else cursor.rowcount
             )
-            orphan_context_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
-            stats["deleted_contexts"] = len(orphan_context_ids)
-            if not dry_run and orphan_context_ids:
-                placeholders = ",".join("?" * len(orphan_context_ids))
-                await tx.execute(
-                    f"DELETE FROM th_contexts WHERE id IN ({placeholders})",
-                    orphan_context_ids,
-                )
+
         return stats
 
     async def move_to_dlq(

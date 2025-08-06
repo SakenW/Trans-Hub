@@ -280,12 +280,14 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
+        # 修复：移除多余的 str() 转换
         texts_to_translate = [
-            str(item.source_payload.get(self.PAYLOAD_TEXT_KEY)) for item in items
+            item.source_payload[self.PAYLOAD_TEXT_KEY] for item in items
         ]
 
+        # 修复：在推断源语言时过滤掉 None 和空字符串
         source_langs = {
-            item.source_lang for item in items if item.source_lang is not None
+            lang for item in items if (lang := item.source_lang) and lang.strip()
         }
 
         if len(source_langs) <= 1:
@@ -299,12 +301,20 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
             batch_source_lang = p_context.config.source_lang
 
-        return await active_engine.atranslate_batch(
-            texts=texts_to_translate,
-            target_lang=target_lang,
-            source_lang=batch_source_lang,
-            context=engine_context,
-        )
+        # 修复：为引擎调用添加异常保护
+        try:
+            return await active_engine.atranslate_batch(
+                texts=texts_to_translate,
+                target_lang=target_lang,
+                source_lang=batch_source_lang,
+                context=engine_context,
+            )
+        except Exception as e:
+            logger.error("引擎在执行 atranslate_batch 时发生意外异常", exc_info=True)
+            error_msg = f"引擎执行异常: {e.__class__.__name__}: {e}"
+            return [EngineError(error_message=error_msg, is_retryable=True)] * len(
+                items
+            )
 
     async def _cache_new_results(
         self,
@@ -321,10 +331,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 and not res.from_cache
                 and res.translated_payload is not None
             ):
-                # 修复：从 item_map 中查找原始 ContentItem 以获取正确的 source_lang
                 original_item = item_map.get(res.translation_id)
                 if not original_item:
-                    continue  # Should not happen, but as a safeguard
+                    continue
 
                 request = TranslationRequest(
                     source_payload=res.original_payload,
