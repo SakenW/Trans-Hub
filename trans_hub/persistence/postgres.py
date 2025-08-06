@@ -385,11 +385,16 @@ class PostgresPersistenceHandler(PersistenceHandler):
         )
 
     async def garbage_collect(
-        self, retention_days: int, dry_run: bool = False
+        self,
+        retention_days: int,
+        dry_run: bool = False,
+        _now: Optional[datetime] = None,
     ) -> dict[str, int]:
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
-        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+        now = _now or datetime.now(timezone.utc)
+        cutoff_date = (now - timedelta(days=retention_days)).date()
 
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
         try:
@@ -397,16 +402,16 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 async with conn.transaction():
                     del_jobs_sql = """
                         DELETE FROM th_jobs
-                        WHERE last_requested_at < $1
+                        WHERE DATE(last_requested_at) < $1
                         RETURNING id;
                     """
                     if dry_run:
                         del_jobs_sql = """
                             SELECT id FROM th_jobs
-                            WHERE last_requested_at < $1;
+                            WHERE DATE(last_requested_at) < $1;
                         """
                     stats["deleted_jobs"] = len(
-                        await conn.fetch(del_jobs_sql, cutoff_datetime)
+                        await conn.fetch(del_jobs_sql, cutoff_date)
                     )
 
                     del_content_sql = """
@@ -524,7 +529,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
         except asyncio.CancelledError:
             logger.info("通知监听器被取消。")
         finally:
-            # 修复：确保在生成器退出时（无论何种原因），都清理资源
             if listener_conn:
                 try:
                     await listener_conn.remove_listener(

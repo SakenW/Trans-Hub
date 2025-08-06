@@ -15,7 +15,8 @@ class EngineName(str, enum.Enum):
     DEBUG = "debug"
     OPENAI = "openai"
     TRANSLATORS = "translators"
-    MOCK_ENGINE = "mock_engine"
+    # 修复：移除未实现的 MOCK_ENGINE 枚举，以防止无效配置
+    # MOCK_ENGINE = "mock_engine"
 
 
 class LoggingConfig(BaseModel):
@@ -38,12 +39,9 @@ class TransHubConfig(BaseSettings):
 
     database_url: str = "sqlite:///transhub.db"
     active_engine: EngineName = EngineName.TRANSLATORS
-    # 修复：增加 gt=0 约束，确保 batch_size 必须为正数
     batch_size: int = Field(default=50, gt=0)
     source_lang: Optional[str] = Field(default=None)
-    # 修复：增加 gt=0 约束，确保 gc_retention_days 必须为正数
     gc_retention_days: int = Field(default=90, gt=0)
-    # 修复：增加 gt=0 约束，确保 worker_poll_interval 必须为正数
     worker_poll_interval: int = Field(
         default=10, description="Worker在轮询模式下的等待间隔（秒）", gt=0
     )

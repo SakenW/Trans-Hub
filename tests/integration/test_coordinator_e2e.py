@@ -7,7 +7,7 @@ v3.0.0 更新：全面重写以测试基于新架构的端到端工作流。
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -57,18 +57,13 @@ async def test_request_with_specific_source_lang_overrides_global_config(
     coordinator: Coordinator, mocker: MockerFixture
 ) -> None:
     """测试在请求时指定 source_lang 能否正确覆盖全局配置。"""
-    # GIVEN: 全局 source_lang 在 test_config fixture 中被设为 "en"
     assert coordinator.config.source_lang == "en"
-
-    # 准备 mock
     mock_translate = mocker.patch.object(
         coordinator.active_engine,
         "atranslate_batch",
         new_callable=AsyncMock,
         return_value=[EngineSuccess(translated_text="mocked")],
     )
-
-    # WHEN: 发起一个指定了不同 source_lang 的请求
     business_id = "test.override.french_greeting"
     source_payload = {"text": "Bonjour"}
     target_lang = "de"
@@ -80,10 +75,8 @@ async def test_request_with_specific_source_lang_overrides_global_config(
         target_langs=[target_lang],
         source_lang=override_source_lang,
     )
-
     _ = [res async for res in coordinator.process_pending_translations(target_lang)]
 
-    # THEN: 验证引擎被调用时，使用的是覆盖后的 source_lang
     mock_translate.assert_awaited_once()
     call_args = mock_translate.call_args
     assert call_args.kwargs["source_lang"] == override_source_lang
@@ -138,35 +131,28 @@ async def test_translators_engine_workflow(coordinator: Coordinator) -> None:
 async def test_garbage_collection_respects_date_boundary(
     coordinator: Coordinator,
 ) -> None:
-    """测试垃圾回收（GC）能精确地根据日期边界清理过期数据，且不依赖 mock 时间。"""
-    # GIVEN: 两个翻译任务，一个将被设置为刚好过期，一个刚好未过期
+    """测试垃圾回收（GC）能精确地根据日期边界清理过期数据。"""
     retention_days = 2
+    now_for_test = datetime(2024, 1, 5, 12, 0, 0, tzinfo=timezone.utc)
     
-    # 模拟“现在”是某个固定时间点
-    now_for_test = datetime.now(timezone.utc)
-    
-    # last_requested_at < now - retention_days，所以它应该被删除。
     stale_bid = "item.stale"
-    stale_timestamp = now_for_test - timedelta(days=retention_days, seconds=1)
+    stale_timestamp = now_for_test - timedelta(days=retention_days + 1)
 
-    # last_requested_at >= now - retention_days，所以它应该被保留。
     fresh_bid = "item.fresh"
-    fresh_timestamp = now_for_test - timedelta(days=retention_days, seconds=-1)
+    fresh_timestamp = now_for_test - timedelta(days=retention_days)
 
-    # 创建数据
+    # 第一步：创建所有数据
     for bid in [stale_bid, fresh_bid]:
         await coordinator.request(
             business_id=bid,
             source_payload={"text": bid},
             target_langs=["de"],
         )
-    _ = [res async for res in coordinator.process_pending_translations("de")]
-    
-    # 手动更新时间戳以模拟过期
+
+    # 第二步：使用 handler 自身的连接和事务来更新时间戳
     handler = coordinator.handler
     assert isinstance(handler, SQLitePersistenceHandler)
-    db_path = handler.db_path
-    async with aiosqlite.connect(db_path) as db:
+    async with handler._transaction() as db: # type: ignore
         await db.execute(
             "UPDATE th_jobs SET last_requested_at = ? WHERE content_id = "
             "(SELECT id FROM th_content WHERE business_id = ?)",
@@ -177,25 +163,27 @@ async def test_garbage_collection_respects_date_boundary(
             "(SELECT id FROM th_content WHERE business_id = ?)",
             (fresh_timestamp.isoformat(), fresh_bid),
         )
-        await db.commit()
     
-    # WHEN: 运行垃圾回收
-    report = await coordinator.run_garbage_collection(dry_run=False, expiration_days=retention_days)
+    _ = [res async for res in coordinator.process_pending_translations("de")]
 
-    # THEN: 验证只有过期的任务被删除
+    # WHEN: 通过 Coordinator 的公共接口调用 GC，并注入 _now
+    report = await coordinator.run_garbage_collection(
+        expiration_days=retention_days, dry_run=False, _now=now_for_test
+    )
+
     assert report.get("deleted_jobs", 0) == 1
     
-    # 验证数据库状态
-    async with aiosqlite.connect(db_path) as db:
+    # 优化：使用 handler 的连接进行验证，确保单一连接
+    async with handler._transaction() as db: # type: ignore
         cursor = await db.execute("SELECT COUNT(*) FROM th_jobs")
         row = await cursor.fetchone()
-        assert row is not None and row[0] == 1 # 应该只剩一个 job
+        assert row is not None and row[0] == 1
         
         cursor = await db.execute(
             "SELECT c.business_id FROM th_jobs j JOIN th_content c ON j.content_id = c.id"
         )
         row = await cursor.fetchone()
-        assert row is not None and row[0] == fresh_bid # 剩下的必须是 fresh_bid
+        assert row is not None and row[0] == fresh_bid
 
 
 @pytest.mark.asyncio
@@ -211,7 +199,6 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     )
 
     processing_started = asyncio.Event()
-
     original_process_batch = coordinator.processing_policy.process_batch
 
     async def slow_process_batch(*args: Any, **kwargs: Any) -> list[TranslationResult]:
@@ -230,11 +217,8 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     ):
         worker_task = asyncio.create_task(consume_worker())
         coordinator.track_task(worker_task)
-
         await processing_started.wait()
-
         close_task = asyncio.create_task(coordinator.close())
-
         await close_task
 
         assert worker_task.done()

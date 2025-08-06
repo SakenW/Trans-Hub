@@ -5,7 +5,7 @@ v3.0.0 重大更新：适配结构化载荷（payload）和新的核心类型。
 """
 
 import asyncio
-from typing import Any, List, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
 
 import structlog
 
@@ -204,6 +204,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         processed_results: list[TranslationResult] = list(cached_results)
         processed_results.extend(payload_error_results)
         retryable_items: list[ContentItem] = []
+        item_map = {item.translation_id: item for item in batch}
 
         for item, output in zip(valid_items, engine_outputs):
             if isinstance(output, EngineError) and output.is_retryable:
@@ -214,7 +215,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 processed_results.append(result)
 
-        await self._cache_new_results(processed_results, p_context)
+        await self._cache_new_results(processed_results, p_context, item_map)
         return processed_results, retryable_items
 
     def _validate_payload_structure(
@@ -309,9 +310,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         self,
         results: list[TranslationResult],
         p_context: ProcessingContext,
+        item_map: Dict[str, ContentItem],
     ) -> None:
         """[私有] 将新获得的成功翻译结果存入缓存。"""
-        # 修复：为 Task 添加 [None] 类型参数以满足 mypy --strict
         tasks_with_ids: List[Tuple[asyncio.Task[None], str]] = []
 
         for res in results:
@@ -320,9 +321,15 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 and not res.from_cache
                 and res.translated_payload is not None
             ):
+                # 修复：从 item_map 中查找原始 ContentItem 以获取正确的 source_lang
+                original_item = item_map.get(res.translation_id)
+                if not original_item:
+                    continue  # Should not happen, but as a safeguard
+
                 request = TranslationRequest(
                     source_payload=res.original_payload,
-                    source_lang=p_context.config.source_lang,  # 简化处理，因为缓存键已足够独特 # noqa: E501
+                    source_lang=original_item.source_lang
+                    or p_context.config.source_lang,
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )

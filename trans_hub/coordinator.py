@@ -9,6 +9,9 @@ v3.0.0 重大更新：
 
 import asyncio
 from collections.abc import AsyncGenerator
+
+# 修复：为依赖注入导入 datetime
+from datetime import datetime
 from itertools import groupby
 from typing import TYPE_CHECKING, Any, Optional, Set
 
@@ -24,8 +27,6 @@ from .core import (
     TranslationResult,
     TranslationStatus,
 )
-
-# 修复：移除此处的 discover_engines 导入
 from .engine_registry import ENGINE_REGISTRY
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
@@ -49,8 +50,6 @@ class Coordinator:
         """
         初始化 Coordinator。
         """
-        # 修复：移除此处的 discover_engines() 调用。
-        # 引擎发现应在应用程序的最高入口点（如CLI）执行一次。
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
@@ -62,7 +61,6 @@ class Coordinator:
             self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
 
         self._shutting_down = False
-        # v3.5.5 修复：使用任务跟踪代替复杂的锁机制
         self._active_tasks: Set[asyncio.Task[Any]] = set()
 
         self.processing_context = ProcessingContext(
@@ -137,19 +135,17 @@ class Coordinator:
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
 
-        init_tasks = [
-            instance.initialize()
+        self._get_or_create_engine_instance(self.config.active_engine.value)
+
+        instances_to_init = {
+            instance
             for instance in self._engine_instances.values()
             if not instance.initialized
-        ]
-        active_engine_instance = self._get_or_create_engine_instance(
-            self.config.active_engine.value
-        )
-        if not active_engine_instance.initialized:
-            init_tasks.append(active_engine_instance.initialize())
+        }
 
-        if init_tasks:
-            await asyncio.gather(*list(set(init_tasks)))
+        if instances_to_init:
+            init_tasks = [instance.initialize() for instance in instances_to_init]
+            await asyncio.gather(*init_tasks)
 
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
@@ -289,12 +285,19 @@ class Coordinator:
         )
 
     async def run_garbage_collection(
-        self, expiration_days: Optional[int] = None, dry_run: bool = False
+        self,
+        expiration_days: Optional[int] = None,
+        dry_run: bool = False,
+        # 修复：为依赖注入添加 _now 参数
+        _now: Optional[datetime] = None,
     ) -> dict[str, int]:
         """运行垃圾回收，清理旧的、无关联的数据。"""
         self._check_is_active()
         days = expiration_days or self.config.gc_retention_days
-        return await self.handler.garbage_collect(retention_days=days, dry_run=dry_run)
+        # 修复：将 _now 参数传递给 handler
+        return await self.handler.garbage_collect(
+            retention_days=days, dry_run=dry_run, _now=_now
+        )
 
     def track_task(self, task: asyncio.Task[Any]) -> None:
         """[公共] 允许外部调用者（如 worker CLI）注册其任务以进行优雅停机。"""

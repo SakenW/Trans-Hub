@@ -6,6 +6,9 @@ v3.0.0.dev: 重构以适应新的数据模型，并为可插拔的持久层设�
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+
+# 修复：为依赖注入导入 datetime
+from datetime import datetime
 from typing import Any, Optional, Protocol
 
 from trans_hub.core.types import (
@@ -89,7 +92,11 @@ class PersistenceHandler(Protocol):
     ) -> Optional[TranslationResult]: ...
 
     async def garbage_collect(
-        self, retention_days: int, dry_run: bool = False
+        self,
+        retention_days: int,
+        dry_run: bool = False,
+        # 修复：为依赖注入添加 _now 参数
+        _now: Optional[datetime] = None,
     ) -> dict[str, int]: ...
 
     async def move_to_dlq(

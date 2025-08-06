@@ -84,7 +84,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 await self.connection.commit()
         except Exception:
             logger.error("SQLite 事务执行失败，正在回滚", exc_info=True)
-            if self.connection.is_alive() and transaction_started:
+            if self._conn and transaction_started:
                 await self.connection.rollback()
             raise
 
@@ -127,8 +127,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 batch_items: list[ContentItem] = []
                 async with self._transaction() as tx:
                     status_placeholders = ",".join("?" for _ in statuses)
-                    # v3.x 优化: 在 SQL 中进行排序，以减轻 Python 端的负担
-                    # 并确保 itertools.groupby 能够正确工作。
                     find_ids_sql = (
                         f"SELECT id FROM th_translations "
                         f"WHERE lang_code = ? AND status IN ({status_placeholders}) "
@@ -423,19 +421,20 @@ class SQLitePersistenceHandler(PersistenceHandler):
         )
 
     async def garbage_collect(
-        self, retention_days: int, dry_run: bool = False
+        self,
+        retention_days: int,
+        dry_run: bool = False,
+        _now: Optional[datetime] = None,
     ) -> dict[str, int]:
-        # 修复：在 Python 端计算精确的 cutoff_date ISO 字符串
-        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
-        cutoff_iso_string = cutoff_datetime.isoformat()
-
+        # 修复：恢复到逻辑清晰的版本
+        now = _now or datetime.now(timezone.utc)
+        cutoff_date = (now - timedelta(days=retention_days)).date()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            # 修复：在 SQL 中直接使用 ISO 字符串比较，不再依赖数据库的 DATE() 函数
             cursor = await tx.execute(
-                "SELECT id FROM th_jobs WHERE last_requested_at < ?",
-                (cutoff_iso_string,),
+                "SELECT id FROM th_jobs WHERE DATE(last_requested_at) < ?",
+                (cutoff_date.isoformat(),),
             )
             expired_job_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
