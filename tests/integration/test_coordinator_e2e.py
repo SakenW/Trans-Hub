@@ -9,13 +9,18 @@ import os
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 import pytest
+from pytest_mock import MockerFixture
 
 from trans_hub import Coordinator, EngineName
-from trans_hub.core import TranslationResult, TranslationStatus
+from trans_hub.core import (
+    EngineSuccess,
+    TranslationResult,
+    TranslationStatus,
+)
 from trans_hub.persistence.sqlite import SQLitePersistenceHandler
 
 
@@ -45,6 +50,44 @@ async def test_full_workflow_with_debug_engine(coordinator: Coordinator) -> None
     fetched_result = await coordinator.get_translation(business_id, target_lang)
     assert fetched_result is not None
     assert fetched_result.status == TranslationStatus.TRANSLATED
+
+
+@pytest.mark.asyncio
+async def test_request_with_specific_source_lang_overrides_global_config(
+    coordinator: Coordinator, mocker: MockerFixture
+) -> None:
+    """测试在请求时指定 source_lang 能否正确覆盖全局配置。"""
+    # GIVEN: 全局 source_lang 在 test_config fixture 中被设为 "en"
+    assert coordinator.config.source_lang == "en"
+
+    # 准备 mock
+    mock_translate = mocker.patch.object(
+        coordinator.active_engine,
+        "atranslate_batch",
+        new_callable=AsyncMock,
+        return_value=[EngineSuccess(translated_text="mocked")],
+    )
+
+    # WHEN: 发起一个指定了不同 source_lang 的请求
+    business_id = "test.override.french_greeting"
+    source_payload = {"text": "Bonjour"}
+    target_lang = "de"
+    override_source_lang = "fr"
+
+    await coordinator.request(
+        business_id=business_id,
+        source_payload=source_payload,
+        target_langs=[target_lang],
+        source_lang=override_source_lang,
+    )
+
+    _ = [res async for res in coordinator.process_pending_translations(target_lang)]
+
+    # THEN: 验证引擎被调用时，使用的是覆盖后的 source_lang
+    mock_translate.assert_awaited_once()
+    call_args = mock_translate.call_args
+    assert call_args.kwargs["source_lang"] == override_source_lang
+    assert call_args.kwargs["source_lang"] != coordinator.config.source_lang
 
 
 @pytest.mark.skipif(
@@ -150,7 +193,7 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     )
 
     processing_started = asyncio.Event()
-    
+
     original_process_batch = coordinator.processing_policy.process_batch
 
     async def slow_process_batch(*args: Any, **kwargs: Any) -> list[TranslationResult]:
@@ -162,7 +205,6 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
         return await original_callable(*args, **kwargs)
 
     async def consume_worker() -> None:
-        # v3.5.6 修复：移除 try/except，让 CancelledError 自然传播
         _ = [res async for res in coordinator.process_pending_translations(target_lang)]
 
     with patch.object(
@@ -170,17 +212,16 @@ async def test_graceful_shutdown(coordinator: Coordinator) -> None:
     ):
         worker_task = asyncio.create_task(consume_worker())
         coordinator.track_task(worker_task)
-        
+
         await processing_started.wait()
 
         close_task = asyncio.create_task(coordinator.close())
-        
-        # v3.5.6 修复：等待 close() 完成，它会负责取消和等待 worker
+
         await close_task
-        
+
         assert worker_task.done()
         assert worker_task.cancelled()
         assert close_task.done()
-        
+
         with pytest.raises(RuntimeError):
             await coordinator.get_translation(business_id, target_lang)
