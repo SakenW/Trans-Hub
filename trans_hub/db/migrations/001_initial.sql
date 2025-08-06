@@ -45,15 +45,15 @@ CREATE TABLE IF NOT EXISTS th_translations (
     -- v4.0 修复：增加 source_lang 字段以支持多源语言
     source_lang TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
-    
+
     translation_payload_json TEXT,
     engine TEXT,
     engine_version TEXT,
     error TEXT,
-    
+
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'utc')),
     last_updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'utc')),
-    
+
     FOREIGN KEY(content_id) REFERENCES th_content(id) ON DELETE CASCADE,
     FOREIGN KEY(context_id) REFERENCES th_contexts(id) ON DELETE CASCADE,
     UNIQUE(content_id, context_id, lang_code)

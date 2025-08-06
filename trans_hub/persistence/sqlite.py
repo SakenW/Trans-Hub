@@ -520,3 +520,4 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 "DELETE FROM th_translations WHERE id = ?", (item.translation_id,)
             )
         logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
+        

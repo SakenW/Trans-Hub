@@ -44,15 +44,15 @@ CREATE TABLE IF NOT EXISTS th_translations (
     -- v4.0 修复：增加 source_lang 字段以支持多源语言
     source_lang TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
-    
+
     translation_payload_json JSONB,
     engine TEXT,
     engine_version TEXT,
     error TEXT,
-    
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
     last_updated_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
-    
+
     UNIQUE(content_id, context_id, lang_code)
 );
 CREATE INDEX IF NOT EXISTS idx_translations_status_lang ON th_translations(status, lang_code);

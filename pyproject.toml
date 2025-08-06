@@ -90,8 +90,6 @@ pytest = ">=7.4"
 pytest-cov = ">=4.1"
 pytest-asyncio = ">=0.21.0"
 types-cachetools = ">=5.3.1"
-types-asyncpg = "^0.29.0"
-types-asyncpg-exceptions = "^0.1.0"
 pytest-mock = "^3.14.1"
 
 [tool.ruff]

@@ -8,7 +8,9 @@
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any, List, Optional, cast
 
 try:
     import asyncpg
@@ -43,29 +45,198 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 "要使用 PostgresPersistenceHandler, 请安装 'asyncpg' 驱动。"
             )
         self.dsn = dsn
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: Optional["asyncpg.Pool"] = None
+        self._notification_listener_conn: Optional["asyncpg.Connection"] = None
+        self._notification_queue: Optional["asyncio.Queue[str]"] = None
         logger.info("PostgreSQL 持久层已配置")
 
-    async def connect(self) -> None:
-        """建立与数据库的连接。"""
+    @asynccontextmanager
+    async def _get_connection(self) -> AsyncGenerator["asyncpg.Connection", None]:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self.dsn)
-            logger.info("已连接到 PostgreSQL 数据库")
+            raise DatabaseError("数据库连接池未初始化，请先调用 connect()。")
+        conn = await self._pool.acquire()
+        try:
+            yield conn
+        finally:
+            await self._pool.release(conn)
+
+    async def connect(self) -> None:
+        """建立与数据库的连接池。"""
+        if self._pool is None:
+            try:
+                self._pool = await asyncpg.create_pool(self.dsn, min_size=5, max_size=20)
+                logger.info("已连接到 PostgreSQL 数据库并创建连接池")
+            except asyncpg.PostgresError as e:
+                logger.error("连接 PostgreSQL 数据库失败", exc_info=True)
+                raise DatabaseError(f"数据库连接失败: {e}") from e
 
     async def close(self) -> None:
-        """关闭与数据库的连接。"""
-        if self._pool is not None:
+        """关闭数据库连接池和所有相关连接。"""
+        if self._notification_listener_conn:
+            await self._notification_listener_conn.close()
+            self._notification_listener_conn = None
+        if self._pool:
             await self._pool.close()
             self._pool = None
-            logger.info("已关闭与 PostgreSQL 数据库的连接")
+            logger.info("已关闭与 PostgreSQL 数据库的连接池")
 
-    def _transaction(self) -> asyncpg.pool.PoolAcquireContext:
-        """获取数据库事务连接。"""
-        if self._pool is None:
-            raise RuntimeError("数据库连接池未初始化")
-        return self._pool.acquire()
+    async def reset_stale_tasks(self) -> None:
+        """[实现] 在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
+        sql = """
+            UPDATE th_translations
+            SET status = 'PENDING', error = NULL
+            WHERE status = 'TRANSLATING'
+              AND last_updated_at < (now() at time zone 'utc') - interval '1 hour'
+            RETURNING id;
+        """
+        try:
+            async with self._get_connection() as conn:
+                updated_rows = await conn.fetch(sql)
+                if updated_rows:
+                    logger.warning(
+                        "系统自愈：重置了遗留的翻译任务", count=len(updated_rows)
+                    )
+        except asyncpg.PostgresError as e:
+            raise DatabaseError(f"重置陈旧任务失败: {e}") from e
 
-    # ... 其他方法保持不变 ...
+    async def stream_translatable_items(
+        self,
+        lang_code: str,
+        statuses: list[TranslationStatus],
+        batch_size: int,
+        limit: Optional[int] = None,
+    ) -> AsyncGenerator[list[ContentItem], None]:
+        """[实现] 使用 `SELECT ... FOR UPDATE SKIP LOCKED` 从 PG 流式获取任务。"""
+        processed_count = 0
+        status_values = tuple(s.value for s in statuses)
+
+        while limit is None or processed_count < limit:
+            current_batch_size = min(
+                batch_size,
+                (limit - processed_count) if limit is not None else batch_size,
+            )
+            if current_batch_size <= 0:
+                break
+
+            items: list[ContentItem] = []
+            async with self._get_connection() as conn:
+                async with conn.transaction():
+                    # 1. 查询并锁定一批待处理任务的ID
+                    locked_ids_sql = """
+                        SELECT id FROM th_translations
+                        WHERE lang_code = $1 AND status = ANY($2)
+                        ORDER BY context_id, last_updated_at ASC
+                        LIMIT $3
+                        FOR UPDATE SKIP LOCKED;
+                    """
+                    locked_rows = await conn.fetch(
+                        locked_ids_sql, lang_code, status_values, current_batch_size
+                    )
+                    if not locked_rows:
+                        break  # 没有可处理的任务了
+
+                    batch_ids = [row["id"] for row in locked_rows]
+
+                    # 2. 更新这些任务的状态为 "TRANSLATING"
+                    await conn.execute(
+                        """
+                        UPDATE th_translations
+                        SET status = 'TRANSLATING',
+                            last_updated_at = (now() at time zone 'utc')
+                        WHERE id = ANY($1);
+                        """,
+                        batch_ids,
+                    )
+
+                    # 3. 获取这些任务的完整详细信息
+                    details_sql = """
+                        SELECT
+                            t.id AS translation_id,
+                            c.business_id,
+                            t.content_id,
+                            t.context_id,
+                            t.source_lang,
+                            c.source_payload_json,
+                            ctx.context_payload_json
+                        FROM th_translations t
+                        JOIN th_content c ON t.content_id = c.id
+                        LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+                        WHERE t.id = ANY($1)
+                        ORDER BY t.context_id, t.last_updated_at ASC;
+                    """
+                    detail_rows = await conn.fetch(details_sql, batch_ids)
+
+                    items = [
+                        ContentItem(
+                            translation_id=str(r["translation_id"]),
+                            business_id=r["business_id"],
+                            content_id=str(r["content_id"]),
+                            context_id=str(r["context_id"]) if r["context_id"] else None,
+                            source_payload=r["source_payload_json"],
+                            context=r["context_payload_json"],
+                            source_lang=r["source_lang"],
+                        )
+                        for r in detail_rows
+                    ]
+
+            if not items:
+                break
+
+            yield items
+            processed_count += len(items)
+
+    async def ensure_content_and_context(
+        self,
+        business_id: str,
+        source_payload: dict[str, Any],
+        context: Optional[dict[str, Any]],
+    ) -> tuple[str, Optional[str]]:
+        async with self._get_connection() as conn:
+            try:
+                # 插入或获取内容ID
+                content_sql = """
+                    INSERT INTO th_content (business_id, source_payload_json)
+                    VALUES ($1, $2)
+                    ON CONFLICT (business_id) DO UPDATE
+                    SET source_payload_json = EXCLUDED.source_payload_json,
+                        updated_at = (now() at time zone 'utc')
+                    RETURNING id;
+                """
+                content_row = await conn.fetchrow(content_sql, business_id, source_payload)
+                content_id = str(content_row["id"])
+
+                # 如果有上下文，插入或获取上下文ID
+                context_id: Optional[str] = None
+                if context:
+                    context_hash = get_context_hash(context)
+                    context_sql = """
+                        INSERT INTO th_contexts (context_hash, context_payload_json)
+                        VALUES ($1, $2)
+                        ON CONFLICT (context_hash) DO NOTHING
+                        RETURNING id;
+                    """
+                    context_row = await conn.fetchrow(context_sql, context_hash, context)
+                    if not context_row:  # 如果发生冲突（已存在）
+                        context_row = await conn.fetchrow(
+                            "SELECT id FROM th_contexts WHERE context_hash = $1",
+                            context_hash,
+                        )
+                    context_id = str(context_row["id"])
+
+                # 更新或创建 Job
+                await conn.execute(
+                    """
+                    INSERT INTO th_jobs (content_id, last_requested_at)
+                    VALUES ($1, (now() at time zone 'utc'))
+                    ON CONFLICT (content_id) DO UPDATE
+                    SET last_requested_at = (now() at time zone 'utc');
+                    """,
+                    content_id,
+                )
+
+                return content_id, context_id
+            except asyncpg.PostgresError as e:
+                raise DatabaseError(f"确保内容和上下文失败: {e}") from e
 
     async def create_pending_translations(
         self,
@@ -78,52 +249,43 @@ class PostgresPersistenceHandler(PersistenceHandler):
     ) -> None:
         """[实现] 为给定的内容和上下文创建待处理的翻译任务。"""
         try:
-            async with self._transaction() as conn:
-                # v4.0 修复：为 force_retranslate 使用独立的、正确的 SQL 语句
+            async with self._get_connection() as conn:
                 if force_retranslate:
                     sql = """
-INSERT INTO th_translations (
-    content_id, context_id, lang_code, source_lang,
-    engine_version
-)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (content_id, context_id, lang_code) DO UPDATE
-SET status = 'PENDING',
-    source_lang = EXCLUDED.source_lang,
-    engine_version = EXCLUDED.engine_version,
-    translation_payload_json = NULL,
-    error = NULL,
-    last_updated_at = now();
-"""
+                        INSERT INTO th_translations (
+                            content_id, context_id, lang_code, source_lang,
+                            engine_version, status, translation_payload_json, error, last_updated_at
+                        )
+                        SELECT $1, $2, lang.code, $3, $4, 'PENDING', NULL, NULL, (now() at time zone 'utc')
+                        FROM unnest($5::text[]) AS lang(code)
+                        ON CONFLICT (content_id, context_id, lang_code) DO UPDATE
+                        SET status = 'PENDING',
+                            source_lang = EXCLUDED.source_lang,
+                            engine_version = EXCLUDED.engine_version,
+                            translation_payload_json = NULL,
+                            error = NULL,
+                            last_updated_at = (now() at time zone 'utc');
+                    """
                 else:
                     sql = """
-INSERT INTO th_translations (
-    content_id, context_id, lang_code, source_lang,
-    engine_version
-)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
-"""
-
-                params = [
-                    (content_id, context_id, lang, source_lang, engine_version)
-                    for lang in target_langs
-                ]
-                if params:
-                    await conn.executemany(sql, params)
-        except (UniqueViolationError, asyncpg.PostgresError) as e:
+                        INSERT INTO th_translations (
+                            content_id, context_id, lang_code, source_lang, engine_version
+                        )
+                        SELECT $1, $2, lang.code, $3, $4
+                        FROM unnest($5::text[]) AS lang(code)
+                        ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
+                    """
+                await conn.execute(sql, content_id, context_id, source_lang, engine_version, target_langs)
+        except asyncpg.PostgresError as e:
             raise DatabaseError(f"创建待处理翻译失败: {e}") from e
 
-    async def save_translation_results(
-        self,
-        results: list[TranslationResult],
-    ) -> None:
+    async def save_translation_results(self, results: list[TranslationResult]) -> None:
         if not results:
             return
         params = [
             (
                 res.status.value,
-                json.dumps(res.translated_payload) if res.translated_payload else None,
+                res.translated_payload,
                 res.engine,
                 res.error,
                 res.translation_id,
@@ -134,14 +296,14 @@ ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
             UPDATE th_translations
             SET
                 status = $1,
-                translation_payload_json = $2::jsonb,
+                translation_payload_json = $2,
                 engine = $3,
                 error = $4,
-                last_updated_at = now()
-            WHERE id = $5::uuid AND status = 'TRANSLATING';
+                last_updated_at = (now() at time zone 'utc')
+            WHERE id = $5 AND status = 'TRANSLATING';
         """
         try:
-            async with self._transaction() as conn:
+            async with self._get_connection() as conn:
                 await conn.executemany(sql, params)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"保存翻译结果失败: {e}") from e
@@ -171,23 +333,18 @@ ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
             LIMIT 1;
         """
         try:
-            async with self._transaction() as conn:
+            async with self._get_connection() as conn:
                 row = await conn.fetchrow(sql, business_id, target_lang, context_hash)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"查找翻译失败: {e}") from e
         if not row:
             return None
-        original_payload = json.loads(row["source_payload_json"])
-        translated_payload = (
-            json.loads(row["translation_payload_json"])
-            if row["translation_payload_json"]
-            else None
-        )
+
         return TranslationResult(
             translation_id=str(row["translation_id"]),
             business_id=business_id,
-            original_payload=original_payload,
-            translated_payload=translated_payload,
+            original_payload=row["source_payload_json"],
+            translated_payload=row["translation_payload_json"],
             target_lang=target_lang,
             status=TranslationStatus(row["status"]),
             engine=row["engine"],
@@ -200,52 +357,52 @@ ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
         self, retention_days: int, dry_run: bool = False
     ) -> dict[str, int]:
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
-        cutoff_date_sql = "now() - interval '%s days'" % retention_days
+        cutoff_date_sql = f"(now() at time zone 'utc') - interval '{retention_days} days'"
         try:
-            async with self._transaction() as conn:
-                del_jobs_sql = (
-                    f"DELETE FROM th_jobs WHERE last_requested_at < {cutoff_date_sql} "
-                    "RETURNING id;"
-                )
-                if dry_run:
-                    del_jobs_sql = (
-                        f"SELECT id FROM th_jobs WHERE last_requested_at "
-                        f"< {cutoff_date_sql};"
-                    )
-                deleted_jobs = await conn.fetch(del_jobs_sql)
-                stats["deleted_jobs"] = len(deleted_jobs)
-                del_content_sql = """
-                    DELETE FROM th_content c
-                    WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                    RETURNING id;
-                """
-                if dry_run:
+            async with self._get_connection() as conn:
+                async with conn.transaction():
+                    del_jobs_sql = f"""
+                        DELETE FROM th_jobs WHERE last_requested_at < {cutoff_date_sql}
+                        RETURNING id;
+                    """
+                    if dry_run:
+                        del_jobs_sql = (
+                            "SELECT id FROM th_jobs WHERE last_requested_at < "
+                            f"{cutoff_date_sql};"
+                        )
+                    deleted_jobs = await conn.fetch(del_jobs_sql)
+                    stats["deleted_jobs"] = len(deleted_jobs)
+
                     del_content_sql = """
-                        SELECT id FROM th_content c
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
-                        );
+                        DELETE FROM th_content c
+                        WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                        AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
+                        RETURNING id;
                     """
-                deleted_content = await conn.fetch(del_content_sql)
-                stats["deleted_content"] = len(deleted_content)
-                del_contexts_sql = """
-                    DELETE FROM th_contexts ctx
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
-                    ) RETURNING id;
-                """
-                if dry_run:
+                    if dry_run:
+                        del_content_sql = """
+                            SELECT id FROM th_content c
+                            WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                            AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id);
+                        """
+                    deleted_content = await conn.fetch(del_content_sql)
+                    stats["deleted_content"] = len(deleted_content)
+
                     del_contexts_sql = """
-                        SELECT id FROM th_contexts ctx
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM th_translations t
-                            WHERE t.context_id = ctx.id
-                        );
+                        DELETE FROM th_contexts ctx
+                        WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
+                        RETURNING id;
                     """
-                deleted_contexts = await conn.fetch(del_contexts_sql)
-                stats["deleted_contexts"] = len(deleted_contexts)
-                if dry_run:
-                    raise asyncpg.exceptions.RollbackTransactionError("Dry run")
+                    if dry_run:
+                        del_contexts_sql = """
+                            SELECT id FROM th_contexts ctx
+                            WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id);
+                        """
+                    deleted_contexts = await conn.fetch(del_contexts_sql)
+                    stats["deleted_contexts"] = len(deleted_contexts)
+
+                    if dry_run:
+                        raise asyncpg.exceptions.RollbackTransactionError("Dry run")
             return stats
         except asyncpg.exceptions.RollbackTransactionError:
             logger.info("垃圾回收 (dry run) 完成，事务已回滚。")
@@ -262,189 +419,54 @@ ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
         engine_version: str,
     ) -> None:
         try:
-            async with self._transaction() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO th_dead_letter_queue (
-                        translation_id, original_payload_json, context_payload_json,
-                        target_lang_code, last_error_message,
-                        engine_name, engine_version
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    """,
-                    item.translation_id,
-                    json.dumps(item.source_payload),
-                    json.dumps(item.context) if item.context else None,
-                    target_lang,
-                    error_message,
-                    engine_name,
-                    engine_version,
-                )
-                await conn.execute(
-                    "DELETE FROM th_translations WHERE id = $1", item.translation_id
-                )
-            logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
+            async with self._get_connection() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        """
+                        INSERT INTO th_dead_letter_queue (
+                            translation_id, original_payload_json, context_payload_json,
+                            target_lang_code, last_error_message,
+                            engine_name, engine_version
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        item.translation_id,
+                        item.source_payload,
+                        item.context,
+                        target_lang,
+                        error_message,
+                        engine_name,
+                        engine_version,
+                    )
+                    await conn.execute(
+                        "DELETE FROM th_translations WHERE id = $1", item.translation_id
+                    )
+                logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"移动到死信队列失败: {e}") from e
 
-    async def ensure_content_and_context(
-        self,
-        business_id: str,
-        source_payload: dict[str, Any],
-        context: Optional[dict[str, Any]],
-    ) -> tuple[str, Optional[str]]:
-        context_hash = get_context_hash(context)
-        try:
-            async with self._transaction() as conn:
-                # 插入或获取内容ID
-                content_sql = """
-                    INSERT INTO th_content (business_id, source_payload_json)
-                    VALUES ($1, $2)
-                    ON CONFLICT (business_id) DO UPDATE
-                    SET business_id = EXCLUDED.business_id
-                    RETURNING id
-                """
-                content_row = await conn.fetchrow(
-                    content_sql, business_id, json.dumps(source_payload)
-                )
-                content_id = str(content_row["id"])
-
-                # 如果有上下文，插入或获取上下文ID
-                context_id = None
-                if context is not None:
-                    context_sql = """
-                        INSERT INTO th_contexts (context_hash, context_payload_json)
-                        VALUES ($1, $2)
-                        ON CONFLICT (context_hash) DO UPDATE
-                        SET context_hash = EXCLUDED.context_hash
-                        RETURNING id
-                    """
-                    context_row = await conn.fetchrow(
-                        context_sql, context_hash, json.dumps(context)
-                    )
-                    context_id = str(context_row["id"])
-
-                return content_id, context_id
-        except asyncpg.PostgresError as e:
-            raise DatabaseError(f"确保内容和上下文失败: {e}") from e
+    async def _notification_callback(
+        self, connection: "asyncpg.Connection", pid: int, channel: str, payload: str
+    ) -> None:
+        if self._notification_queue:
+            await self._notification_queue.put(payload)
 
     async def listen_for_notifications(self) -> AsyncGenerator[str, None]:
-        # 创建一个队列来存储通知
-        queue: asyncio.Queue[str] = asyncio.Queue()
+        """[实现] 使用 `LISTEN/NOTIFY` 监听数据库通知。"""
+        if not self._notification_listener_conn or self._notification_listener_conn.is_closed():
+            if self._pool is None:
+                raise DatabaseError("数据库连接池未初始化")
+            self._notification_listener_conn = await self._pool.acquire()
+            self._notification_queue = asyncio.Queue()
+            await self._notification_listener_conn.add_listener(
+                self.NOTIFICATION_CHANNEL, self._notification_callback
+            )
+            logger.info("PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL)
 
-        def notify_handler(
-            connection: Any, pid: int, channel: str, payload: str
-        ) -> None:
-            # 将通知放入队列
-            queue.put_nowait(payload)
-
-        try:
-            async with self._transaction() as conn:
-                # 监听数据库通知
-                await conn.add_listener(self.NOTIFICATION_CHANNEL, notify_handler)
-
-                # 持续从队列中获取通知并生成
-                while True:
-                    try:
-                        notification = await asyncio.wait_for(queue.get(), timeout=1.0)
-                        yield notification
-                    except asyncio.TimeoutError:
-                        continue
-        except asyncpg.PostgresError as e:
-            logger.error(f"监听通知失败: {e}")
-            raise DatabaseError(f"监听通知失败: {e}") from e
-
-    async def reset_stale_tasks(self) -> None:
-        try:
-            async with self._transaction() as conn:
-                # 重置超过1小时仍未完成的翻译任务
-                await conn.execute(
-                    """
-                    UPDATE th_translations
-                    SET status = 'PENDING', engine = NULL, error = NULL
-                    WHERE status = 'TRANSLATING'
-                      AND last_updated_at < now() - interval '1 hour'
-                    """
-                )
-                logger.info("陈旧任务已重置")
-        except asyncpg.PostgresError as e:
-            logger.error(f"重置陈旧任务失败: {e}")
-            raise DatabaseError(f"重置陈旧任务失败: {e}") from e
-
-    async def stream_translatable_items(
-        self,
-        lang_code: str,
-        statuses: list[TranslationStatus],
-        batch_size: int,
-        limit: Optional[int] = None,
-    ) -> AsyncGenerator[list[ContentItem], None]:
-        # 构建状态条件
-        status_conditions = " OR ".join(
-            [f"status = '{status.value}'" for status in statuses]
-        )
-
-        # 构建SQL查询
-        sql = f"""
-            SELECT
-                t.id AS translation_id,
-                c.source_payload_json,
-                ctx.context_payload_json,
-                t.lang_code
-            FROM th_translations t
-            JOIN th_content c ON t.content_id = c.id
-            LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-            WHERE t.lang_code = $1
-              AND ({status_conditions})
-        """
-
-        # 添加限制条件
-        if limit is not None:
-            sql += f" LIMIT {limit}"
-
-        try:
-            offset = 0
-            while True:
-                # 添加偏移量
-                batch_sql = sql + f" OFFSET {offset} LIMIT {batch_size}"
-
-                async with self._transaction() as conn:
-                    rows = await conn.fetch(batch_sql, lang_code)
-
-                # 如果没有更多行，停止迭代
-                if not rows:
-                    break
-
-                # 转换行为ContentItem对象
-                items = []
-                for row in rows:
-                    # 获取content_id和context_id
-                    content_sql = (
-                        "SELECT business_id, source_lang FROM th_content WHERE id = $1"
-                    )
-                    content_row = await conn.fetchrow(content_sql, row["content_id"])
-
-                    items.append(
-                        ContentItem(
-                            translation_id=str(row["translation_id"]),
-                            business_id=content_row["business_id"],
-                            content_id=row["content_id"],
-                            context_id=row["context_id"],
-                            source_payload=json.loads(row["source_payload_json"]),
-                            context=json.loads(row["context_payload_json"])
-                            if row["context_payload_json"]
-                            else None,
-                            source_lang=content_row["source_lang"],
-                        )
-                    )
-
-                # 生成批次
-                yield items
-
-                # 更新偏移量
-                offset += batch_size
-
-                # 如果返回的行数少于批次大小，说明已经处理完所有行
-                if len(rows) < batch_size:
-                    break
-        except asyncpg.PostgresError as e:
-            logger.error(f"流式传输可翻译项目失败: {e}")
-            raise DatabaseError(f"流式传输可翻译项目失败: {e}") from e
+        assert self._notification_queue is not None
+        while True:
+            try:
+                payload = await self._notification_queue.get()
+                yield payload
+            except asyncio.CancelledError:
+                logger.info("通知监听器被取消。")
+                break
