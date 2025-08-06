@@ -177,12 +177,17 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             uncached_items, target_lang, p_context, active_engine, engine_context
         )
 
+        # v3.x 修复：增加对引擎返回数量的严格校验，防止任务静默丢失
         if len(engine_outputs) != len(uncached_items):
             error_msg = (
                 f"引擎返回结果数量 ({len(engine_outputs)}) "
                 f"与输入数量 ({len(uncached_items)}) 不匹配。"
             )
-            logger.error(error_msg)
+            logger.error(
+                error_msg,
+                engine=p_context.config.active_engine.value,
+                lang=target_lang,
+            )
             engine_error = EngineError(error_message=error_msg, is_retryable=False)
             failed_results = [
                 self._build_translation_result(
@@ -217,7 +222,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         for item in batch:
             request = TranslationRequest(
                 source_payload=item.source_payload,
-                # v3.x 修复：优先使用条目自带的 source_lang，再回退到全局配置
                 source_lang=item.source_lang or p_context.config.source_lang,
                 target_lang=target_lang,
                 context_hash=get_context_hash(item.context),
@@ -245,14 +249,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in items
         ]
 
-        # v3.x 修复：健壮地处理批次中的源语言
         source_langs = {item.source_lang for item in items}
         if len(source_langs) == 1:
-            # 如果批次中所有条目的源语言都相同（最常见的情况）
             batch_source_lang = source_langs.pop() or p_context.config.source_lang
         else:
-            # 如果批次中包含多种源语言，记录警告并回退到全局配置
-            # 这是一个边缘情况，理想情况下调用方应按源语言分组
             logger.warning(
                 "批次中包含多种源语言，将回退到全局源语言配置。",
                 found_langs=list(source_langs),
@@ -286,7 +286,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
                 request = TranslationRequest(
                     source_payload=res.original_payload,
-                    # v3.x 修复：使用原始条目的 source_lang 来生成缓存键
                     source_lang=original_item.source_lang
                     or p_context.config.source_lang,
                     target_lang=res.target_lang,
@@ -344,7 +343,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             from_cache = engine_output.from_cache
             engine = active_engine_name
         else:
-            # 此处不应发生，因为上层逻辑已处理错误情况
             raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
 
         translated_payload = dict(item.source_payload)

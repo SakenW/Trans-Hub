@@ -38,13 +38,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
         self._conn: Optional[aiosqlite.Connection] = None
         logger.info("SQLite 持久层已配置", db_path=self.db_path)
 
-    def listen_for_notifications(self) -> AsyncGenerator[str, None]:
-        async def _empty_generator() -> AsyncGenerator[str, None]:
-            return
-            yield
-
-        return _empty_generator()
-
     async def connect(self) -> None:
         """建立与 SQLite 数据库的连接。"""
         try:
@@ -183,7 +176,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                                 if r["context_payload_json"]
                                 else None
                             ),
-                            # v3.x 修复: 从数据库读取每个任务的源语言
                             source_lang=r["source_lang"],
                         )
                         for r in detail_rows
@@ -293,7 +285,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as tx:
             if force_retranslate and target_langs:
                 placeholders = ",".join("?" for _ in target_langs)
-                # v3.x 修复: 在 UPDATE 语句中也设置 source_lang
                 update_params: List[Any] = [
                     TranslationStatus.PENDING.value,
                     now_iso,
@@ -322,7 +313,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 """
                 await tx.execute(sql, tuple(update_params))
 
-            # v3.x 修复: 在 INSERT 语句中也设置 source_lang
             insert_sql = (
                 "INSERT OR IGNORE INTO th_translations "
                 "(id, content_id, context_id, lang_code, source_lang, engine_version, "
@@ -437,6 +427,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
             datetime.now(timezone.utc) - timedelta(days=retention_days)
         ).isoformat()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
+
         async with self._transaction() as tx:
             cursor = await tx.execute(
                 "SELECT id FROM th_jobs WHERE DATE(last_requested_at) < DATE(?)",
@@ -445,12 +436,14 @@ class SQLitePersistenceHandler(PersistenceHandler):
             expired_job_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
             stats["deleted_jobs"] = len(expired_job_ids)
+
             if not dry_run and expired_job_ids:
                 placeholders = ",".join("?" * len(expired_job_ids))
                 await tx.execute(
                     f"DELETE FROM th_jobs WHERE id IN ({placeholders})",
                     expired_job_ids,
                 )
+
             cursor = await tx.execute(
                 """
                 SELECT c.id FROM th_content c
@@ -524,3 +517,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 "DELETE FROM th_translations WHERE id = ?", (item.translation_id,)
             )
         logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
+
+    def listen_for_notifications(self) -> AsyncGenerator[str, None]:
+        async def _empty_generator() -> AsyncGenerator[str, None]:
+            return
+            yield
+
+        return _empty_generator()
