@@ -13,12 +13,12 @@ Trans-Hub v3.0 真实世界高并发模拟
 1. (可选) 如果想使用 OpenAI 引擎, 请在 .env 文件中配置 TH_OPENAI_API_KEY。
 2. 在项目根目录执行: `poetry run python examples/07_real_world_simulation.py`
 """
+
 import asyncio
 import os
 import random
 import sys
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -29,7 +29,7 @@ sys.path.insert(0, str(project_root))
 # ---
 
 from trans_hub import Coordinator, EngineName, TransHubConfig  # noqa: E402
-from trans_hub.core import TranslationResult, TranslationStatus  # noqa: E402
+from trans_hub.core import TranslationResult  # noqa: E402
 from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
 from trans_hub.logging_config import setup_logging  # noqa: E402
 from trans_hub.persistence import create_persistence_handler  # noqa: E402
@@ -46,7 +46,10 @@ ARTICLES = [
     {"title": "The Future of AI", "content": "Artificial intelligence is evolving..."},
     {"title": "A Guide to Async Python", "content": "Asyncio provides tools..."},
     {"title": "Exploring the Cosmos", "content": "Space is the final frontier..."},
-    {"title": "The Art of Cooking", "content": "Cooking is both a science and an art..."},
+    {
+        "title": "The Art of Cooking",
+        "content": "Cooking is both a science and an art...",
+    },
     {"title": "Sustainable Living", "content": "Living sustainably means..."},
 ]
 
@@ -98,21 +101,19 @@ async def translation_worker(
                 continue
 
 
-async def api_server(
-    coordinator: Coordinator, shutdown_event: asyncio.Event
-) -> None:
+async def api_server(coordinator: Coordinator, shutdown_event: asyncio.Event) -> None:
     """模拟一个 API 服务器，定期查询随机文章的翻译状态。"""
     log.info("📡 API Server started.")
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=1) # 每秒查询一次
+            await asyncio.wait_for(shutdown_event.wait(), timeout=1)  # 每秒查询一次
         except asyncio.TimeoutError:
             random_author = random.choice(AUTHORS).lower()
             random_index = random.randint(0, 3)
             random_lang = random.choice(TARGET_LANGS)
             business_id_to_check = f"article.{random_author}.{random_index}"
 
-            result: Optional[TranslationResult] = await coordinator.get_translation(
+            result: TranslationResult | None = await coordinator.get_translation(
                 business_id=business_id_to_check, target_lang=random_lang
             )
             status = result.status.value if result else "NOT_FOUND"
@@ -127,7 +128,9 @@ async def main() -> None:
         DB_FILE.unlink()
 
     active_engine = (
-        EngineName.OPENAI if "TH_OPENAI_API_KEY" in os.environ else EngineName.TRANSLATORS
+        EngineName.OPENAI
+        if "TH_OPENAI_API_KEY" in os.environ
+        else EngineName.TRANSLATORS
     )
     config = TransHubConfig(
         database_url=f"sqlite:///{DB_FILE.resolve()}",
@@ -137,14 +140,16 @@ async def main() -> None:
     apply_migrations(config.db_path)
     handler = create_persistence_handler(config)
     coordinator = Coordinator(config=config, persistence_handler=handler)
-    
+
     shutdown_event = asyncio.Event()
 
     try:
         await coordinator.initialize()
         log.info("✅ 协调器初始化成功", db_path=str(DB_FILE))
 
-        log.warning("🚀 启动真实世界模拟... 运行约 15 秒后将自动停止。按 CTRL+C 可提前停止。")
+        log.warning(
+            "🚀 启动真实世界模拟... 运行约 15 秒后将自动停止。按 CTRL+C 可提前停止。"
+        )
 
         producer_tasks = [
             asyncio.create_task(content_producer(coordinator, author, shutdown_event))
@@ -157,9 +162,9 @@ async def main() -> None:
         api_task = asyncio.create_task(api_server(coordinator, shutdown_event))
 
         all_tasks = producer_tasks + worker_tasks + [api_task]
-        
+
         simulation_task = asyncio.gather(*all_tasks)
-        
+
         # 让模拟运行一段时间
         await asyncio.sleep(15)
 
@@ -170,10 +175,10 @@ async def main() -> None:
         shutdown_event.set()
         # 等待所有任务响应关闭信号并完成
         if "simulation_task" in locals():
-            await asyncio.sleep(1) # 给任务一点时间来响应事件
+            await asyncio.sleep(1)  # 给任务一点时间来响应事件
             simulation_task.cancel()
             await asyncio.gather(simulation_task, return_exceptions=True)
-            
+
         await coordinator.close()
         log.info("🚪 系统已安全关闭。")
         if DB_FILE.exists():

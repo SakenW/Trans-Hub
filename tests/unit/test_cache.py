@@ -5,6 +5,7 @@
 本测试文件验证了缓存的基本功能（设置、获取、TTL过期）以及
 缓存键生成的正确性（基于哈希、稳定性）。
 """
+
 import pytest
 from cachetools import TTLCache
 from pytest_mock import MockerFixture
@@ -76,9 +77,7 @@ async def test_ttl_expiration(
 def test_generate_cache_key_is_hashed_and_stable(
     sample_request: TranslationRequest,
 ) -> None:
-    """
-    测试生成的缓存键是稳定的、基于哈希的，并且不包含原始载荷的明文。
-    """
+    """测试生成的缓存键是稳定的、基于哈希的，并且不包含原始载荷的明文。"""
     cache = TranslationCache()
     key1 = cache.generate_cache_key(sample_request)
 

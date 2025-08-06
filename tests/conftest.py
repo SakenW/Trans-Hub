@@ -14,9 +14,7 @@ from rich.console import Console
 def disable_rich_colors_for_tests(
     session_mocker: MockerFixture,
 ) -> Generator[None, None, None]:
-    """
-    全局禁用 rich 库的颜色输出，以确保测试结果的确定性。
-    """
+    """全局禁用 rich 库的颜色输出，以确保测试结果的确定性。"""
     original_init = Console.__init__
 
     def new_init(self: Console, *args: Any, **kwargs: Any) -> None:

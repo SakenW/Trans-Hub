@@ -3,14 +3,14 @@
 
 import importlib
 import pkgutil
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
 from trans_hub.engines.base import BaseTranslationEngine
 
 log = structlog.get_logger(__name__)
-ENGINE_REGISTRY: Dict[str, type[BaseTranslationEngine[Any]]] = {}
+ENGINE_REGISTRY: dict[str, type[BaseTranslationEngine[Any]]] = {}
 
 
 def discover_engines() -> None:
@@ -25,8 +25,8 @@ def discover_engines() -> None:
 
     import trans_hub.engines
 
-    successful_engines: List[str] = []
-    skipped_engines: List[Dict[str, str]] = []
+    successful_engines: list[str] = []
+    skipped_engines: list[dict[str, str]] = []
 
     for module_info in pkgutil.iter_modules(trans_hub.engines.__path__):
         module_name = module_info.name
@@ -58,7 +58,7 @@ def discover_engines() -> None:
             )
 
     # 在所有发现操作完成后，记录一次性的摘要日志
-    log_payload: Dict[str, Any] = {"path": trans_hub.engines.__path__}
+    log_payload: dict[str, Any] = {"path": trans_hub.engines.__path__}
     if successful_engines:
         log_payload["✅ 已注册"] = sorted(successful_engines)
     if skipped_engines:

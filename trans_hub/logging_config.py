@@ -5,7 +5,8 @@
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, List, Literal, MutableMapping
+from collections.abc import MutableMapping
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from structlog.typing import Processor
@@ -67,7 +68,7 @@ class HybridPanelRenderer:
     def __call__(
         self, logger: Any, name: str, event_dict: MutableMapping[str, Any]
     ) -> str:
-        """structlog 处理器的主调用方法。"""
+        """Structlog 处理器的主调用方法。"""
         event = str(event_dict.pop("event", "")).strip()
         if not event:
             return ""
@@ -114,7 +115,7 @@ class HybridPanelRenderer:
             title_parts.append(f"[cyan dim]({logger_name})[/]")
         title = Text.from_markup(" ".join(title_parts))
 
-        renderables: List["RenderableType"] = [Text(event, justify="left")]
+        renderables: list[RenderableType] = [Text(event, justify="left")]
         if kv:
             # --- 核心优化：使用固定宽度键列的表格来实现完美对齐 ---
             kv_table = Table(
@@ -198,6 +199,7 @@ def setup_logging(
         show_timestamp: 是否显示时间戳
         show_logger_name: 是否显示记录器名称
         kv_truncate_at: 键值对值的截断长度
+
     """
     if log_format == "console" and Console is None:
         raise ImportError(

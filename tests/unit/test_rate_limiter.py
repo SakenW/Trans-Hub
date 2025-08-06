@@ -6,7 +6,6 @@
 包括令牌的消耗、补充以及在令牌不足时的异步等待行为。
 """
 
-import asyncio
 import time
 from unittest.mock import AsyncMock
 
@@ -81,6 +80,7 @@ async def test_refill_logic_does_not_exceed_capacity(mocker: MockerFixture) -> N
 
     Args:
         mocker: pytest-mock 提供的 mocker fixture。
+
     """
     limiter = RateLimiter(refill_rate=10, capacity=10)
     # 消耗一些令牌

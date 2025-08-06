@@ -7,7 +7,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 # v3.7 修复：将 sys.path 修改逻辑置于顶部，并添加 noqa
 try:
@@ -21,6 +20,7 @@ except (ImportError, IndexError):
 
 import aiosqlite  # noqa: E402
 import structlog  # noqa: E402
+
 # v3.9 修复：导入 RenderableType 以解决 Mypy 错误
 from rich.console import Console, Group, RenderableType  # noqa: E402
 from rich.panel import Panel  # noqa: E402
@@ -45,7 +45,7 @@ class DatabaseInspector:
         """
         self.db_path = db_path
         self.console = console
-        self.conn: Optional[aiosqlite.Connection] = None
+        self.conn: aiosqlite.Connection | None = None
 
     async def inspect(self) -> None:
         """执行数据库检查的主流程。"""
@@ -100,23 +100,23 @@ class DatabaseInspector:
         assert self.conn is not None
         self.console.print(Panel("[bold cyan]详细翻译记录[/bold cyan]", expand=False))
         query = """
-        SELECT
-            t.id AS translation_id,
-            t.lang_code,
-            t.status,
-            t.translation_payload_json,
-            t.engine,
-            t.engine_version,
-            t.last_updated_at,
-            c.source_payload_json,
-            ctx.context_payload_json,
-            c.business_id,
-            j.last_requested_at
-        FROM th_translations t
-        JOIN th_content c ON t.content_id = c.id
-        LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-        LEFT JOIN th_jobs j ON t.content_id = j.content_id
-        ORDER BY t.last_updated_at DESC;
+            SELECT
+                t.id AS translation_id,
+                t.lang_code,
+                t.status,
+                t.translation_payload_json,
+                t.engine,
+                t.engine_version,
+                t.last_updated_at,
+                c.source_payload_json,
+                ctx.context_payload_json,
+                c.business_id,
+                j.last_requested_at
+            FROM th_translations t
+            JOIN th_content c ON t.content_id = c.id
+            LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+            LEFT JOIN th_jobs j ON t.content_id = j.content_id
+            ORDER BY t.last_updated_at DESC;
         """
         async with self.conn.cursor() as cursor:
             await cursor.execute(query)
@@ -131,15 +131,18 @@ class DatabaseInspector:
     def _build_single_record_panel(self, index: int, row: aiosqlite.Row) -> Panel:
         """为单条记录构建一个包含所有信息的、结构化的 Rich Panel。"""
         status_colors = {
-            "TRANSLATED": "green", "APPROVED": "bright_green",
-            "PENDING": "yellow", "TRANSLATING": "cyan", "FAILED": "red",
+            "TRANSLATED": "green",
+            "APPROVED": "bright_green",
+            "PENDING": "yellow",
+            "TRANSLATING": "cyan",
+            "FAILED": "red",
         }
         status_color = status_colors.get(row["status"], "default")
 
         # --- 主要内容 ---
         original_payload = json.loads(row["source_payload_json"])
         original_text = original_payload.get("text", str(original_payload))
-        
+
         translated_text = "[dim]N/A[/dim]"
         if row["translation_payload_json"]:
             translated_payload = json.loads(row["translation_payload_json"])
@@ -150,19 +153,21 @@ class DatabaseInspector:
         content_table.add_column()
         content_table.add_row("原文:", f"[cyan]{original_text}[/cyan]")
         content_table.add_row("译文:", f"[cyan]{translated_text}[/cyan]")
-        
+
         # --- 元数据 ---
         meta_table = Table(show_header=False, box=None, padding=(0, 1))
         meta_table.add_column(style="dim", width=12)
         meta_table.add_column()
         if row["business_id"]:
             meta_table.add_row("业务 ID:", f"[blue]{row['business_id']}[/blue]")
-        meta_table.add_row("更新于:", row['last_updated_at'].split('.')[0])
-        meta_table.add_row("引擎:", f"{row['engine']} [dim](v{row['engine_version']})[/dim]")
+        meta_table.add_row("更新于:", row["last_updated_at"].split(".")[0])
+        meta_table.add_row(
+            "引擎:", f"{row['engine']} [dim](v{row['engine_version']})[/dim]"
+        )
 
         # --- 上下文 ---
         # v3.9 修复：使用 RenderableType 作为通用类型
-        context_renderable: Optional[RenderableType] = None
+        context_renderable: RenderableType | None = None
         if row["context_payload_json"]:
             try:
                 parsed = json.loads(row["context_payload_json"])
@@ -172,15 +177,19 @@ class DatabaseInspector:
                 context_renderable = Text(row["context_payload_json"])
 
         # v3.9 修复：使用 List[RenderableType] 作为通用列表类型
-        renderables: List[RenderableType] = [content_table, meta_table]
+        renderables: list[RenderableType] = [content_table, meta_table]
         if context_renderable:
-            renderables.append(Panel(
-                context_renderable, title="[dim]关联上下文[/dim]",
-                border_style="dim", title_align="left"
-            ))
+            renderables.append(
+                Panel(
+                    context_renderable,
+                    title="[dim]关联上下文[/dim]",
+                    border_style="dim",
+                    title_align="left",
+                )
+            )
 
         render_group = Group(*renderables)
-        
+
         title = Text.from_markup(
             f"记录 #{index} | 状态: [{status_color}]{row['status']}[/{status_color}] | "
             f"目标: [magenta]{row['lang_code']}[/magenta]"
@@ -188,8 +197,12 @@ class DatabaseInspector:
         subtitle = Text.from_markup(f"[dim]ID: {row['translation_id']}[/dim]")
 
         return Panel(
-            render_group, title=title, subtitle=subtitle,
-            border_style="bright_blue", padding=(1, 2), subtitle_align="right"
+            render_group,
+            title=title,
+            subtitle=subtitle,
+            border_style="bright_blue",
+            padding=(1, 2),
+            subtitle_align="right",
         )
 
 

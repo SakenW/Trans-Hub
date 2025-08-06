@@ -1,7 +1,6 @@
 # tests/integration/conftest.py
 """为所有集成测试提供共享的、真实的 Fixtures。"""
 
-import asyncio
 import os
 import shutil
 from collections.abc import AsyncGenerator, Generator
@@ -21,7 +20,7 @@ from trans_hub.logging_config import setup_logging
 from trans_hub.persistence import create_persistence_handler
 
 if TYPE_CHECKING:
-    import asyncpg
+    pass
 
 load_dotenv()
 setup_logging(log_level=os.getenv("TEST_LOG_LEVEL", "INFO"), log_format="console")
@@ -78,9 +77,7 @@ async def coordinator(
 @pytest_asyncio.fixture
 @requires_postgres
 async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
-    """
-    提供一个连接到临时测试数据库并应用了 Schema 的 PostgresPersistenceHandler。
-    """
+    """提供一个连接到临时测试数据库并应用了 Schema 的 PostgresPersistenceHandler。"""
     import asyncpg  # 延迟导入
 
     # 从主 DSN 解析出用于连接主服务器的 DSN
@@ -89,7 +86,7 @@ async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
     db_name = f"test_db_{os.urandom(4).hex()}"
     # DSN to connect to the server, but not a specific database
     server_dsn = parsed._replace(path="").geturl()
-    
+
     conn = await asyncpg.connect(dsn=server_dsn)
     # 使用 force 选项来处理 CI 环境中可能存在的连接残留
     await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')

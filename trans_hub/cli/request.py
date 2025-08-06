@@ -6,7 +6,7 @@ v3.0.0 重大更新：命令接口已重构，以适配基于业务ID和结构�
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -25,9 +25,9 @@ async def _async_request_new(
     business_id: str,
     source_payload: dict[str, Any],
     target_langs: list[str],
-    source_lang: Optional[str],
+    source_lang: str | None,
     force: bool,
-    context: Optional[dict[str, Any]],
+    context: dict[str, Any] | None,
 ) -> None:
     """异步执行请求的核心逻辑。"""
     try:
@@ -48,34 +48,42 @@ async def _async_request_new(
 @request_app.command("new")
 def request_new(
     ctx: typer.Context,
-    business_id: str = typer.Option(
-        ..., "--id", help="关联内容的、全局唯一的业务ID (必需)。"
-    ),
-    payload_json: str = typer.Option(
-        ...,
-        "--payload-json",
-        help=(
-            '要翻译的结构化内容，格式为 JSON 字符串 (必需)。例如: \'{"text": "Hello"}\''
+    business_id: Annotated[
+        str, typer.Option("--id", help="关联内容的、全局唯一的业务ID (必需)。")
+    ],
+    payload_json: Annotated[
+        str,
+        typer.Option(
+            "--payload-json",
+            help=(
+                '要翻译的结构化内容，格式为 JSON 字符串 (必需)。例如: \'{"text": "Hello"}\''
+            ),
         ),
-    ),
-    target_lang: list[str] = typer.Option(
-        ..., "--target", "-t", help="一个或多个目标语言代码 (例如: de, fr, zh-CN)。"
-    ),
-    source_lang: Optional[str] = typer.Option(
-        None, "--source", "-s", help="源语言代码 (可选，若不提供则使用引擎默认值)。"
-    ),
-    context_json: Optional[str] = typer.Option(
-        None,
-        "--context-json",
-        help="与请求相关的上下文，格式为 JSON 字符串 (可选)。",
-    ),
-    force: bool = typer.Option(
-        False, "--force", "-f", help="强制重新翻译，即使已存在有效的翻译。"
-    ),
+    ],
+    target_lang: Annotated[
+        list[str],
+        typer.Option(
+            "--target", "-t", help="一个或多个目标语言代码 (例如: de, fr, zh-CN)。"
+        ),
+    ],
+    source_lang: Annotated[
+        str | None,
+        typer.Option(
+            "--source", "-s", help="源语言代码 (可选，若不提供则使用引擎默认值)。"
+        ),
+    ] = None,
+    context_json: Annotated[
+        str | None,
+        typer.Option(
+            "--context-json",
+            help="与请求相关的上下文，格式为 JSON 字符串 (可选)。",
+        ),
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="强制重新翻译，即使已存在有效的翻译。")
+    ] = False,
 ) -> None:
-    """
-    向 Trans-Hub 提交一个新的翻译请求。
-    """
+    """向 Trans-Hub 提交一个新的翻译请求。"""
     # 1. 输入校验
     try:
         validate_lang_codes(target_lang)
@@ -83,7 +91,7 @@ def request_new(
             validate_lang_codes([source_lang])
     except ValueError as e:
         console.print(f"[bold red]❌ 语言代码错误: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     try:
         source_payload = json.loads(payload_json)
@@ -91,9 +99,9 @@ def request_new(
             raise TypeError("Payload 必须是一个 JSON 对象。")
     except (json.JSONDecodeError, TypeError) as e:
         console.print(f"[bold red]❌ Payload 格式错误: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
-    context: Optional[dict[str, Any]] = None
+    context: dict[str, Any] | None = None
     if context_json:
         try:
             context = json.loads(context_json)
@@ -101,7 +109,7 @@ def request_new(
                 raise TypeError("Context 必须是一个 JSON 对象。")
         except (json.JSONDecodeError, TypeError) as e:
             console.print(f"[bold red]❌ Context 格式错误: {e}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
     # 2. 执行业务逻辑
     state: State = ctx.obj
@@ -122,4 +130,4 @@ def request_new(
         )
     except Exception as e:
         console.print(f"[bold red]❌ 请求处理失败: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e

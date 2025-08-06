@@ -9,12 +9,12 @@ v3.1 修订：移除了易产生误导的 `get_database_url` 函数，并增强�
 import hashlib
 import json
 import re
-from typing import Any, Optional
+from typing import Any
 
 from trans_hub.core.types import GLOBAL_CONTEXT_SENTINEL
 
 
-def get_context_hash(context: Optional[dict[str, Any]]) -> str:
+def get_context_hash(context: dict[str, Any] | None) -> str:
     """
     为一个上下文（context）字典生成一个确定性的、稳定的 SHA-256 哈希值。
 
@@ -29,6 +29,7 @@ def get_context_hash(context: Optional[dict[str, Any]]) -> str:
 
     Raises:
         ValueError: 如果 context 包含无法被 JSON 序列化的数据。
+
     """
     if not context:
         return GLOBAL_CONTEXT_SENTINEL
@@ -56,6 +57,7 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
 
     Raises:
         ValueError: 如果任何一个语言代码格式无效。
+
     """
     # v3.1 修复：改进的正则表达式，以更好地匹配 BCP 47，例如 'en', 'zh-CN', 'es-419'
     lang_code_pattern = re.compile(

@@ -17,6 +17,7 @@ from trans_hub.core import (
     TranslationStatus,
 )
 from trans_hub.core.interfaces import PersistenceHandler
+
 # 修复：导入 BaseTranslationEngine 以进行更精确的 mock
 from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.policies import DefaultProcessingPolicy
@@ -154,12 +155,22 @@ async def test_policy_handles_engine_returning_mismatched_results(
     """测试当引擎返回数量不匹配的结果时，策略能将批次中所有项标记为失败。"""
     batch = [
         ContentItem(
-            translation_id="uuid-1", business_id="b-1", content_id="c-1",
-            source_payload={"text": "text1"}, context=None, source_lang="en", context_id=None
+            translation_id="uuid-1",
+            business_id="b-1",
+            content_id="c-1",
+            source_payload={"text": "text1"},
+            context=None,
+            source_lang="en",
+            context_id=None,
         ),
         ContentItem(
-            translation_id="uuid-2", business_id="b-2", content_id="c-2",
-            source_payload={"text": "text2"}, context=None, source_lang="en", context_id=None
+            translation_id="uuid-2",
+            business_id="b-2",
+            content_id="c-2",
+            source_payload={"text": "text2"},
+            context=None,
+            source_lang="en",
+            context_id=None,
         ),
     ]
 

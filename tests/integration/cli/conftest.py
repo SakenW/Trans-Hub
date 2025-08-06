@@ -27,9 +27,7 @@ def mock_cli_config() -> Generator[TransHubConfig, None, None]:
 
 @pytest.fixture(autouse=True)
 def patch_cli_config(mocker: MockerFixture, mock_cli_config: TransHubConfig) -> None:
-    """
-    自动为所有 CLI 测试修补配置加载。
-    """
+    """自动为所有 CLI 测试修补配置加载。"""
     mocker.patch("trans_hub.cli.main.TransHubConfig", return_value=mock_cli_config)
 
 
@@ -41,9 +39,7 @@ def mock_coordinator(mocker: MockerFixture) -> Generator[AsyncMock, None, None]:
 
 @pytest.fixture
 def mock_cli_backend(mocker: MockerFixture, mock_coordinator: AsyncMock) -> None:
-    """
-    修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。
-    """
+    """修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。"""
     mocker.patch(
         "trans_hub.cli.utils.create_coordinator", return_value=mock_coordinator
     )

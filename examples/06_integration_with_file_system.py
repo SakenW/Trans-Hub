@@ -12,12 +12,12 @@ Trans-Hub v3.0 与文件系统集成示例
 运行方式:
 在项目根目录执行: `poetry run python examples/06_integration_with_file_system.py`
 """
+
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import structlog
 
@@ -59,6 +59,7 @@ async def main() -> None:
     SOURCE_FILE.write_text(json.dumps(SOURCE_CONTENT, indent=2, ensure_ascii=False))
     if OUTPUT_DIR.exists():
         import shutil
+
         shutil.rmtree(OUTPUT_DIR)
     OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -90,7 +91,7 @@ async def main() -> None:
 
         log.info("💾 步骤 3: 获取结果并写入目标文件...")
         for lang in TARGET_LANGS:
-            lang_results: Dict[str, Any] = {}
+            lang_results: dict[str, Any] = {}
             for business_id, _ in flat_source.items():
                 result = await coordinator.get_translation(
                     business_id=business_id, target_lang=lang
@@ -114,11 +115,14 @@ async def main() -> None:
             SOURCE_FILE.unlink()
         if OUTPUT_DIR.exists():
             import shutil
+
             shutil.rmtree(OUTPUT_DIR)
 
 
-def flatten_dict(d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, str]:
-    items: List[Tuple[str, str]] = []
+def flatten_dict(
+    d: dict[str, Any], parent_key: str = "", sep: str = "."
+) -> dict[str, str]:
+    items: list[tuple[str, str]] = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
         if isinstance(v, dict):
@@ -128,8 +132,8 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dic
     return dict(items)
 
 
-def unflatten_dict(d: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
-    result: Dict[str, Any] = {}
+def unflatten_dict(d: dict[str, Any], sep: str = ".") -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in d.items():
         parts = key.split(sep)
         d_ref = result
@@ -141,7 +145,7 @@ def unflatten_dict(d: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
     return result
 
 
-async def process_translations(coordinator: Coordinator, langs: List[str]) -> None:
+async def process_translations(coordinator: Coordinator, langs: list[str]) -> None:
     """模拟 Worker 处理所有待办任务。"""
     tasks = [asyncio.create_task(consume_all(coordinator, lang)) for lang in langs]
     await asyncio.gather(*tasks)
@@ -149,7 +153,7 @@ async def process_translations(coordinator: Coordinator, langs: List[str]) -> No
 
 async def consume_all(coordinator: Coordinator, lang: str) -> None:
     """消费指定语言的所有待办任务。"""
-    results: List[TranslationResult] = [
+    results: list[TranslationResult] = [
         res async for res in coordinator.process_pending_translations(lang)
     ]
     log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")

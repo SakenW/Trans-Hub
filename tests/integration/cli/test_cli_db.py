@@ -10,12 +10,14 @@ from trans_hub.cli.main import app
 def test_db_migrate_success(
     cli_runner: CliRunner, mock_cli_backend: None, mocker: MockerFixture
 ) -> None:
-    """测试 `db migrate` 命令成功时，是否调用了正确的后端函数。
+    """
+    测试 `db migrate` 命令成功时，是否调用了正确的后端函数。
 
     Args:
         cli_runner: Typer 测试运行器。
         mock_cli_backend: 激活后端的 mock。
         mocker: pytest-mock 提供的 mocker fixture。
+
     """
     mock_apply = mocker.patch("trans_hub.cli.db.apply_migrations")
     result = cli_runner.invoke(app, ["db", "migrate"])
@@ -28,12 +30,14 @@ def test_db_migrate_success(
 def test_db_migrate_handles_exception(
     cli_runner: CliRunner, mock_cli_backend: None, mocker: MockerFixture
 ) -> None:
-    """测试 `db migrate` 在后端函数抛出异常时的行为。
+    """
+    测试 `db migrate` 在后端函数抛出异常时的行为。
 
     Args:
         cli_runner: Typer 测试运行器。
         mock_cli_backend: 激活后端的 mock。
         mocker: pytest-mock 提供的 mocker fixture。
+
     """
     mocker.patch(
         "trans_hub.cli.db.apply_migrations", side_effect=RuntimeError("DB locked")

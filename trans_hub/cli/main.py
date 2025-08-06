@@ -1,7 +1,7 @@
 # trans_hub/cli/main.py
 """Trans-Hub CLI 的主入口点。"""
 
-from typing import Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -43,14 +43,16 @@ def version_callback(value: bool) -> None:
 @app.callback()
 def main(
     ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
-        None,
-        "--version",
-        "-v",
-        help="显示版本信息并退出。",
-        callback=version_callback,
-        is_eager=True,
-    ),
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            "-v",
+            help="显示版本信息并退出。",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = None,
 ) -> None:
     """
     主回调函数，在任何子命令执行前运行。
@@ -68,4 +70,4 @@ def main(
     except Exception as e:
         console.print("[bold red]❌ 启动失败：无法加载配置或初始化日志。[/bold red]")
         console.print(f"[dim]{e}[/dim]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e

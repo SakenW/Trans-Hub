@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections import defaultdict
 from enum import Enum
-from typing import DefaultDict, Optional, Union
+from typing import Union
 
 from cachetools import LRUCache, TTLCache
 from pydantic import BaseModel, Field
@@ -32,12 +32,12 @@ class CacheConfig(BaseModel):
 class TranslationCache:
     """一个用于管理翻译结果的、异步安全的内存缓存。"""
 
-    def __init__(self, config: Optional[CacheConfig] = None):
+    def __init__(self, config: CacheConfig | None = None):
         self.config = config or CacheConfig()
         self.cache: Union[LRUCache[str, str], TTLCache[str, str]]
         self._initialize_cache()
         # 修复：实现按键的细粒度锁，以提升并发写入性能
-        self._key_locks: DefaultDict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._key_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # 修复：为 clear_cache 和锁字典本身的管理提供一个全局锁
         self._global_lock = asyncio.Lock()
 
@@ -68,7 +68,7 @@ class TranslationCache:
             ]
         )
 
-    async def get_cached_result(self, request: TranslationRequest) -> Optional[str]:
+    async def get_cached_result(self, request: TranslationRequest) -> str | None:
         """从缓存中异步、安全地获取翻译结果。"""
         key = self.generate_cache_key(request)
         return self.cache.get(key)

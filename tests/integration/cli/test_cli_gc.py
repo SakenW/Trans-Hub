@@ -9,9 +9,7 @@ from typer.testing import CliRunner
 from trans_hub.cli.main import app
 
 
-def test_gc_run_calls_async_logic(
-    cli_runner: CliRunner, mocker: MockerFixture
-) -> None:
+def test_gc_run_calls_async_logic(cli_runner: CliRunner, mocker: MockerFixture) -> None:
     """
     测试 `gc run` 命令是否正确调用了其核心异步逻辑。
 

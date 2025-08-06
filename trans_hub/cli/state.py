@@ -12,10 +12,12 @@ if TYPE_CHECKING:
 class State:
     """一个简单的类，用于通过 Typer 上下文传递共享状态。"""
 
-    def __init__(self, config: "TransHubConfig") -> None:
-        """初始化状态对象。
+    def __init__(self, config: TransHubConfig) -> None:
+        """
+        初始化状态对象。
 
         Args:
             config: Trans-Hub 的主配置对象。
+
         """
         self.config = config

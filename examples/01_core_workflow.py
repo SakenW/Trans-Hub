@@ -10,12 +10,10 @@ Trans-Hub v3.0 核心工作流示例
 运行方式:
 在项目根目录执行: `poetry run python examples/01_core_workflow.py`
 """
+
 import asyncio
-import os
 import sys
-import logging
 from pathlib import Path
-from typing import List
 
 import structlog
 
@@ -44,7 +42,9 @@ async def main() -> None:
     if DB_FILE.exists():
         DB_FILE.unlink()
 
-    config = TransHubConfig(database_url=f"sqlite:///{DB_FILE.resolve()}", source_lang="en")
+    config = TransHubConfig(
+        database_url=f"sqlite:///{DB_FILE.resolve()}", source_lang="en"
+    )
     apply_migrations(config.db_path)
     handler = create_persistence_handler(config)
     coordinator = Coordinator(config=config, persistence_handler=handler)
@@ -69,7 +69,11 @@ async def main() -> None:
             result = await coordinator.get_translation(
                 business_id=business_id, target_lang=lang
             )
-            if result and result.status == TranslationStatus.TRANSLATED and result.translated_payload:
+            if (
+                result
+                and result.status == TranslationStatus.TRANSLATED
+                and result.translated_payload
+            ):
                 original_text = result.original_payload.get("text", "[N/A]")
                 translated_text = result.translated_payload.get("text", "[N/A]")
                 log.info(
@@ -87,7 +91,7 @@ async def main() -> None:
             DB_FILE.unlink()
 
 
-async def process_translations(coordinator: Coordinator, langs: List[str]) -> None:
+async def process_translations(coordinator: Coordinator, langs: list[str]) -> None:
     """模拟 Worker 处理所有待办任务。"""
     tasks = [asyncio.create_task(consume_all(coordinator, lang)) for lang in langs]
     await asyncio.gather(*tasks)
@@ -95,7 +99,7 @@ async def process_translations(coordinator: Coordinator, langs: List[str]) -> No
 
 async def consume_all(coordinator: Coordinator, lang: str) -> None:
     """消费指定语言的所有待办任务。"""
-    results: List[TranslationResult] = [
+    results: list[TranslationResult] = [
         res async for res in coordinator.process_pending_translations(lang)
     ]
     log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")
@@ -103,4 +107,3 @@ async def consume_all(coordinator: Coordinator, lang: str) -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-    

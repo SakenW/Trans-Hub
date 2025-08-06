@@ -10,7 +10,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional, cast
+from typing import Any, cast
 
 import aiosqlite
 import structlog
@@ -35,7 +35,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: aiosqlite.Connection | None = None
         logger.info("SQLite 持久层已配置", db_path=self.db_path)
 
     async def connect(self) -> None:
@@ -84,7 +84,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 await self.connection.commit()
         except Exception:
             logger.error("SQLite 事务执行失败，正在回滚", exc_info=True)
-            if self._conn and transaction_started:
+            if self.connection.is_alive() and transaction_started:
                 await self.connection.rollback()
             raise
 
@@ -113,7 +113,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
         lang_code: str,
         statuses: list[TranslationStatus],
         batch_size: int,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
         async def _internal_generator() -> AsyncGenerator[list[ContentItem], None]:
             processed_count = 0
@@ -127,11 +127,15 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 batch_items: list[ContentItem] = []
                 async with self._transaction() as tx:
                     status_placeholders = ",".join("?" for _ in statuses)
-                    find_ids_sql = (
-                        f"SELECT id FROM th_translations "
-                        f"WHERE lang_code = ? AND status IN ({status_placeholders}) "
-                        "ORDER BY context_id, last_updated_at ASC LIMIT ?"
-                    )
+                    # v3.x 优化: 在 SQL 中进行排序，以减轻 Python 端的负担
+                    # 并确保 itertools.groupby 能够正确工作。
+                    find_ids_sql = f"""
+                        SELECT id
+                        FROM th_translations
+                        WHERE lang_code = ? AND status IN ({status_placeholders})
+                        ORDER BY context_id, last_updated_at ASC
+                        LIMIT ?
+                    """
                     params = (
                         [lang_code] + [s.value for s in statuses] + [current_batch_size]
                     )
@@ -157,8 +161,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                             c.source_payload_json,
                             ctx.context_payload_json
                         FROM th_translations t
-                        JOIN th_content c ON t.content_id = c.id
-                        LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+                        JOIN th_content c
+                            ON t.content_id = c.id
+                        LEFT JOIN th_contexts ctx
+                            ON t.context_id = ctx.id
                         WHERE t.id IN ({id_placeholders})
                         ORDER BY t.context_id, t.last_updated_at ASC
                     """
@@ -193,8 +199,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
         self,
         business_id: str,
         source_payload: dict[str, Any],
-        context: Optional[dict[str, Any]],
-    ) -> tuple[str, Optional[str]]:
+        context: dict[str, Any] | None,
+    ) -> tuple[str, str | None]:
         async with self._transaction() as tx:
             cursor = await tx.execute(
                 "SELECT id FROM th_content WHERE business_id = ?", (business_id,)
@@ -206,8 +212,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
             if content_row:
                 content_id = cast(str, content_row["id"])
                 await tx.execute(
-                    "UPDATE th_content SET source_payload_json = ?, updated_at = ? "
-                    "WHERE id = ?",
+                    """
+                    UPDATE th_content
+                    SET source_payload_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
                     (
                         json.dumps(source_payload, ensure_ascii=False),
                         now_iso,
@@ -217,9 +226,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
             else:
                 content_id = generate_uuid()
                 await tx.execute(
-                    "INSERT INTO th_content (id, business_id, source_payload_json, "
-                    "created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    """
+                    INSERT INTO th_content
+                        (id, business_id, source_payload_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
                     (
                         content_id,
                         business_id,
@@ -229,7 +240,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     ),
                 )
 
-            context_id: Optional[str] = None
+            context_id: str | None = None
             if context:
                 context_hash = get_context_hash(context)
                 cursor = await tx.execute(
@@ -242,10 +253,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 else:
                     context_id = generate_uuid()
                     await tx.execute(
-                        "INSERT INTO th_contexts (id, context_hash, "
-                        "context_payload_json, "
-                        "created_at) "
-                        "VALUES (?, ?, ?, ?)",
+                        """
+                        INSERT INTO th_contexts
+                            (id, context_hash, context_payload_json, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
                         (
                             context_id,
                             context_hash,
@@ -266,8 +278,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
             else:
                 await tx.execute(
-                    "INSERT INTO th_jobs (id, content_id, last_requested_at) "
-                    "VALUES (?, ?, ?)",
+                    "INSERT INTO th_jobs (id, content_id, last_requested_at) VALUES (?, ?, ?)",
                     (generate_uuid(), content_id, now_iso),
                 )
         return content_id, context_id
@@ -275,9 +286,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def create_pending_translations(
         self,
         content_id: str,
-        context_id: Optional[str],
+        context_id: str | None,
         target_langs: list[str],
-        source_lang: Optional[str],
+        source_lang: str | None,
         engine_version: str,
         force_retranslate: bool = False,
     ) -> None:
@@ -285,7 +296,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as tx:
             if force_retranslate and target_langs:
                 placeholders = ",".join("?" for _ in target_langs)
-                update_params: List[Any] = [
+                update_params: list[Any] = [
                     TranslationStatus.PENDING.value,
                     now_iso,
                     engine_version,
@@ -301,7 +312,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
 
                 sql = f"""
                     UPDATE th_translations
-                    SET status = ?,
+                    SET
+                        status = ?,
                         last_updated_at = ?,
                         engine_version = ?,
                         source_lang = ?,
@@ -313,12 +325,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 """
                 await tx.execute(sql, tuple(update_params))
 
-            insert_sql = (
-                "INSERT OR IGNORE INTO th_translations "
-                "(id, content_id, context_id, lang_code, source_lang, engine_version, "
-                "created_at, last_updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            )
+            insert_sql = """
+                INSERT OR IGNORE INTO th_translations
+                    (id, content_id, context_id, lang_code, source_lang, engine_version, created_at, last_updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
             params = [
                 (
                     generate_uuid(),
@@ -376,8 +387,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
         self,
         business_id: str,
         target_lang: str,
-        context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]:
+        context: dict[str, Any] | None = None,
+    ) -> TranslationResult | None:
         context_hash = get_context_hash(context)
         sql = """
             SELECT
@@ -388,8 +399,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 t.engine,
                 t.error
             FROM th_translations t
-            JOIN th_content c ON t.content_id = c.id
-            LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+            JOIN th_content c
+                ON t.content_id = c.id
+            LEFT JOIN th_contexts ctx
+                ON t.context_id = ctx.id
             WHERE c.business_id = ?
               AND t.lang_code = ?
               AND COALESCE(ctx.context_hash, '__GLOBAL__') = ?
@@ -424,91 +437,61 @@ class SQLitePersistenceHandler(PersistenceHandler):
         self,
         retention_days: int,
         dry_run: bool = False,
-        _now: Optional[datetime] = None,
+        _now: datetime | None = None,
     ) -> dict[str, int]:
-        now = _now or datetime.now(timezone.utc)
-        cutoff_date = (now - timedelta(days=retention_days)).date()
+        now = _now if _now is not None else datetime.now(timezone.utc)
+        cutoff_date = (now - timedelta(days=retention_days)).isoformat()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            # 修复：使用内存高效的单条 DELETE 语句，并确保逻辑正确
-            # Step 1: Clean up expired jobs
-            if dry_run:
-                cursor = await tx.execute(
-                    "SELECT COUNT(*) FROM th_jobs WHERE DATE(last_requested_at) < ?",
-                    (cutoff_date.isoformat(),),
-                )
-                row = await cursor.fetchone()
-                stats["deleted_jobs"] = row[0] if row else 0
-            else:
-                cursor = await tx.execute(
-                    "DELETE FROM th_jobs WHERE DATE(last_requested_at) < ?",
-                    (cutoff_date.isoformat(),),
-                )
-                stats["deleted_jobs"] = cursor.rowcount
+            cursor = await tx.execute(
+                "SELECT id FROM th_jobs WHERE last_requested_at < ?",
+                (cutoff_date,),
+            )
+            expired_job_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
+            stats["deleted_jobs"] = len(expired_job_ids)
 
-            # Step 2 & 3: Clean up orphan content and contexts
-            # This needs to be done iteratively until no more orphans are found
-            while True:
-                # Clean orphan content
-                orphan_content_subquery = """
-                    SELECT c.id FROM th_content c
-                    WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM th_translations t WHERE t.content_id = c.id
-                      )
+            if not dry_run and expired_job_ids:
+                placeholders = ",".join("?" * len(expired_job_ids))
+                await tx.execute(
+                    f"DELETE FROM th_jobs WHERE id IN ({placeholders})",
+                    expired_job_ids,
+                )
+
+            cursor = await tx.execute(
                 """
-                if dry_run:
-                    cursor = await tx.execute(
-                        f"SELECT COUNT(*) FROM ({orphan_content_subquery})"
-                    )
-                    row = await cursor.fetchone()
-                    count = row[0] if row else 0
-                    stats["deleted_content"] += count
-                else:
-                    cursor = await tx.execute(
-                        (
-                            f"DELETE FROM th_content WHERE id IN ("
-                            f"{orphan_content_subquery})"
-                        )
-                    )
-                    count = cursor.rowcount
-                    stats["deleted_content"] += count
-                await cursor.close()
-
-                # Clean orphan contexts
-                orphan_contexts_subquery = """
-                    SELECT ctx.id FROM th_contexts ctx
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
-                    )
+                SELECT c.id
+                FROM th_content c
+                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                  AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
                 """
-                if dry_run:
-                    cursor = await tx.execute(
-                        f"SELECT COUNT(*) FROM ({orphan_contexts_subquery})"
-                    )
-                    row = await cursor.fetchone()
-                    count_ctx = row[0] if row else 0
-                    stats["deleted_contexts"] += count_ctx
-                else:
-                    cursor = await tx.execute(
-                        (
-                            f"DELETE FROM th_contexts WHERE id IN ("
-                            f"{orphan_contexts_subquery})"
-                        )
-                    )
-                    count_ctx = cursor.rowcount
-                    stats["deleted_contexts"] += count_ctx
-                await cursor.close()
-
-                # If nothing was deleted in this pass, we are done
-                if not dry_run and count == 0 and count_ctx == 0:
-                    break
-                # In dry_run, we only need to run once
-                if dry_run:
-                    break
-
+            )
+            orphan_content_ids = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
+            stats["deleted_content"] = len(orphan_content_ids)
+            if not dry_run and orphan_content_ids:
+                placeholders = ",".join("?" * len(orphan_content_ids))
+                await tx.execute(
+                    f"DELETE FROM th_content WHERE id IN ({placeholders})",
+                    orphan_content_ids,
+                )
+            cursor = await tx.execute(
+                """
+                SELECT ctx.id
+                FROM th_contexts ctx
+                WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
+                """
+            )
+            orphan_context_ids = [row[0] for row in await cursor.fetchall()]
+            await cursor.close()
+            stats["deleted_contexts"] = len(orphan_context_ids)
+            if not dry_run and orphan_context_ids:
+                placeholders = ",".join("?" * len(orphan_context_ids))
+                await tx.execute(
+                    f"DELETE FROM th_contexts WHERE id IN ({placeholders})",
+                    orphan_context_ids,
+                )
         return stats
 
     async def move_to_dlq(
@@ -522,11 +505,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as tx:
             await tx.execute(
                 """
-                INSERT INTO th_dead_letter_queue (
-                    translation_id, original_payload_json, context_payload_json,
-                    target_lang_code, last_error_message, failed_at,
-                    engine_name, engine_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO th_dead_letter_queue
+                    (translation_id, original_payload_json, context_payload_json,
+                     target_lang_code, last_error_message, failed_at,
+                     engine_name, engine_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.translation_id,

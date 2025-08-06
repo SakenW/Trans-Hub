@@ -1,15 +1,12 @@
 # tests/unit/engines/test_engine_functionality.py
-"""
-测试翻译引擎的核心功能，包括速率限制、并发控制和翻译执行。
-"""
+"""测试翻译引擎的核心功能，包括速率限制、并发控制和翻译执行。"""
 
 import asyncio
-from typing import Any, AsyncGenerator, Optional
-from unittest.mock import AsyncMock
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 import pytest_asyncio
-from pytest_mock import MockerFixture
 
 from trans_hub.core.types import EngineBatchItemResult, EngineError, EngineSuccess
 from trans_hub.engines.base import (
@@ -17,7 +14,6 @@ from trans_hub.engines.base import (
     BaseEngineConfig,
     BaseTranslationEngine,
 )
-from trans_hub.rate_limiter import RateLimiter
 
 
 class _TestEngineConfig(BaseEngineConfig):
@@ -46,7 +42,7 @@ class _TestTranslationEngine(BaseTranslationEngine[_TestEngineConfig]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """模拟翻译执行，不包含延迟。"""
@@ -73,9 +69,7 @@ async def test_engine() -> AsyncGenerator[_TestTranslationEngine, None]:
 async def test_concurrency_control_limits_active_tasks(
     test_engine: _TestTranslationEngine,
 ) -> None:
-    """
-    测试并发控制功能（确定性测试）。
-    """
+    """测试并发控制功能（确定性测试）。"""
     test_engine.config = _TestEngineConfig(max_concurrency=2)
     test_engine._concurrency_semaphore = asyncio.Semaphore(2)
 

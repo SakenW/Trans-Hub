@@ -1,7 +1,7 @@
 # trans_hub/engines/debug.py
 """提供一个用于开发和测试的调试翻译引擎。"""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,9 +17,9 @@ class DebugEngineConfig(BaseSettings, BaseEngineConfig):
     model_config = SettingsConfigDict(env_prefix="TH_DEBUG_", extra="ignore")
 
     mode: str = Field(default="SUCCESS", description="SUCCESS, FAIL, or PARTIAL_FAIL")
-    fail_on_text: Optional[str] = Field(default=None)
+    fail_on_text: str | None = Field(default=None)
     fail_is_retryable: bool = Field(default=True)
-    translation_map: Dict[str, str] = Field(default_factory=dict)
+    translation_map: dict[str, str] = Field(default_factory=dict)
 
 
 class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
@@ -32,7 +32,7 @@ class DebugEngine(BaseTranslationEngine[DebugEngineConfig]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """[实现] 异步翻译单个文本。"""

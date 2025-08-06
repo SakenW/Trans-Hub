@@ -5,7 +5,7 @@ v3.0.0 重大更新：适配结构化载荷（payload）和新的核心类型。
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
+from typing import Any, Protocol, Union
 
 import structlog
 
@@ -34,9 +34,7 @@ class ProcessingPolicy(Protocol):
         context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
     ) -> list[TranslationResult]:
-        """
-        异步处理一批翻译任务。
-        """
+        """异步处理一批翻译任务。"""
         ...
 
 
@@ -162,7 +160,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         target_lang: str,
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-        engine_context: Optional[BaseContextModel],
+        engine_context: BaseContextModel | None,
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
         """[私有] 执行单次翻译尝试，分离出成功、失败和可重试的项。"""
         cached_results, uncached_items = await self._separate_cached_items(
@@ -202,7 +200,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         retryable_items: list[ContentItem] = []
         item_map = {item.translation_id: item for item in batch}
 
-        for item, output in zip(valid_items, engine_outputs):
+        for item, output in zip(valid_items, engine_outputs, strict=False):
             if isinstance(output, EngineError) and output.is_retryable:
                 retryable_items.append(item)
             else:
@@ -280,7 +278,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         target_lang: str,
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-        engine_context: Optional[BaseContextModel],
+        engine_context: BaseContextModel | None,
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
         texts_to_translate = [
@@ -298,7 +296,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         else:
             logger.warning(
                 "批次中包含多种源语言，将回退到全局源语言配置。",
-                found_langs=sorted(list(source_langs)),
+                found_langs=sorted(source_langs),
             )
             batch_source_lang = p_context.config.source_lang
 
@@ -321,10 +319,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         results: list[TranslationResult],
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-        item_map: Dict[str, ContentItem],
+        item_map: dict[str, ContentItem],
     ) -> None:
         """[私有] 将新获得的成功翻译结果存入缓存。"""
-        tasks_with_ids: List[Tuple[asyncio.Task[None], str]] = []
+        tasks_with_ids: list[tuple[asyncio.Task[None], str]] = []
 
         for res in results:
             if (
@@ -373,9 +371,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         target_lang: str,
         p_context: ProcessingContext,
         *,
-        engine_output: Optional[Union[EngineSuccess, EngineError]] = None,
-        cached_text: Optional[str] = None,
-        error_override: Optional[EngineError] = None,
+        engine_output: Union[EngineSuccess, EngineError] | None = None,
+        cached_text: str | None = None,
+        error_override: EngineError | None = None,
     ) -> TranslationResult:
         """[私有] 根据不同的输入源构建一个标准的 `TranslationResult` 对象。"""
         active_engine_name = p_context.config.active_engine.value
@@ -398,7 +396,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 business_id=item.business_id,
             )
 
-        translated_text: Optional[str] = None
+        translated_text: str | None = None
         from_cache = False
         if cached_text is not None:
             translated_text = cached_text

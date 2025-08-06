@@ -27,6 +27,7 @@ def create_coordinator(config: TransHubConfig) -> Coordinator:
 
     Returns:
         一个未初始化的 Coordinator 实例。
+
     """
     # 修复：调用工厂函数，而不是硬编码 SQLitePersistenceHandler
     handler = create_persistence_handler(config)

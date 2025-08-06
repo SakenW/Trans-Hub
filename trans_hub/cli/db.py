@@ -37,9 +37,9 @@ def db_migrate(ctx: typer.Context) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         apply_migrations(db_path)
         console.print("[bold green]✅ 数据库迁移成功完成！[/bold green]")
-    except Exception:
+    except Exception as e:
         logger.error("数据库迁移过程中发生错误。", exc_info=True)
         console.print(
             "[bold red]❌ 数据库迁移失败！请检查日志获取详细信息。[/bold red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e

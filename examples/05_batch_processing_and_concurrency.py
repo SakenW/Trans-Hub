@@ -10,12 +10,11 @@ Trans-Hub v3.0 批量处理与并发示例
 运行方式:
 在项目根目录执行: `poetry run python examples/05_batch_processing_and_concurrency.py`
 """
+
 import asyncio
-import os
 import sys
 import time
 from pathlib import Path
-from typing import List
 
 import structlog
 
@@ -46,7 +45,9 @@ async def main() -> None:
     if DB_FILE.exists():
         DB_FILE.unlink()
 
-    config = TransHubConfig(database_url=f"sqlite:///{DB_FILE.resolve()}", source_lang="en")
+    config = TransHubConfig(
+        database_url=f"sqlite:///{DB_FILE.resolve()}", source_lang="en"
+    )
     apply_migrations(config.db_path)
     handler = create_persistence_handler(config)
     coordinator = Coordinator(config=config, persistence_handler=handler)
@@ -73,7 +74,9 @@ async def main() -> None:
 
         log.warning(f"👷 步骤 2: 启动 {len(TARGET_LANGS)} 个并发 Worker...")
         start_time = time.monotonic()
-        results_per_lang = await process_translations_with_results(coordinator, TARGET_LANGS)
+        results_per_lang = await process_translations_with_results(
+            coordinator, TARGET_LANGS
+        )
         duration = time.monotonic() - start_time
 
         log.warning("🔍 步骤 3: 验证处理结果...")
@@ -92,19 +95,18 @@ async def main() -> None:
 
 
 async def process_translations_with_results(
-    coordinator: Coordinator, langs: List[str]
-) -> List[List[TranslationResult]]:
+    coordinator: Coordinator, langs: list[str]
+) -> list[list[TranslationResult]]:
     """模拟 Worker 处理所有待办任务并返回结果。"""
     tasks = [
-        asyncio.create_task(consume_all_and_return(coordinator, lang))
-        for lang in langs
+        asyncio.create_task(consume_all_and_return(coordinator, lang)) for lang in langs
     ]
     return await asyncio.gather(*tasks)
 
 
 async def consume_all_and_return(
     coordinator: Coordinator, lang: str
-) -> List[TranslationResult]:
+) -> list[TranslationResult]:
     """消费指定语言的所有待办任务并返回结果列表。"""
     results = [res async for res in coordinator.process_pending_translations(lang)]
     log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")

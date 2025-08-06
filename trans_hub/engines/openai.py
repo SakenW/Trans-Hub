@@ -2,7 +2,7 @@
 """提供一个使用 OpenAI API 的翻译引擎。"""
 
 import os
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -17,7 +17,7 @@ from trans_hub.engines.base import (
     BaseTranslationEngine,
 )
 
-_AsyncOpenAIClient: Optional[type] = None
+_AsyncOpenAIClient: type | None = None
 try:
     from openai import (
         APIConnectionError,
@@ -44,17 +44,17 @@ logger = structlog.get_logger(__name__)
 class OpenAIContext(BaseContextModel):
     """OpenAI 引擎的上下文模型。"""
 
-    system_prompt: Optional[str] = None
-    prompt_template: Optional[str] = None
-    model: Optional[str] = None
-    temperature: Optional[float] = None
+    system_prompt: str | None = None
+    prompt_template: str | None = None
+    model: str | None = None
+    temperature: float | None = None
 
 
 class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
     """OpenAI 引擎的配置模型。"""
 
     model_config = SettingsConfigDict(env_prefix="TH_OPENAI_", extra="ignore")
-    api_key: Optional[SecretStr] = Field(default=None, alias="th_openai_api_key")
+    api_key: SecretStr | None = Field(default=None, alias="th_openai_api_key")
     endpoint: HttpUrl = Field(default=cast(HttpUrl, "https://api.openai.com/v1"))
     model: str = "gpt-3.5-turbo"
     temperature: float = 0.1
@@ -160,7 +160,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         final_source_lang = cast(str, source_lang)

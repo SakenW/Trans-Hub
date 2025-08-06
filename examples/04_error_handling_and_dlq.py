@@ -11,11 +11,10 @@ Trans-Hub v3.0 错误处理与死信队列(DLQ)示例
 运行方式:
 在项目根目录执行: `poetry run python examples/04_error_handling_and_dlq.py`
 """
+
 import asyncio
-import os
 import sys
 from pathlib import Path
-from typing import List
 
 import aiosqlite
 import structlog
@@ -30,6 +29,7 @@ from trans_hub import Coordinator, EngineName, TransHubConfig  # noqa: E402
 from trans_hub.config import RetryPolicyConfig  # noqa: E402
 from trans_hub.core import TranslationResult  # noqa: E402
 from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+
 # 修复：将此 import 移至文件顶部
 from trans_hub.logging_config import setup_logging  # noqa: E402
 from trans_hub.persistence import create_persistence_handler  # noqa: E402
@@ -93,7 +93,7 @@ async def main() -> None:
             DB_FILE.unlink()
 
 
-async def process_translations(coordinator: Coordinator, langs: List[str]) -> None:
+async def process_translations(coordinator: Coordinator, langs: list[str]) -> None:
     """模拟 Worker 处理所有待办任务。"""
     tasks = [asyncio.create_task(consume_all(coordinator, lang)) for lang in langs]
     await asyncio.gather(*tasks)
@@ -101,7 +101,7 @@ async def process_translations(coordinator: Coordinator, langs: List[str]) -> No
 
 async def consume_all(coordinator: Coordinator, lang: str) -> None:
     """消费指定语言的所有待办任务。"""
-    results: List[TranslationResult] = [
+    results: list[TranslationResult] = [
         res async for res in coordinator.process_pending_translations(lang)
     ]
     log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")

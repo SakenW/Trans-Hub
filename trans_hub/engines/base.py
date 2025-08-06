@@ -6,7 +6,7 @@ v3.1.0 修复: 彻底解耦引擎与主配置。
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union
 
 from pydantic import BaseModel, Field
 
@@ -25,13 +25,13 @@ class BaseContextModel(BaseModel):
 class BaseEngineConfig(BaseModel):
     """所有引擎配置模型的基类，提供了通用的速率与并发控制选项。"""
 
-    rpm: Optional[int] = Field(
+    rpm: int | None = Field(
         default=None, description="每分钟最大请求数 (Requests Per Minute)", gt=0
     )
-    rps: Optional[int] = Field(
+    rps: int | None = Field(
         default=None, description="每秒最大请求数 (Requests Per Second)", gt=0
     )
-    max_concurrency: Optional[int] = Field(
+    max_concurrency: int | None = Field(
         default=None, description="最大并发请求数", gt=0
     )
     max_batch_size: int = Field(default=50, gt=0)
@@ -48,8 +48,8 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
     def __init__(self, config: _ConfigType):
         self.config = config
-        self._rate_limiter: Optional[RateLimiter] = None
-        self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
+        self._rate_limiter: RateLimiter | None = None
+        self._concurrency_semaphore: asyncio.Semaphore | None = None
         self.initialized: bool = False
 
         if config.rpm:
@@ -82,24 +82,20 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """
-        [子类实现] 真正执行单次翻译的逻辑。
-        """
+        """[子类实现] 真正执行单次翻译的逻辑。"""
         ...
 
     async def _atranslate_one(
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
-        """
-        [模板方法] 执行单次翻译，应用并发和速率限制。
-        """
+        """[模板方法] 执行单次翻译，应用并发和速率限制。"""
         if self._rate_limiter:
             await self._rate_limiter.acquire()
 
@@ -113,15 +109,13 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
                 text, target_lang, source_lang, context_config
             )
 
-    def _get_context_config(
-        self, context: Optional[BaseContextModel]
-    ) -> dict[str, Any]:
+    def _get_context_config(self, context: BaseContextModel | None) -> dict[str, Any]:
         if context and isinstance(context, self.CONTEXT_MODEL):
             return context.model_dump(exclude_unset=True)
         return {}
 
     def validate_and_parse_context(
-        self, context_dict: Optional[dict[str, Any]]
+        self, context_dict: dict[str, Any] | None
     ) -> Union[BaseContextModel, EngineError]:
         if not self.ACCEPTS_CONTEXT or not context_dict:
             return BaseContextModel()
@@ -135,8 +129,8 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         self,
         texts: list[str],
         target_lang: str,
-        source_lang: Optional[str] = None,
-        context: Optional[BaseContextModel] = None,
+        source_lang: str | None = None,
+        context: BaseContextModel | None = None,
     ) -> list[EngineBatchItemResult]:
         if self.REQUIRES_SOURCE_LANG and not source_lang:
             error_msg = f"引擎 '{self.__class__.__name__}' 需要提供源语言。"
@@ -154,7 +148,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
         final_results: list[EngineBatchItemResult] = []
         for res in results:
-            if isinstance(res, (EngineSuccess, EngineError)):
+            if isinstance(res, EngineSuccess | EngineError):
                 final_results.append(res)
             elif isinstance(res, BaseException):
                 error_res = EngineError(

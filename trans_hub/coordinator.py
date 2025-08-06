@@ -11,7 +11,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from itertools import groupby
-from typing import TYPE_CHECKING, Any, List, Optional, Set
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -25,7 +25,7 @@ from .core import (
     TranslationResult,
     TranslationStatus,
 )
-from .engine_registry import ENGINE_REGISTRY
+from .engine_registry import ENGINE_REGISTRY, discover_engines
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 
@@ -42,24 +42,24 @@ class Coordinator:
         self,
         config: TransHubConfig,
         persistence_handler: PersistenceHandler,
-        rate_limiter: Optional[RateLimiter] = None,
-        max_concurrent_requests: Optional[int] = None,
+        rate_limiter: RateLimiter | None = None,
+        max_concurrent_requests: int | None = None,
     ) -> None:
-        """
-        初始化 Coordinator。
-        """
+        """初始化 Coordinator。"""
+        discover_engines()
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
         self.rate_limiter = rate_limiter
         self.initialized = False
-        self._engine_instances: dict[str, "BaseTranslationEngine[Any]"] = {}
-        self._request_semaphore: Optional[asyncio.Semaphore] = None
+        self._engine_instances: dict[str, BaseTranslationEngine[Any]] = {}
+        self._request_semaphore: asyncio.Semaphore | None = None
         if max_concurrent_requests and max_concurrent_requests > 0:
             self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
 
         self._shutting_down = False
-        self._active_tasks: Set[asyncio.Task[Any]] = set()
+        # v3.5.5 修复：使用任务跟踪代替复杂的锁机制
+        self._active_tasks: set[asyncio.Task[Any]] = set()
 
         self.processing_context = ProcessingContext(
             config=self.config,
@@ -91,10 +91,10 @@ class Coordinator:
                     f"引擎 '{engine_name}' 未在引擎注册表中找到。"
                 )
 
-            EngineConfigModel = engine_class.CONFIG_MODEL
+            engine_config_model = engine_class.CONFIG_MODEL
             raw_config_data = self.config.engine_configs.get(engine_name, {})
             try:
-                engine_config_instance = EngineConfigModel(**raw_config_data)
+                engine_config_instance = engine_config_model(**raw_config_data)
             except Exception as e:
                 raise ConfigurationError(
                     f"解析引擎 '{engine_name}' 的配置失败: {e}"
@@ -133,17 +133,19 @@ class Coordinator:
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
 
-        self._get_or_create_engine_instance(self.config.active_engine.value)
-
-        instances_to_init = {
-            instance
+        init_tasks = [
+            instance.initialize()
             for instance in self._engine_instances.values()
             if not instance.initialized
-        }
+        ]
+        active_engine_instance = self._get_or_create_engine_instance(
+            self.config.active_engine.value
+        )
+        if not active_engine_instance.initialized:
+            init_tasks.append(active_engine_instance.initialize())
 
-        if instances_to_init:
-            init_tasks = [instance.initialize() for instance in instances_to_init]
-            await asyncio.gather(*init_tasks)
+        if init_tasks:
+            await asyncio.gather(*list(set(init_tasks)))
 
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
@@ -151,8 +153,8 @@ class Coordinator:
     async def _process_and_track(
         self,
         target_lang: str,
-        batch_size: Optional[int] = None,
-        limit: Optional[int] = None,
+        batch_size: int | None = None,
+        limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
         """[内部] 包装 process_pending_translations 以传播取消信号。"""
         self._check_is_active()
@@ -168,8 +170,8 @@ class Coordinator:
     def process_pending_translations(
         self,
         target_lang: str,
-        batch_size: Optional[int] = None,
-        limit: Optional[int] = None,
+        batch_size: int | None = None,
+        limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
         """[公共] 返回一个异步生成器来处理待处理任务。"""
         return self._process_and_track(target_lang, batch_size, limit)
@@ -177,8 +179,8 @@ class Coordinator:
     async def _internal_process_pending(
         self,
         target_lang: str,
-        batch_size: Optional[int] = None,
-        limit: Optional[int] = None,
+        batch_size: int | None = None,
+        limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
         """[解析层] 处理指定语言的待处理翻译任务。"""
         active_engine = self.active_engine
@@ -200,30 +202,16 @@ class Coordinator:
             if not batch:
                 continue
 
-            # 修复：并行处理不同上下文的小组
-            processing_tasks: List[asyncio.Task[List[TranslationResult]]] = []
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
-                task = asyncio.create_task(
-                    self.processing_policy.process_batch(
-                        items_group,
-                        target_lang,
-                        self.processing_context,
-                        active_engine,
-                    )
+                batch_results = await self.processing_policy.process_batch(
+                    items_group,
+                    target_lang,
+                    self.processing_context,
+                    active_engine,
                 )
-                processing_tasks.append(task)
-
-            # 等待所有上下文小组处理完成
-            grouped_results: List[List[TranslationResult]] = await asyncio.gather(
-                *processing_tasks
-            )
-
-            # 将结果扁平化并保存
-            all_results = [result for group in grouped_results for result in group]
-            if all_results:
-                await self.handler.save_translation_results(all_results)
-                for result in all_results:
+                await self.handler.save_translation_results(batch_results)
+                for result in batch_results:
                     yield result
 
     async def request(
@@ -231,13 +219,11 @@ class Coordinator:
         business_id: str,
         source_payload: dict[str, Any],
         target_langs: list[str],
-        context: Optional[dict[str, Any]] = None,
-        source_lang: Optional[str] = None,
+        context: dict[str, Any] | None = None,
+        source_lang: str | None = None,
         force_retranslate: bool = False,
     ) -> None:
-        """
-        [操作层入口] 提交一个新的翻译请求。
-        """
+        """[操作层入口] 提交一个新的翻译请求。"""
         self._check_is_active()
 
         op = self._execute_request_operation(
@@ -260,8 +246,8 @@ class Coordinator:
         business_id: str,
         source_payload: dict[str, Any],
         target_langs: list[str],
-        context: Optional[dict[str, Any]],
-        source_lang: Optional[str],
+        context: dict[str, Any] | None,
+        source_lang: str | None,
         force_retranslate: bool,
     ) -> None:
         """[操作层实现] 执行翻译请求的核心数据库操作。"""
@@ -284,11 +270,9 @@ class Coordinator:
         self,
         business_id: str,
         target_lang: str,
-        context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]:
-        """
-        [解析层] 直接获取一个翻译结果。
-        """
+        context: dict[str, Any] | None = None,
+    ) -> TranslationResult | None:
+        """[解析层] 直接获取一个翻译结果。"""
         self._check_is_active()
         return await self.handler.find_translation(
             business_id=business_id,
@@ -298,9 +282,9 @@ class Coordinator:
 
     async def run_garbage_collection(
         self,
-        expiration_days: Optional[int] = None,
+        expiration_days: int | None = None,
         dry_run: bool = False,
-        _now: Optional[datetime] = None,
+        _now: datetime | None = None,
     ) -> dict[str, int]:
         """运行垃圾回收，清理旧的、无关联的数据。"""
         self._check_is_active()

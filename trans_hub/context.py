@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from trans_hub.cache import TranslationCache
 from trans_hub.config import TransHubConfig
@@ -22,4 +21,4 @@ class ProcessingContext:
     cache: TranslationCache
 
     # 可选依赖组件
-    rate_limiter: Optional[RateLimiter] = None
+    rate_limiter: RateLimiter | None = None

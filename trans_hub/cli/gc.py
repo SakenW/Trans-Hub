@@ -2,6 +2,7 @@
 """处理垃圾回收 (GC) 的 CLI 命令。"""
 
 import asyncio
+from typing import Annotated
 
 import questionary
 import typer
@@ -68,12 +69,14 @@ async def _async_gc_run(
 @gc_app.command("run")
 def gc_run(
     ctx: typer.Context,
-    retention_days: int = typer.Option(90, "--days", "-d", help="数据保留的最短天数。"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="跳过确认提示，直接执行删除。"),
+    retention_days: Annotated[
+        int, typer.Option("--days", "-d", help="数据保留的最短天数。")
+    ] = 90,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="跳过确认提示，直接执行删除。")
+    ] = False,
 ) -> None:
-    """
-    执行垃圾回收，清理过期的、无关联的旧数据。
-    """
+    """执行垃圾回收，清理过期的、无关联的旧数据。"""
     state: State = ctx.obj
     coordinator = create_coordinator(state.config)
     try:
@@ -88,4 +91,4 @@ def gc_run(
             console.print(error_msg)
         else:
             console.print(f"[bold red]❌ 执行失败: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e

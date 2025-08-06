@@ -8,7 +8,6 @@
 """
 
 import traceback
-from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import HttpUrl, SecretStr
@@ -37,8 +36,8 @@ class TestOpenAIConfig(BaseSettings):
     """用于测试 .env 文件中的 OpenAI 配置加载是否正常。"""
 
     model_config = SettingsConfigDict(env_prefix="TH_", env_file=".env", extra="ignore")
-    openai_endpoint: Optional[HttpUrl] = None
-    openai_api_key: Optional[SecretStr] = None
+    openai_endpoint: HttpUrl | None = None
+    openai_api_key: SecretStr | None = None
     openai_model: str = "default-model"
 
 

@@ -2,7 +2,7 @@
 """提供一个使用 `translators` 库的免费翻译引擎。"""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +21,7 @@ logger = structlog.get_logger(__name__)
 class TranslatorsContextModel(BaseContextModel):
     """Translators 引擎的上下文。"""
 
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 class TranslatorsEngineConfig(BaseSettings, BaseEngineConfig):
@@ -43,7 +43,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
 
     def __init__(self, config: TranslatorsEngineConfig):
         super().__init__(config)
-        self.ts_module: Optional[Any] = None
+        self.ts_module: Any | None = None
         logger.info("Translators 引擎已配置。", default_provider=self.config.provider)
 
     async def _ensure_initialized(self) -> None:
@@ -67,7 +67,7 @@ class TranslatorsEngine(BaseTranslationEngine[TranslatorsEngineConfig]):
         self,
         text: str,
         target_lang: str,
-        source_lang: Optional[str],
+        source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
         """[实现] 异步翻译单个文本。"""

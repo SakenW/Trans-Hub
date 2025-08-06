@@ -9,11 +9,10 @@ Trans-Hub v3.0 上下文翻译示例
 运行方式:
 在项目根目录执行: `poetry run python examples/02_contextual_translation.py`
 """
+
 import asyncio
-import os
 import sys
 from pathlib import Path
-from typing import List
 
 import structlog
 
@@ -111,7 +110,7 @@ async def main() -> None:
             DB_FILE.unlink()
 
 
-async def process_translations(coordinator: Coordinator, langs: List[str]) -> None:
+async def process_translations(coordinator: Coordinator, langs: list[str]) -> None:
     """模拟 Worker 处理所有待办任务。"""
     tasks = [asyncio.create_task(consume_all(coordinator, lang)) for lang in langs]
     await asyncio.gather(*tasks)
@@ -119,7 +118,7 @@ async def process_translations(coordinator: Coordinator, langs: List[str]) -> No
 
 async def consume_all(coordinator: Coordinator, lang: str) -> None:
     """消费指定语言的所有待办任务。"""
-    results: List[TranslationResult] = [
+    results: list[TranslationResult] = [
         res async for res in coordinator.process_pending_translations(lang)
     ]
     log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")

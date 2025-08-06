@@ -6,7 +6,7 @@ v3.0.0 更新：调整日志输出以适配结构化载荷（payload）。
 
 import asyncio
 import signal
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
 import typer
@@ -141,18 +141,16 @@ async def _run_worker_loop(
 @worker_app.command("start")
 def worker_start(
     ctx: typer.Context,
-    target_langs: list[str] = typer.Option(
-        ..., "--lang", "-l", help="一个或多个要处理的目标语言代码。"
-    ),
+    target_langs: Annotated[
+        list[str], typer.Option("--lang", "-l", help="一个或多个要处理的目标语言代码。")
+    ],
 ) -> None:
-    """
-    启动一个或多个后台 Worker 进程，持续处理待翻译任务。
-    """
+    """启动一个或多个后台 Worker 进程，持续处理待翻译任务。"""
     try:
         validate_lang_codes(target_langs)
     except ValueError as e:
         console.print(f"[bold red]❌ 语言代码错误: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     state: State = ctx.obj
     coordinator = create_coordinator(state.config)

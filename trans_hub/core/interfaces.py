@@ -6,10 +6,8 @@ v3.0.0.dev: 重构以适应新的数据模型，并为可插拔的持久层设�
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-
-# 修复：为依赖注入导入 datetime
 from datetime import datetime
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from trans_hub.core.types import (
     ContentItem,
@@ -26,15 +24,13 @@ class TranslationNotification:
     content_id: str
     target_lang: str
     source_payload: dict[str, Any]
-    business_id: Optional[str] = None
-    context_id: Optional[str] = None
-    context: Optional[dict[str, Any]] = None
+    business_id: str | None = None
+    context_id: str | None = None
+    context: dict[str, Any] | None = None
 
 
 class PersistenceHandler(Protocol):
-    """
-    定义了持久化处理器的纯异步接口协议。
-    """
+    """定义了持久化处理器的纯异步接口协议。"""
 
     SUPPORTS_NOTIFICATIONS: bool = False
 
@@ -59,22 +55,22 @@ class PersistenceHandler(Protocol):
         lang_code: str,
         statuses: list[TranslationStatus],
         batch_size: int,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> AsyncGenerator[list[ContentItem], None]: ...
 
     async def ensure_content_and_context(
         self,
         business_id: str,
         source_payload: dict[str, Any],
-        context: Optional[dict[str, Any]],
-    ) -> tuple[str, Optional[str]]: ...
+        context: dict[str, Any] | None,
+    ) -> tuple[str, str | None]: ...
 
     async def create_pending_translations(
         self,
         content_id: str,
-        context_id: Optional[str],
+        context_id: str | None,
         target_langs: list[str],
-        source_lang: Optional[str],
+        source_lang: str | None,
         engine_version: str,
         force_retranslate: bool = False,
     ) -> None: ...
@@ -88,15 +84,14 @@ class PersistenceHandler(Protocol):
         self,
         business_id: str,
         target_lang: str,
-        context: Optional[dict[str, Any]] = None,
-    ) -> Optional[TranslationResult]: ...
+        context: dict[str, Any] | None = None,
+    ) -> TranslationResult | None: ...
 
     async def garbage_collect(
         self,
         retention_days: int,
         dry_run: bool = False,
-        # 修复：为依赖注入添加 _now 参数
-        _now: Optional[datetime] = None,
+        _now: datetime | None = None,
     ) -> dict[str, int]: ...
 
     async def move_to_dlq(

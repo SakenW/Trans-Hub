@@ -5,7 +5,7 @@ v3.0.0 更新：全面转向结构化载荷（payload），并与新的数据库
 """
 
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -41,7 +41,7 @@ class TranslationRequest(BaseModel):
     """表示一个内部传递或用于缓存查找的翻译请求单元。"""
 
     source_payload: dict[str, Any]
-    source_lang: Optional[str]
+    source_lang: str | None
     target_lang: str
     context_hash: str
     # 修复：为缓存键加入引擎标识
@@ -53,21 +53,19 @@ class TranslationResult(BaseModel):
     """由 Coordinator 返回给最终用户的综合结果对象。"""
 
     translation_id: str
-    business_id: Optional[str] = Field(default=None)
+    business_id: str | None = Field(default=None)
     original_payload: dict[str, Any]
-    translated_payload: Optional[dict[str, Any]] = None
+    translated_payload: dict[str, Any] | None = None
     target_lang: str
     status: TranslationStatus
-    engine: Optional[str] = None
+    engine: str | None = None
     from_cache: bool
-    error: Optional[str] = None
+    error: str | None = None
     context_hash: str
 
     @model_validator(mode="after")
     def check_consistency(self) -> "TranslationResult":
-        """
-        验证模型状态的一致性。
-        """
+        """验证模型状态的一致性。"""
         if (
             self.status == TranslationStatus.TRANSLATED
             and self.translated_payload is None
@@ -84,10 +82,10 @@ class ContentItem(BaseModel):
     translation_id: str
     business_id: str
     content_id: str
-    context_id: Optional[str]
+    context_id: str | None
     source_payload: dict[str, Any]
-    context: Optional[dict[str, Any]]
-    source_lang: Optional[str]
+    context: dict[str, Any] | None
+    source_lang: str | None
 
 
 GLOBAL_CONTEXT_SENTINEL = "__GLOBAL__"
