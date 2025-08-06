@@ -31,7 +31,7 @@ class RateLimiter:
         if tokens_needed > self.capacity:
             raise ValueError("请求的令牌数不能超过桶的容量")
 
-        # v3.5 修复：重构锁的获取和释放，避免在 sleep 时持有锁，以提高并发效率
+        # v3.x 修复：重构锁的获取和释放，避免在 sleep 时持有锁，以提高并发效率
         while True:
             async with self._lock:
                 self._refill()
@@ -39,7 +39,7 @@ class RateLimiter:
                     self.tokens -= tokens_needed
                     return  # 成功获取令牌，退出
 
-                # 在锁内计算等待时间
+                # 在锁内计算等待时间，以确保状态一致
                 required = tokens_needed - self.tokens
                 wait_time = required / self.refill_rate
 

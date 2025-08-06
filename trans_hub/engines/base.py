@@ -105,8 +105,8 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         """
         [模板方法] 执行单次翻译，应用并发和速率限制。
         """
-        # v3.10 修复：调整顺序，先等待速率限制，再获取并发槽位
-        # 这样可以避免在等待令牌时长时间占用一个宝贵的并发槽位
+        # v3.x 修复：调整顺序，先等待速率限制，再获取并发槽位。
+        # 这样可以避免在等待令牌时长时间占用一个宝贵的并发槽位，从而提高整体吞吐量。
         if self._rate_limiter:
             await self._rate_limiter.acquire()
 
