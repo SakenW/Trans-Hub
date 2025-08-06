@@ -431,60 +431,83 @@ class SQLitePersistenceHandler(PersistenceHandler):
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            # 修复：使用内存高效的单条 DELETE 语句
-            base_query = "FROM th_jobs WHERE DATE(last_requested_at) < ?"
+            # 修复：使用内存高效的单条 DELETE 语句，并确保逻辑正确
+            # Step 1: Clean up expired jobs
             if dry_run:
                 cursor = await tx.execute(
-                    f"SELECT COUNT(*) {base_query}", (cutoff_date.isoformat(),)
+                    "SELECT COUNT(*) FROM th_jobs WHERE DATE(last_requested_at) < ?",
+                    (cutoff_date.isoformat(),),
                 )
                 row = await cursor.fetchone()
                 stats["deleted_jobs"] = row[0] if row else 0
             else:
                 cursor = await tx.execute(
-                    f"DELETE {base_query}", (cutoff_date.isoformat(),)
+                    "DELETE FROM th_jobs WHERE DATE(last_requested_at) < ?",
+                    (cutoff_date.isoformat(),),
                 )
                 stats["deleted_jobs"] = cursor.rowcount
             await cursor.close()
 
-            # 对于孤立项，同样使用内存高效的查询
-            orphan_content_subquery = """
-                SELECT c.id FROM th_content c
-                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM th_translations t WHERE t.content_id = c.id
-                  )
-            """
-            if dry_run:
-                cursor = await tx.execute(
-                    f"SELECT COUNT(*) FROM ({orphan_content_subquery})"
-                )
-                row = await cursor.fetchone()
-                stats["deleted_content"] = row[0] if row else 0
-            else:
-                cursor = await tx.execute(
-                    f"DELETE FROM th_content WHERE id IN ({orphan_content_subquery})"
-                )
-                stats["deleted_content"] = cursor.rowcount
-            await cursor.close()
+            # Step 2 & 3: Clean up orphan content and contexts
+            # This needs to be done iteratively until no more orphans are found
+            while True:
+                # Clean orphan content
+                orphan_content_subquery = """
+                    SELECT c.id FROM th_content c
+                    WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM th_translations t WHERE t.content_id = c.id
+                      )
+                """
+                if dry_run:
+                    cursor = await tx.execute(
+                        f"SELECT COUNT(*) FROM ({orphan_content_subquery})"
+                    )
+                    row = await cursor.fetchone()
+                    count = row[0] if row else 0
+                    stats["deleted_content"] += count
+                else:
+                    cursor = await tx.execute(
+                        (
+                            f"DELETE FROM th_content WHERE id IN ("
+                            f"{orphan_content_subquery})"
+                        )
+                    )
+                    count = cursor.rowcount
+                    stats["deleted_content"] += count
+                await cursor.close()
 
-            orphan_contexts_subquery = """
-                SELECT ctx.id FROM th_contexts ctx
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
-                )
-            """
-            if dry_run:
-                cursor = await tx.execute(
-                    f"SELECT COUNT(*) FROM ({orphan_contexts_subquery})"
-                )
-                row = await cursor.fetchone()
-                stats["deleted_contexts"] = row[0] if row else 0
-            else:
-                cursor = await tx.execute(
-                    f"DELETE FROM th_contexts WHERE id IN ({orphan_contexts_subquery})"
-                )
-                stats["deleted_contexts"] = cursor.rowcount
-            await cursor.close()
+                # Clean orphan contexts
+                orphan_contexts_subquery = """
+                    SELECT ctx.id FROM th_contexts ctx
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
+                    )
+                """
+                if dry_run:
+                    cursor = await tx.execute(
+                        f"SELECT COUNT(*) FROM ({orphan_contexts_subquery})"
+                    )
+                    row = await cursor.fetchone()
+                    count_ctx = row[0] if row else 0
+                    stats["deleted_contexts"] += count_ctx
+                else:
+                    cursor = await tx.execute(
+                        (
+                            f"DELETE FROM th_contexts WHERE id IN ("
+                            f"{orphan_contexts_subquery})"
+                        )
+                    )
+                    count_ctx = cursor.rowcount
+                    stats["deleted_contexts"] += count_ctx
+                await cursor.close()
+
+                # If nothing was deleted in this pass, we are done
+                if not dry_run and count == 0 and count_ctx == 0:
+                    break
+                # In dry_run, we only need to run once
+                if dry_run:
+                    break
 
         return stats
 
