@@ -1,106 +1,109 @@
-# tests/integration/test_persistence_postgres.py
-"""
-针对 `trans_hub.persistence.postgres` 的集成测试。
+# tools/generate_project_snapshot.py
+"""生成项目完整快照的工具，用于快速分享给AI协作伙伴。"""
 
-这些测试需要在 .env 文件或环境变量中将 TH_DATABASE_URL 设置为
-一个可用的 PostgreSQL 连接字符串来运行。
-"""
-import pytest
-
-from trans_hub.core.interfaces import PersistenceHandler
-from trans_hub.core.types import TranslationResult, TranslationStatus
-from tests.integration.conftest import requires_postgres
-
-# 将标记应用到整个模块的所有测试
-pytestmark = requires_postgres
+import os
+from pathlib import Path
 
 
-@pytest.mark.asyncio
-async def test_pg_ensure_content_and_context_creates_all_entities(
-    postgres_handler: PersistenceHandler,
-) -> None:
-    """测试 ensure_content_and_context 是否能正确创建所有实体。"""
-    business_id = "test.pg.hello"
-    source_payload = {"text": "Hello PG"}
-    context = {"domain": "testing"}
+def should_include_file(file_path: Path) -> bool:
+    """判断是否应该包含该文件在快照中。
 
-    content_id, context_id = await postgres_handler.ensure_content_and_context(
-        business_id=business_id,
-        source_payload=source_payload,
-        context=context,
-    )
-    assert content_id is not None
-    assert context_id is not None
+    Args:
+        file_path: 文件路径。
 
-    source_payload_updated = {"text": "Hello PG Updated"}
-    content_id2, context_id2 = await postgres_handler.ensure_content_and_context(
-        business_id=business_id,
-        source_payload=source_payload_updated,
-        context=context,
-    )
-    assert content_id == content_id2
-    assert context_id == context_id2
+    Returns:
+        True表示包含，False表示排除。
+    """
+    # 排除隐藏文件和目录
+    if any(part.startswith('.') for part in file_path.parts):
+        return False
+
+    # 排除特定目录
+    excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
+    if any(part in excluded_dirs for part in file_path.parts):
+        return False
+
+    # 包含特定类型的文件
+    included_extensions = {'.py', '.sql', '.toml', '.yml', '.yaml', '.rst', '.sh', '.json'}
+    return file_path.suffix in included_extensions
 
 
-@pytest.mark.asyncio
-async def test_pg_create_pending_translations_and_force_retranslate(
-    postgres_handler: PersistenceHandler,
-) -> None:
-    """测试创建待处理任务和强制重译的逻辑。"""
-    from trans_hub.persistence.postgres import PostgresPersistenceHandler
-    business_id = "test.pg.force"
-    content_id, _ = await postgres_handler.ensure_content_and_context(
-        business_id, {"text": "force me"}, None
-    )
+def generate_snapshot(root_path: str = ".", output_file: str = "project_snapshot.txt") -> None:
+    """生成项目快照文件。
 
-    await postgres_handler.create_pending_translations(
-        content_id, None, ["de"], "en", "1.0", force_retranslate=False
-    )
-    result1 = await postgres_handler.find_translation(business_id, "de")
-    assert result1 is not None
-    assert result1.status == TranslationStatus.PENDING
+    Args:
+        root_path: 项目根目录路径。
+        output_file: 输出文件名。
+    """
+    root = Path(root_path)
+    output_path = root / "tools" / output_file
 
-    # 模拟 Worker 拉取任务，状态变为 TRANSLATING
-    handler = postgres_handler
-    assert isinstance(handler, PostgresPersistenceHandler)
-    async with handler._transaction() as conn:
-        await conn.execute(
-            "UPDATE th_translations SET status = $1 WHERE id = $2",
-            TranslationStatus.TRANSLATING.value,
-            result1.translation_id,
-        )
-    # 验证状态确实已更新为 TRANSLATING
-    result_translating = await postgres_handler.find_translation(business_id, "de")
-    assert result_translating is not None
-    assert result_translating.status == TranslationStatus.TRANSLATING
+    with open(output_path, 'w', encoding='utf-8') as f:
+        # 写入标题
+        f.write("# Trans-Hub 项目完整快照\n\n")
 
-    # 模拟翻译完成
-    result_to_save = TranslationResult(
-        translation_id=result1.translation_id,
-        business_id=business_id,
-        original_payload={"text": "force me"},
-        translated_payload={"text": "zwing mich"},
-        target_lang="de",
-        status=TranslationStatus.TRANSLATED, # v3.28 修复：这里的 status 就是要保存到数据库的最终状态
-        from_cache=False,
-        context_hash="__GLOBAL__",
-        engine="test-engine",
-    )
-    # 在保存结果之前，再次检查数据库中的状态
-    result_before_save = await postgres_handler.find_translation(business_id, "de")
-    assert result_before_save is not None
-    assert result_before_save.status == TranslationStatus.TRANSLATING, f"Status before save is {result_before_save.status}, expected TRANSLATING"
-    await postgres_handler.save_translation_results([result_to_save])
-    
-    result_saved = await postgres_handler.find_translation(business_id, "de")
-    assert result_saved is not None
-    assert result_saved.status == TranslationStatus.TRANSLATED
+        # 获取并写入目录结构
+        f.write("## 目录结构\n\n")
+        for path in sorted(root.rglob('*')):
+            # 跳过输出文件本身
+            if path.resolve() == output_path.resolve():
+                continue
 
-    # 测试强制重译
-    await postgres_handler.create_pending_translations(
-        content_id, None, ["de"], "en", "1.1", force_retranslate=True
-    )
-    result2 = await postgres_handler.find_translation(business_id, "de")
-    assert result2 is not None
-    assert result2.status == TranslationStatus.PENDING
-    assert result2.translated_payload is None
+            # 排除隐藏文件和目录
+            if any(part.startswith('.') for part in path.parts):
+                continue
+
+            # 排除特定目录
+            excluded_dirs = {'docs', '__pycache__', '.git', '.pytest_cache', '.mypy_cache', '.vscode', '.github'}
+            if any(part in excluded_dirs for part in path.parts):
+                continue
+
+            # 计算相对于根目录的层级
+            relative_path = path.relative_to(root)
+            depth = len(relative_path.parts) - 1
+            indent = "  " * depth
+
+            # 写入目录或文件
+            if path.is_dir():
+                f.write(f"{indent}- {path.name}/\n")
+            else:
+                f.write(f"{indent}- {path.name}\n")
+
+        # 写入文件内容
+        f.write("\n## 文件内容\n\n")
+
+        # 收集所有需要包含的文件
+        included_files = []
+        for path in sorted(root.rglob('*')):
+            # 跳过输出文件本身
+            if path.resolve() == output_path.resolve():
+                continue
+
+            if path.is_file() and should_include_file(path):
+                included_files.append(path)
+
+        # 写入每个文件的内容
+        for file_path in included_files:
+            relative_path = file_path.relative_to(root)
+            f.write(f"### {relative_path}\n\n")
+
+            try:
+                # 尝试以文本方式读取文件
+                content = file_path.read_text(encoding='utf-8')
+                # 规范化换行符
+                content = content.replace('\r\n', '\n').replace('\r', '\n')
+                f.write(f"``````\n{content}\n``````\n\n")
+            except Exception as e:
+                f.write(f"``````\n[无法读取文件内容: {e}]\n``````\n\n")
+
+    print(f"项目快照已生成: {output_path}")
+
+
+def main() -> None:
+    """主函数。"""
+    print("正在生成项目快照...")
+    generate_snapshot()
+
+
+if __name__ == "__main__":
+    main()

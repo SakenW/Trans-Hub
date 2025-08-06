@@ -217,7 +217,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         for item in batch:
             request = TranslationRequest(
                 source_payload=item.source_payload,
-                # v4.0 修复：优先使用条目自带的 source_lang，再回退到全局配置
+                # v3.x 修复：优先使用条目自带的 source_lang，再回退到全局配置
                 source_lang=item.source_lang or p_context.config.source_lang,
                 target_lang=target_lang,
                 context_hash=get_context_hash(item.context),
@@ -245,7 +245,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in items
         ]
 
-        # v4.0 修复：健壮地处理批次中的源语言
+        # v3.x 修复：健壮地处理批次中的源语言
         source_langs = {item.source_lang for item in items}
         if len(source_langs) == 1:
             # 如果批次中所有条目的源语言都相同（最常见的情况）
@@ -286,13 +286,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
                 request = TranslationRequest(
                     source_payload=res.original_payload,
-                    # v4.0 修复：使用原始条目的 source_lang 来生成缓存键
+                    # v3.x 修复：使用原始条目的 source_lang 来生成缓存键
                     source_lang=original_item.source_lang
                     or p_context.config.source_lang,
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )
-                # 修复：即使 text 是空字符串 ""，也应该被缓存
                 if self.PAYLOAD_TEXT_KEY in res.translated_payload:
                     translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
                     tasks.append(

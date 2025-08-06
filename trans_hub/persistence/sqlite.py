@@ -183,6 +183,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                                 if r["context_payload_json"]
                                 else None
                             ),
+                            # v3.x 修复: 从数据库读取每个任务的源语言
                             source_lang=r["source_lang"],
                         )
                         for r in detail_rows
@@ -292,6 +293,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
         async with self._transaction() as tx:
             if force_retranslate and target_langs:
                 placeholders = ",".join("?" for _ in target_langs)
+                # v3.x 修复: 在 UPDATE 语句中也设置 source_lang
                 update_params: List[Any] = [
                     TranslationStatus.PENDING.value,
                     now_iso,
@@ -320,6 +322,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 """
                 await tx.execute(sql, tuple(update_params))
 
+            # v3.x 修复: 在 INSERT 语句中也设置 source_lang
             insert_sql = (
                 "INSERT OR IGNORE INTO th_translations "
                 "(id, content_id, context_id, lang_code, source_lang, engine_version, "
@@ -436,7 +439,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
         async with self._transaction() as tx:
             cursor = await tx.execute(
-                "SELECT id FROM th_jobs WHERE last_requested_at < ?", (cutoff_date,)
+                "SELECT id FROM th_jobs WHERE DATE(last_requested_at) < DATE(?)",
+                (cutoff_date,),
             )
             expired_job_ids = [row[0] for row in await cursor.fetchall()]
             await cursor.close()
@@ -520,4 +524,3 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 "DELETE FROM th_translations WHERE id = ?", (item.translation_id,)
             )
         logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
-        

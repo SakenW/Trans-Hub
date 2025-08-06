@@ -9,15 +9,13 @@
 import asyncio
 import json
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from typing import Any, List, Optional, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 try:
     import asyncpg
-    from asyncpg.exceptions import UniqueViolationError
 except ImportError:
     asyncpg = None
-    UniqueViolationError = None
 
 import structlog
 
@@ -50,21 +48,13 @@ class PostgresPersistenceHandler(PersistenceHandler):
         self._notification_queue: Optional["asyncio.Queue[str]"] = None
         logger.info("PostgreSQL 持久层已配置")
 
-    @asynccontextmanager
-    async def _get_connection(self) -> AsyncGenerator["asyncpg.Connection", None]:
-        if self._pool is None:
-            raise DatabaseError("数据库连接池未初始化，请先调用 connect()。")
-        conn = await self._pool.acquire()
-        try:
-            yield conn
-        finally:
-            await self._pool.release(conn)
-
     async def connect(self) -> None:
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-                self._pool = await asyncpg.create_pool(self.dsn, min_size=5, max_size=20)
+                self._pool = await asyncpg.create_pool(
+                    self.dsn, min_size=5, max_size=20
+                )
                 logger.info("已连接到 PostgreSQL 数据库并创建连接池")
             except asyncpg.PostgresError as e:
                 logger.error("连接 PostgreSQL 数据库失败", exc_info=True)
@@ -82,6 +72,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def reset_stale_tasks(self) -> None:
         """[实现] 在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
         sql = """
             UPDATE th_translations
             SET status = 'PENDING', error = NULL
@@ -90,7 +82,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
             RETURNING id;
         """
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 updated_rows = await conn.fetch(sql)
                 if updated_rows:
                     logger.warning(
@@ -107,6 +99,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
         limit: Optional[int] = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
         """[实现] 使用 `SELECT ... FOR UPDATE SKIP LOCKED` 从 PG 流式获取任务。"""
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
+
         processed_count = 0
         status_values = tuple(s.value for s in statuses)
 
@@ -119,9 +114,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 break
 
             items: list[ContentItem] = []
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # 1. 查询并锁定一批待处理任务的ID
                     locked_ids_sql = """
                         SELECT id FROM th_translations
                         WHERE lang_code = $1 AND status = ANY($2)
@@ -133,11 +127,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         locked_ids_sql, lang_code, status_values, current_batch_size
                     )
                     if not locked_rows:
-                        break  # 没有可处理的任务了
+                        break
 
                     batch_ids = [row["id"] for row in locked_rows]
-
-                    # 2. 更新这些任务的状态为 "TRANSLATING"
                     await conn.execute(
                         """
                         UPDATE th_translations
@@ -148,7 +140,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         batch_ids,
                     )
 
-                    # 3. 获取这些任务的完整详细信息
                     details_sql = """
                         SELECT
                             t.id AS translation_id,
@@ -165,23 +156,22 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         ORDER BY t.context_id, t.last_updated_at ASC;
                     """
                     detail_rows = await conn.fetch(details_sql, batch_ids)
-
                     items = [
                         ContentItem(
                             translation_id=str(r["translation_id"]),
                             business_id=r["business_id"],
                             content_id=str(r["content_id"]),
-                            context_id=str(r["context_id"]) if r["context_id"] else None,
+                            context_id=str(r["context_id"])
+                            if r["context_id"]
+                            else None,
                             source_payload=r["source_payload_json"],
                             context=r["context_payload_json"],
                             source_lang=r["source_lang"],
                         )
                         for r in detail_rows
                     ]
-
             if not items:
                 break
-
             yield items
             processed_count += len(items)
 
@@ -191,9 +181,10 @@ class PostgresPersistenceHandler(PersistenceHandler):
         source_payload: dict[str, Any],
         context: Optional[dict[str, Any]],
     ) -> tuple[str, Optional[str]]:
-        async with self._get_connection() as conn:
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
+        async with self._pool.acquire() as conn:
             try:
-                # 插入或获取内容ID
                 content_sql = """
                     INSERT INTO th_content (business_id, source_payload_json)
                     VALUES ($1, $2)
@@ -202,10 +193,11 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         updated_at = (now() at time zone 'utc')
                     RETURNING id;
                 """
-                content_row = await conn.fetchrow(content_sql, business_id, source_payload)
+                content_row = await conn.fetchrow(
+                    content_sql, business_id, json.dumps(source_payload)
+                )
                 content_id = str(content_row["id"])
 
-                # 如果有上下文，插入或获取上下文ID
                 context_id: Optional[str] = None
                 if context:
                     context_hash = get_context_hash(context)
@@ -215,15 +207,16 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         ON CONFLICT (context_hash) DO NOTHING
                         RETURNING id;
                     """
-                    context_row = await conn.fetchrow(context_sql, context_hash, context)
-                    if not context_row:  # 如果发生冲突（已存在）
-                        context_row = await conn.fetchrow(
+                    ctx_row = await conn.fetchrow(
+                        context_sql, context_hash, json.dumps(context)
+                    )
+                    if not ctx_row:
+                        ctx_row = await conn.fetchrow(
                             "SELECT id FROM th_contexts WHERE context_hash = $1",
                             context_hash,
                         )
-                    context_id = str(context_row["id"])
+                    context_id = str(ctx_row["id"])
 
-                # 更新或创建 Job
                 await conn.execute(
                     """
                     INSERT INTO th_jobs (content_id, last_requested_at)
@@ -233,7 +226,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     """,
                     content_id,
                 )
-
                 return content_id, context_id
             except asyncpg.PostgresError as e:
                 raise DatabaseError(f"确保内容和上下文失败: {e}") from e
@@ -247,16 +239,17 @@ class PostgresPersistenceHandler(PersistenceHandler):
         engine_version: str,
         force_retranslate: bool = False,
     ) -> None:
-        """[实现] 为给定的内容和上下文创建待处理的翻译任务。"""
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 if force_retranslate:
                     sql = """
-                        INSERT INTO th_translations (
+                        INSERT INTO th_translations AS t (
                             content_id, context_id, lang_code, source_lang,
-                            engine_version, status, translation_payload_json, error, last_updated_at
+                            engine_version
                         )
-                        SELECT $1, $2, lang.code, $3, $4, 'PENDING', NULL, NULL, (now() at time zone 'utc')
+                        SELECT $1, $2, lang.code, $3, $4
                         FROM unnest($5::text[]) AS lang(code)
                         ON CONFLICT (content_id, context_id, lang_code) DO UPDATE
                         SET status = 'PENDING',
@@ -269,23 +262,31 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 else:
                     sql = """
                         INSERT INTO th_translations (
-                            content_id, context_id, lang_code, source_lang, engine_version
+                            content_id, context_id, lang_code, source_lang,
+                            engine_version
                         )
                         SELECT $1, $2, lang.code, $3, $4
                         FROM unnest($5::text[]) AS lang(code)
                         ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
                     """
-                await conn.execute(sql, content_id, context_id, source_lang, engine_version, target_langs)
+                await conn.execute(
+                    sql,
+                    content_id,
+                    context_id,
+                    source_lang,
+                    engine_version,
+                    target_langs,
+                )
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"创建待处理翻译失败: {e}") from e
 
     async def save_translation_results(self, results: list[TranslationResult]) -> None:
-        if not results:
+        if not results or not self._pool:
             return
         params = [
             (
                 res.status.value,
-                res.translated_payload,
+                json.dumps(res.translated_payload),
                 res.engine,
                 res.error,
                 res.translation_id,
@@ -296,14 +297,14 @@ class PostgresPersistenceHandler(PersistenceHandler):
             UPDATE th_translations
             SET
                 status = $1,
-                translation_payload_json = $2,
+                translation_payload_json = $2::jsonb,
                 engine = $3,
                 error = $4,
                 last_updated_at = (now() at time zone 'utc')
-            WHERE id = $5 AND status = 'TRANSLATING';
+            WHERE id = $5::uuid AND status = 'TRANSLATING';
         """
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 await conn.executemany(sql, params)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"保存翻译结果失败: {e}") from e
@@ -314,6 +315,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
         target_lang: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[TranslationResult]:
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
         context_hash = get_context_hash(context)
         sql = """
             SELECT
@@ -333,13 +336,12 @@ class PostgresPersistenceHandler(PersistenceHandler):
             LIMIT 1;
         """
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(sql, business_id, target_lang, context_hash)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"查找翻译失败: {e}") from e
         if not row:
             return None
-
         return TranslationResult(
             translation_id=str(row["translation_id"]),
             business_id=business_id,
@@ -356,50 +358,67 @@ class PostgresPersistenceHandler(PersistenceHandler):
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False
     ) -> dict[str, int]:
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
-        cutoff_date_sql = f"(now() at time zone 'utc') - interval '{retention_days} days'"
+        cutoff_date = (
+            datetime.now(timezone.utc) - timedelta(days=retention_days)
+        ).date()
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    del_jobs_sql = f"""
-                        DELETE FROM th_jobs WHERE last_requested_at < {cutoff_date_sql}
+                    del_jobs_sql = """
+                        DELETE FROM th_jobs
+                        WHERE DATE(last_requested_at) < $1
                         RETURNING id;
                     """
                     if dry_run:
-                        del_jobs_sql = (
-                            "SELECT id FROM th_jobs WHERE last_requested_at < "
-                            f"{cutoff_date_sql};"
-                        )
-                    deleted_jobs = await conn.fetch(del_jobs_sql)
-                    stats["deleted_jobs"] = len(deleted_jobs)
+                        del_jobs_sql = """
+                            SELECT id FROM th_jobs
+                            WHERE DATE(last_requested_at) < $1;
+                        """
+                    stats["deleted_jobs"] = len(
+                        await conn.fetch(del_jobs_sql, cutoff_date)
+                    )
 
                     del_content_sql = """
                         DELETE FROM th_content c
-                        WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                        AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM th_translations t WHERE t.content_id = c.id
+                        )
                         RETURNING id;
                     """
                     if dry_run:
                         del_content_sql = """
                             SELECT id FROM th_content c
-                            WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                            AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id);
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
+                            ) AND NOT EXISTS (
+                                SELECT 1 FROM th_translations t
+                                WHERE t.content_id = c.id
+                            );
                         """
-                    deleted_content = await conn.fetch(del_content_sql)
-                    stats["deleted_content"] = len(deleted_content)
+                    stats["deleted_content"] = len(await conn.fetch(del_content_sql))
 
                     del_contexts_sql = """
                         DELETE FROM th_contexts ctx
-                        WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM th_translations t
+                            WHERE t.context_id = ctx.id
+                        )
                         RETURNING id;
                     """
                     if dry_run:
                         del_contexts_sql = """
                             SELECT id FROM th_contexts ctx
-                            WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id);
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM th_translations t
+                                WHERE t.context_id = ctx.id
+                            );
                         """
-                    deleted_contexts = await conn.fetch(del_contexts_sql)
-                    stats["deleted_contexts"] = len(deleted_contexts)
+                    stats["deleted_contexts"] = len(await conn.fetch(del_contexts_sql))
 
                     if dry_run:
                         raise asyncpg.exceptions.RollbackTransactionError("Dry run")
@@ -418,20 +437,22 @@ class PostgresPersistenceHandler(PersistenceHandler):
         engine_name: str,
         engine_version: str,
     ) -> None:
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
         try:
-            async with self._get_connection() as conn:
+            async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     await conn.execute(
                         """
                         INSERT INTO th_dead_letter_queue (
-                            translation_id, original_payload_json, context_payload_json,
-                            target_lang_code, last_error_message,
-                            engine_name, engine_version
+                            translation_id, original_payload_json,
+                            context_payload_json, target_lang_code,
+                            last_error_message, engine_name, engine_version
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         item.translation_id,
-                        item.source_payload,
-                        item.context,
+                        json.dumps(item.source_payload),
+                        json.dumps(item.context) if item.context else None,
                         target_lang,
                         error_message,
                         engine_name,
@@ -440,7 +461,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     await conn.execute(
                         "DELETE FROM th_translations WHERE id = $1", item.translation_id
                     )
-                logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
+                logger.info(
+                    "任务已成功移至死信队列", translation_id=item.translation_id
+                )
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"移动到死信队列失败: {e}") from e
 
@@ -452,15 +475,20 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[实现] 使用 `LISTEN/NOTIFY` 监听数据库通知。"""
-        if not self._notification_listener_conn or self._notification_listener_conn.is_closed():
-            if self._pool is None:
-                raise DatabaseError("数据库连接池未初始化")
+        if not self._pool:
+            raise DatabaseError("数据库连接池未初始化")
+        if (
+            not self._notification_listener_conn
+            or self._notification_listener_conn.is_closed()
+        ):
             self._notification_listener_conn = await self._pool.acquire()
             self._notification_queue = asyncio.Queue()
             await self._notification_listener_conn.add_listener(
                 self.NOTIFICATION_CHANNEL, self._notification_callback
             )
-            logger.info("PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL)
+            logger.info(
+                "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
+            )
 
         assert self._notification_queue is not None
         while True:

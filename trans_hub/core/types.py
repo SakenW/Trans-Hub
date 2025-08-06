@@ -84,7 +84,7 @@ class ContentItem(BaseModel):
     context_id: Optional[str]
     source_payload: dict[str, Any]
     context: Optional[dict[str, Any]]
-    # v4.0 修复：增加 source_lang 字段
+    # v3.x 修复：增加 source_lang 字段，用于支持按请求指定源语言
     source_lang: Optional[str]
 
 

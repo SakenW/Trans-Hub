@@ -1,3 +1,4 @@
+-- trans_hub/db/migrations_postgres/001_initial.sql
 -- Trans-Hub v4.0 PostgreSQL 基础 Schema
 -- 本 Schema 是对 SQLite v3.0 Schema 的直接翻译和适配，
 -- 并利用了 PostgreSQL 的原生数据类型如 UUID 和 JSONB。
@@ -17,18 +18,20 @@ INSERT INTO th_meta (key, value) VALUES ('schema_version', '1') ON CONFLICT (key
 
 CREATE TABLE IF NOT EXISTS th_content (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    business_id TEXT NOT NULL UNIQUE,
+    business_id TEXT NOT NULL,
     source_payload_json JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc')
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
+    CONSTRAINT uq_content_business_id UNIQUE (business_id)
 );
 CREATE INDEX IF NOT EXISTS idx_content_business_id ON th_content(business_id);
 
 CREATE TABLE IF NOT EXISTS th_contexts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    context_hash TEXT NOT NULL UNIQUE,
+    context_hash TEXT NOT NULL,
     context_payload_json JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc')
+    created_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
+    CONSTRAINT uq_contexts_hash UNIQUE (context_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_contexts_hash ON th_contexts(context_hash);
 
@@ -41,7 +44,7 @@ CREATE TABLE IF NOT EXISTS th_translations (
     content_id UUID NOT NULL REFERENCES th_content(id) ON DELETE CASCADE,
     context_id UUID REFERENCES th_contexts(id) ON DELETE CASCADE,
     lang_code TEXT NOT NULL,
-    -- v4.0 修复：增加 source_lang 字段以支持多源语言
+    -- v3.x 修复：增加 source_lang 字段以支持多源语言
     source_lang TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING',
 
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS th_translations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
     last_updated_at TIMESTAMPTZ NOT NULL DEFAULT (now() at time zone 'utc'),
 
-    UNIQUE(content_id, context_id, lang_code)
+    CONSTRAINT uq_translation UNIQUE(content_id, context_id, lang_code)
 );
 CREATE INDEX IF NOT EXISTS idx_translations_status_lang ON th_translations(status, lang_code);
 
@@ -98,14 +101,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_record ON th_audit_logs(table_name, re
 CREATE OR REPLACE FUNCTION notify_new_translation_task()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('new_translation_task', 'new');
+    PERFORM pg_notify('new_translation_task', NEW.id::text);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS on_new_translation_task ON th_translations;
 CREATE TRIGGER on_new_translation_task
-    AFTER INSERT ON th_translations
+    AFTER INSERT OR UPDATE OF status ON th_translations
     FOR EACH ROW
     WHEN (NEW.status = 'PENDING')
     EXECUTE FUNCTION notify_new_translation_task();
