@@ -13,7 +13,6 @@ from pydantic import BaseModel
 from trans_hub.core.types import TranslationRequest
 
 
-# v3.10 修复：使用枚举来约束缓存类型，增强配置的健壮性
 class CacheType(str, Enum):
     """定义了支持的缓存类型。"""
 
@@ -46,6 +45,8 @@ class TranslationCache:
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
         """为翻译请求生成一个唯一的、确定性的缓存键。"""
+        # v3.x 优化: 使用 payload 的哈希值代替完整的序列化字符串，
+        # 以减少内存占用和提高查找效率。
         payload_str = json.dumps(
             request.source_payload,
             sort_keys=True,

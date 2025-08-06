@@ -127,6 +127,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 batch_items: list[ContentItem] = []
                 async with self._transaction() as tx:
                     status_placeholders = ",".join("?" for _ in statuses)
+                    # v3.x 优化: 在 SQL 中进行排序，以减轻 Python 端的负担
+                    # 并确保 itertools.groupby 能够正确工作。
                     find_ids_sql = (
                         f"SELECT id FROM th_translations "
                         f"WHERE lang_code = ? AND status IN ({status_placeholders}) "
