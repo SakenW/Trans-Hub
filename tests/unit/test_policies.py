@@ -17,6 +17,8 @@ from trans_hub.core import (
     TranslationStatus,
 )
 from trans_hub.core.interfaces import PersistenceHandler
+# 修复：导入 BaseTranslationEngine 以进行更精确的 mock
+from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.policies import DefaultProcessingPolicy
 
 
@@ -56,10 +58,13 @@ def mock_cache() -> AsyncMock:
 @pytest.fixture
 def mock_active_engine() -> AsyncMock:
     """创建一个翻译引擎的 mock 对象。"""
-    mock = AsyncMock()
+    # 修复：使用 spec=BaseTranslationEngine 来确保接口一致性
+    mock = AsyncMock(spec=BaseTranslationEngine)
     mock.atranslate_batch.return_value = [EngineSuccess(translated_text="mocked")]
     mock.ACCEPTS_CONTEXT = False
     mock.validate_and_parse_context = MagicMock(return_value=MagicMock())
+    # 修复：为新属性提供 mock 值
+    mock.name = "debug"
     mock.VERSION = "test-ver-1.0"
     return mock
 
@@ -147,7 +152,6 @@ async def test_policy_handles_engine_returning_mismatched_results(
     mock_active_engine: AsyncMock,
 ) -> None:
     """测试当引擎返回数量不匹配的结果时，策略能将批次中所有项标记为失败。"""
-    # GIVEN: 一个包含2个任务的批次
     batch = [
         ContentItem(
             translation_id="uuid-1", business_id="b-1", content_id="c-1",
@@ -159,7 +163,6 @@ async def test_policy_handles_engine_returning_mismatched_results(
         ),
     ]
 
-    # WHEN: 引擎只返回了1个结果
     mock_active_engine.atranslate_batch.return_value = [
         EngineSuccess(translated_text="mocked")
     ]
@@ -169,7 +172,6 @@ async def test_policy_handles_engine_returning_mismatched_results(
         batch, "de", mock_processing_context, mock_active_engine
     )
 
-    # THEN: 两个任务都应该被标记为失败
     assert len(results) == 2
     for result in results:
         assert result.status == TranslationStatus.FAILED

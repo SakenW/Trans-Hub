@@ -431,70 +431,59 @@ class SQLitePersistenceHandler(PersistenceHandler):
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            # 修复：使用单条 DELETE 语句并从 rowcount 获取计数，以降低内存占用
-            delete_jobs_sql = "DELETE FROM th_jobs WHERE DATE(last_requested_at) < ?"
+            # 修复：使用内存高效的单条 DELETE 语句
+            base_query = "FROM th_jobs WHERE DATE(last_requested_at) < ?"
             if dry_run:
-                delete_jobs_sql = (
-                    "SELECT COUNT(*) FROM th_jobs WHERE DATE(last_requested_at) < ?"
+                cursor = await tx.execute(
+                    f"SELECT COUNT(*) {base_query}", (cutoff_date.isoformat(),)
                 )
-
-            cursor = await tx.execute(delete_jobs_sql, (cutoff_date.isoformat(),))
-            stats["deleted_jobs"] = (
-                row[0]
-                if dry_run and (row := await cursor.fetchone())
-                else cursor.rowcount
-            )
+                row = await cursor.fetchone()
+                stats["deleted_jobs"] = row[0] if row else 0
+            else:
+                cursor = await tx.execute(
+                    f"DELETE {base_query}", (cutoff_date.isoformat(),)
+                )
+                stats["deleted_jobs"] = cursor.rowcount
             await cursor.close()
 
-            # 对于孤立项，使用 COUNT(*) 避免加载ID，并使用子查询进行删除
-            orphan_content_sql_select = """
+            # 对于孤立项，同样使用内存高效的查询
+            orphan_content_subquery = """
                 SELECT c.id FROM th_content c
-                WHERE
-                  NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
                   AND NOT EXISTS (
-                    SELECT 1 FROM th_translations t WHERE t.content_id = c.id
+                      SELECT 1 FROM th_translations t WHERE t.content_id = c.id
                   )
             """
             if dry_run:
-                orphan_content_sql = (
-                    f"SELECT COUNT(*) FROM ({orphan_content_sql_select})"
+                cursor = await tx.execute(
+                    f"SELECT COUNT(*) FROM ({orphan_content_subquery})"
                 )
+                row = await cursor.fetchone()
+                stats["deleted_content"] = row[0] if row else 0
             else:
-                orphan_content_sql = (
-                    f"DELETE FROM th_content WHERE id IN ({orphan_content_sql_select})"
+                cursor = await tx.execute(
+                    f"DELETE FROM th_content WHERE id IN ({orphan_content_subquery})"
                 )
-
-            cursor = await tx.execute(orphan_content_sql)
-            stats["deleted_content"] = (
-                row[0]
-                if dry_run and (row := await cursor.fetchone())
-                else cursor.rowcount
-            )
+                stats["deleted_content"] = cursor.rowcount
             await cursor.close()
 
-            orphan_contexts_sql_select = """
+            orphan_contexts_subquery = """
                 SELECT ctx.id FROM th_contexts ctx
-                WHERE
-                  NOT EXISTS (
+                WHERE NOT EXISTS (
                     SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id
-                  )
+                )
             """
             if dry_run:
-                orphan_contexts_sql = (
-                    f"SELECT COUNT(*) FROM ({orphan_contexts_sql_select})"
+                cursor = await tx.execute(
+                    f"SELECT COUNT(*) FROM ({orphan_contexts_subquery})"
                 )
+                row = await cursor.fetchone()
+                stats["deleted_contexts"] = row[0] if row else 0
             else:
-                orphan_contexts_sql = (
-                    f"DELETE FROM th_contexts "
-                    f"WHERE id IN ({orphan_contexts_sql_select})"
+                cursor = await tx.execute(
+                    f"DELETE FROM th_contexts WHERE id IN ({orphan_contexts_subquery})"
                 )
-
-            cursor = await tx.execute(orphan_contexts_sql)
-            stats["deleted_contexts"] = (
-                row[0]
-                if dry_run and (row := await cursor.fetchone())
-                else cursor.rowcount
-            )
+                stats["deleted_contexts"] = cursor.rowcount
             await cursor.close()
 
         return stats

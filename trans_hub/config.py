@@ -15,8 +15,6 @@ class EngineName(str, enum.Enum):
     DEBUG = "debug"
     OPENAI = "openai"
     TRANSLATORS = "translators"
-    # 修复：移除未实现的 MOCK_ENGINE 枚举，以防止无效配置
-    # MOCK_ENGINE = "mock_engine"
 
 
 class LoggingConfig(BaseModel):
@@ -25,9 +23,12 @@ class LoggingConfig(BaseModel):
 
 
 class RetryPolicyConfig(BaseModel):
-    max_attempts: int = 2
-    initial_backoff: float = 1.0
-    max_backoff: float = 60.0
+    """重试策略配置。"""
+
+    # 修复：为所有数值型参数添加正数校验
+    max_attempts: int = Field(default=2, gt=0)
+    initial_backoff: float = Field(default=1.0, gt=0)
+    max_backoff: float = Field(default=60.0, gt=0)
 
 
 class TransHubConfig(BaseSettings):

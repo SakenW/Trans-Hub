@@ -16,22 +16,28 @@ from trans_hub.core.types import TranslationRequest
 @pytest.fixture
 def sample_request() -> TranslationRequest:
     """提供一个可复用的翻译请求对象。"""
+    # 修复：添加 engine_name 和 engine_version
     return TranslationRequest(
         source_payload={"text": "Hello"},
         source_lang="en",
         target_lang="de",
         context_hash="__GLOBAL__",
+        engine_name="debug",
+        engine_version="1.0",
     )
 
 
 @pytest.fixture
 def another_request() -> TranslationRequest:
     """提供另一个不同的翻译请求对象。"""
+    # 修复：添加 engine_name 和 engine_version
     return TranslationRequest(
         source_payload={"text": "World"},
         source_lang="en",
         target_lang="de",
         context_hash="__GLOBAL__",
+        engine_name="debug",
+        engine_version="1.0",
     )
 
 
@@ -76,25 +82,27 @@ def test_generate_cache_key_is_hashed_and_stable(
     cache = TranslationCache()
     key1 = cache.generate_cache_key(sample_request)
 
-    # 1. 验证键是字符串且长度合理 (不是完整的 payload)
     assert isinstance(key1, str)
-    assert len(key1) < 100  # SHA256 (64) + langs + context hash + separators
+    assert len(key1) < 150  # 调整预期长度以容纳新字段
 
-    # 2. 验证原始文本不在键中 (证明已被哈希)
     original_text = sample_request.source_payload.get("text")
     assert original_text
     assert original_text not in key1
 
-    # 3. 验证其他部分在键中
     assert sample_request.target_lang in key1
     assert sample_request.context_hash in key1
+    # 修复：验证新字段在键中
+    assert sample_request.engine_name in key1
+    assert sample_request.engine_version in key1
 
-    # 4. 验证稳定性：创建一个逻辑上相同但实例不同的请求
+    # 修复：为新实例添加新字段
     same_request_different_instance = TranslationRequest(
         source_payload={"text": "Hello"},
         source_lang="en",
         target_lang="de",
         context_hash="__GLOBAL__",
+        engine_name="debug",
+        engine_version="1.0",
     )
     key2 = cache.generate_cache_key(same_request_different_instance)
     assert key1 == key2

@@ -26,13 +26,15 @@ class BaseEngineConfig(BaseModel):
     """所有引擎配置模型的基类，提供了通用的速率与并发控制选项。"""
 
     rpm: Optional[int] = Field(
-        default=None, description="每分钟最大请求数 (Requests Per Minute)"
+        default=None, description="每分钟最大请求数 (Requests Per Minute)", gt=0
     )
     rps: Optional[int] = Field(
-        default=None, description="每秒最大请求数 (Requests Per Second)"
+        default=None, description="每秒最大请求数 (Requests Per Second)", gt=0
     )
-    max_concurrency: Optional[int] = Field(default=None, description="最大并发请求数")
-    max_batch_size: int = 50
+    max_concurrency: Optional[int] = Field(
+        default=None, description="最大并发请求数", gt=0
+    )
+    max_batch_size: int = Field(default=50, gt=0)
 
 
 class BaseTranslationEngine(ABC, Generic[_ConfigType]):
@@ -62,6 +64,11 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         if config.max_concurrency:
             self._concurrency_semaphore = asyncio.Semaphore(config.max_concurrency)
 
+    @property
+    def name(self) -> str:
+        """从类名自动推断引擎的名称。"""
+        return self.__class__.__name__.replace("Engine", "").lower()
+
     async def initialize(self) -> None:
         """引擎的异步初始化钩子，用于设置连接池等。"""
         self.initialized = True
@@ -80,18 +87,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
     ) -> EngineBatchItemResult:
         """
         [子类实现] 真正执行单次翻译的逻辑。
-
-        此方法由 `_atranslate_one` 调用，并被并发和速率控制逻辑包裹。
-
-        Args:
-            text (str): 要翻译的单个文本。
-            target_lang (str): 目标语言代码。
-            source_lang (Optional[str]): 源语言代码。
-            context_config (dict[str, Any]): 已解析和验证的上下文配置字典。
-
-        Returns:
-            EngineBatchItemResult: 单次翻译的成功或失败结果。
-
         """
         ...
 
@@ -105,8 +100,6 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         """
         [模板方法] 执行单次翻译，应用并发和速率限制。
         """
-        # v3.x 修复：调整顺序，先等待速率限制，再获取并发槽位。
-        # 这样可以避免在等待令牌时长时间占用一个宝贵的并发槽位，从而提高整体吞吐量。
         if self._rate_limiter:
             await self._rate_limiter.acquire()
 

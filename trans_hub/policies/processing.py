@@ -36,16 +36,6 @@ class ProcessingPolicy(Protocol):
     ) -> list[TranslationResult]:
         """
         异步处理一批翻译任务。
-
-        Args:
-            batch (list[ContentItem]): 从持久化层获取的待处理内容项列表。
-            target_lang (str): 目标语言代码。
-            context (ProcessingContext): 包含所有依赖项的处理上下文。
-            active_engine (BaseTranslationEngine[Any]): 当前活动的翻译引擎实例。
-
-        Returns:
-            list[TranslationResult]: 处理后的一批翻译结果。
-
         """
         ...
 
@@ -109,7 +99,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
         items_to_process = list(batch)
         final_results: list[TranslationResult] = []
-        dlq_tasks: list[asyncio.Task[None]] = []
 
         for attempt in range(max_retries + 1):
             if not items_to_process:
@@ -135,15 +124,26 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     "任务达到最大重试次数，将移至死信队列", count=len(retryable_items)
                 )
                 error_message = "达到最大重试次数"
-                for item in retryable_items:
-                    task = p_context.handler.move_to_dlq(
-                        item=item,
-                        target_lang=target_lang,
-                        error_message=error_message,
-                        engine_name=p_context.config.active_engine.value,
-                        engine_version=active_engine.VERSION,
+                dlq_tasks = [
+                    asyncio.create_task(
+                        p_context.handler.move_to_dlq(
+                            item=item,
+                            target_lang=target_lang,
+                            error_message=error_message,
+                            engine_name=p_context.config.active_engine.value,
+                            engine_version=active_engine.VERSION,
+                        )
                     )
-                    dlq_tasks.append(asyncio.create_task(task))
+                    for item in retryable_items
+                ]
+                dlq_results = await asyncio.gather(*dlq_tasks, return_exceptions=True)
+                for i, res in enumerate(dlq_results):
+                    if isinstance(res, Exception):
+                        logger.error(
+                            "写入死信队列失败",
+                            translation_id=retryable_items[i].translation_id,
+                            exc_info=res,
+                        )
                 break
 
             items_to_process = retryable_items
@@ -154,8 +154,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
             await asyncio.sleep(backoff_time)
 
-        if dlq_tasks:
-            await asyncio.gather(*dlq_tasks)
         return final_results
 
     async def _process_single_translation_attempt(
@@ -168,7 +166,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
         """[私有] 执行单次翻译尝试，分离出成功、失败和可重试的项。"""
         cached_results, uncached_items = await self._separate_cached_items(
-            batch, target_lang, p_context
+            batch, target_lang, p_context, active_engine
         )
 
         valid_items, payload_error_results = self._validate_payload_structure(
@@ -184,13 +182,11 @@ class DefaultProcessingPolicy(ProcessingPolicy):
 
         if len(engine_outputs) != len(valid_items):
             error_msg = (
-                f"引擎返回结果数量 ({len(engine_outputs)}) "
-                f"与输入数量 ({len(valid_items)}) 不匹配。"
+                f"引擎返回结果数量 ({len(engine_outputs)}) 与输入数量 "
+                f"({len(valid_items)}) 不匹配。"
             )
             logger.error(
-                error_msg,
-                engine=p_context.config.active_engine.value,
-                lang=target_lang,
+                error_msg, engine=p_context.config.active_engine.value, lang=target_lang
             )
             engine_error = EngineError(error_message=error_msg, is_retryable=False)
             mismatch_results = [
@@ -215,7 +211,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 processed_results.append(result)
 
-        await self._cache_new_results(processed_results, p_context, item_map)
+        await self._cache_new_results(
+            processed_results, p_context, active_engine, item_map
+        )
         return processed_results, retryable_items
 
     def _validate_payload_structure(
@@ -231,13 +229,11 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             text_value = item.source_payload.get(self.PAYLOAD_TEXT_KEY)
             if not isinstance(text_value, str) or not text_value.strip():
                 error_msg = (
-                    f"源载荷 (source_payload) 中的 '{self.PAYLOAD_TEXT_KEY}' 字段"
-                    "缺失、非字符串或为空。"
+                    f"源载荷 (source_payload) 中的 '{self.PAYLOAD_TEXT_KEY}' 字段缺失、"
+                    f"非字符串或为空。"
                 )
                 logger.warning(
-                    error_msg,
-                    business_id=item.business_id,
-                    payload=item.source_payload,
+                    error_msg, business_id=item.business_id, payload=item.source_payload
                 )
                 engine_error = EngineError(error_message=error_msg, is_retryable=False)
                 result = self._build_translation_result(
@@ -249,7 +245,11 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         return valid_items, failed_results
 
     async def _separate_cached_items(
-        self, batch: list[ContentItem], target_lang: str, p_context: ProcessingContext
+        self,
+        batch: list[ContentItem],
+        target_lang: str,
+        p_context: ProcessingContext,
+        active_engine: BaseTranslationEngine[Any],
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
         """[私有] 从批处理中分离出已缓存和未缓存的项。"""
         cached_results: list[TranslationResult] = []
@@ -260,6 +260,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 source_lang=item.source_lang or p_context.config.source_lang,
                 target_lang=target_lang,
                 context_hash=get_context_hash(item.context),
+                # 修复：使用更健壮的 engine.name 属性
+                engine_name=active_engine.name,
+                engine_version=active_engine.VERSION,
             )
             cached_text = await p_context.cache.get_cached_result(request)
             if cached_text is not None:
@@ -280,12 +283,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
-        # 修复：移除多余的 str() 转换
         texts_to_translate = [
             item.source_payload[self.PAYLOAD_TEXT_KEY] for item in items
         ]
 
-        # 修复：在推断源语言时过滤掉 None 和空字符串
         source_langs = {
             lang for item in items if (lang := item.source_lang) and lang.strip()
         }
@@ -301,7 +302,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             )
             batch_source_lang = p_context.config.source_lang
 
-        # 修复：为引擎调用添加异常保护
         try:
             return await active_engine.atranslate_batch(
                 texts=texts_to_translate,
@@ -320,6 +320,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         self,
         results: list[TranslationResult],
         p_context: ProcessingContext,
+        active_engine: BaseTranslationEngine[Any],
         item_map: Dict[str, ContentItem],
     ) -> None:
         """[私有] 将新获得的成功翻译结果存入缓存。"""
@@ -341,12 +342,14 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     or p_context.config.source_lang,
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
+                    engine_name=active_engine.name,
+                    engine_version=active_engine.VERSION,
                 )
                 if self.PAYLOAD_TEXT_KEY in res.translated_payload:
                     translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
                     task = asyncio.create_task(
                         p_context.cache.cache_translation_result(
-                            request, str(translated_text)
+                            request, translated_text
                         )
                     )
                     tasks_with_ids.append((task, res.translation_id))
@@ -358,7 +361,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 if isinstance(result, Exception):
                     translation_id = tasks_with_ids[i][1]
                     logger.warning(
-                        "写入翻译缓存时发生错误，主流程不受影响。",
+                        "写入翻译缓存时发生错误",
                         error=result,
                         translation_id=translation_id,
                         exc_info=False,

@@ -386,58 +386,53 @@ class PostgresPersistenceHandler(PersistenceHandler):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    del_jobs_sql = """
-                        DELETE FROM th_jobs
-                        WHERE DATE(last_requested_at) < $1
-                        RETURNING id;
-                    """
-                    if dry_run:
-                        del_jobs_sql = """
-                            SELECT id FROM th_jobs
-                            WHERE DATE(last_requested_at) < $1;
-                        """
-                    stats["deleted_jobs"] = len(
-                        await conn.fetch(del_jobs_sql, cutoff_date)
+                    # 修复：使用 rowcount 或 COUNT(*) 避免返回大量 ID
+                    del_jobs_sql_base = (
+                        "FROM th_jobs WHERE DATE(last_requested_at) < $1"
                     )
+                    if dry_run:
+                        count_row = await conn.fetchrow(
+                            f"SELECT COUNT(*) {del_jobs_sql_base}", cutoff_date
+                        )
+                        stats["deleted_jobs"] = count_row[0] if count_row else 0
+                    else:
+                        status = await conn.execute(
+                            f"DELETE {del_jobs_sql_base}", cutoff_date
+                        )
+                        stats["deleted_jobs"] = int(status.split(" ")[1])
 
-                    del_content_sql = """
-                        DELETE FROM th_content c
+                    del_content_sql_base = """
+                        FROM th_content c
                         WHERE NOT EXISTS (
                             SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
                         ) AND NOT EXISTS (
                             SELECT 1 FROM th_translations t WHERE t.content_id = c.id
                         )
-                        RETURNING id;
                     """
                     if dry_run:
-                        del_content_sql = """
-                            SELECT id FROM th_content c
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM th_jobs j WHERE j.content_id = c.id
-                            ) AND NOT EXISTS (
-                                SELECT 1 FROM th_translations t
-                                WHERE t.content_id = c.id
-                            );
-                        """
-                    stats["deleted_content"] = len(await conn.fetch(del_content_sql))
+                        count_row = await conn.fetchrow(
+                            f"SELECT COUNT(*) {del_content_sql_base}"
+                        )
+                        stats["deleted_content"] = count_row[0] if count_row else 0
+                    else:
+                        status = await conn.execute(f"DELETE {del_content_sql_base}")
+                        stats["deleted_content"] = int(status.split(" ")[1])
 
-                    del_contexts_sql = """
-                        DELETE FROM th_contexts ctx
+                    del_contexts_sql_base = """
+                        FROM th_contexts ctx
                         WHERE NOT EXISTS (
                             SELECT 1 FROM th_translations t
                             WHERE t.context_id = ctx.id
                         )
-                        RETURNING id;
                     """
                     if dry_run:
-                        del_contexts_sql = """
-                            SELECT id FROM th_contexts ctx
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM th_translations t
-                                WHERE t.context_id = ctx.id
-                            );
-                        """
-                    stats["deleted_contexts"] = len(await conn.fetch(del_contexts_sql))
+                        count_row = await conn.fetchrow(
+                            f"SELECT COUNT(*) {del_contexts_sql_base}"
+                        )
+                        stats["deleted_contexts"] = count_row[0] if count_row else 0
+                    else:
+                        status = await conn.execute(f"DELETE {del_contexts_sql_base}")
+                        stats["deleted_contexts"] = int(status.split(" ")[1])
 
                     if dry_run:
                         raise _DryRunExit()
@@ -490,7 +485,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
         self, connection: "asyncpg.Connection", pid: int, channel: str, payload: str
     ) -> None:
         if self._notification_queue:
-            # 使用 try-except 避免在队列已满或关闭时抛出异常
             try:
                 self._notification_queue.put_nowait(payload)
             except asyncio.QueueFull:

@@ -4,12 +4,11 @@
 import asyncio
 import hashlib
 import json
+from collections import defaultdict
 from enum import Enum
-from typing import Optional, Union
+from typing import DefaultDict, Optional, Union
 
 from cachetools import LRUCache, TTLCache
-
-# 修复：导入 Field 用于添加约束
 from pydantic import BaseModel, Field
 
 from trans_hub.core.types import TranslationRequest
@@ -25,7 +24,6 @@ class CacheType(str, Enum):
 class CacheConfig(BaseModel):
     """缓存配置模型。"""
 
-    # 修复：为 maxsize 和 ttl 添加 gt=0 约束
     maxsize: int = Field(default=1000, gt=0)
     ttl: int = Field(default=3600, gt=0)
     cache_type: CacheType = CacheType.TTL
@@ -38,8 +36,10 @@ class TranslationCache:
         self.config = config or CacheConfig()
         self.cache: Union[LRUCache[str, str], TTLCache[str, str]]
         self._initialize_cache()
-        # 修复：优化锁策略，仅在写入操作时加锁，提升并发读取性能
-        self._write_lock = asyncio.Lock()
+        # 修复：实现按键的细粒度锁，以提升并发写入性能
+        self._key_locks: DefaultDict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # 修复：为 clear_cache 和锁字典本身的管理提供一个全局锁
+        self._global_lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:
         if self.config.cache_type is CacheType.TTL:
@@ -63,15 +63,14 @@ class TranslationCache:
                 request.source_lang or "auto",
                 request.target_lang,
                 request.context_hash,
+                request.engine_name,
+                request.engine_version,
             ]
         )
 
     async def get_cached_result(self, request: TranslationRequest) -> Optional[str]:
         """从缓存中异步、安全地获取翻译结果。"""
         key = self.generate_cache_key(request)
-        # 修复：读取操作现在是无锁的，以提高并发性能。
-        # cachetools 自身的 get 操作是线程安全的，对于 asyncio 来说，
-        # 在没有 await 的情况下，单次操作是原子的，因此在这里是安全的。
         return self.cache.get(key)
 
     async def cache_translation_result(
@@ -79,11 +78,13 @@ class TranslationCache:
     ) -> None:
         """异步、安全地将翻译结果存入缓存。"""
         key = self.generate_cache_key(request)
-        async with self._write_lock:
+        # 获取特定于此键的锁，并写入缓存
+        async with self._key_locks[key]:
             self.cache[key] = result
 
     async def clear_cache(self) -> None:
         """异步、安全地清空整个缓存。"""
-        async with self._write_lock:
+        async with self._global_lock:
             self.cache.clear()
+            self._key_locks.clear()
             self._initialize_cache()
