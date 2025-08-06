@@ -8,7 +8,9 @@ from enum import Enum
 from typing import Optional, Union
 
 from cachetools import LRUCache, TTLCache
-from pydantic import BaseModel
+
+# 修复：导入 Field 用于添加约束
+from pydantic import BaseModel, Field
 
 from trans_hub.core.types import TranslationRequest
 
@@ -23,8 +25,9 @@ class CacheType(str, Enum):
 class CacheConfig(BaseModel):
     """缓存配置模型。"""
 
-    maxsize: int = 1000
-    ttl: int = 3600
+    # 修复：为 maxsize 和 ttl 添加 gt=0 约束
+    maxsize: int = Field(default=1000, gt=0)
+    ttl: int = Field(default=3600, gt=0)
     cache_type: CacheType = CacheType.TTL
 
 
@@ -35,12 +38,8 @@ class TranslationCache:
         self.config = config or CacheConfig()
         self.cache: Union[LRUCache[str, str], TTLCache[str, str]]
         self._initialize_cache()
-        # 修复：为锁机制添加文档说明。
-        # 当前使用单一全局锁来保证所有操作（包括读、写、清空）的绝对原子性和线程安全。
-        # 虽然这在极高并发的读取场景下可能不是性能最优的，但它提供了最强的安全保证，
-        # 避免了在实现复杂的异步读写锁时可能引入的错误。
-        # 未来的性能优化可以考虑引入一个成熟的异步读写锁库。
-        self._lock = asyncio.Lock()
+        # 修复：优化锁策略，仅在写入操作时加锁，提升并发读取性能
+        self._write_lock = asyncio.Lock()
 
     def _initialize_cache(self) -> None:
         if self.config.cache_type is CacheType.TTL:
@@ -50,8 +49,6 @@ class TranslationCache:
 
     def generate_cache_key(self, request: TranslationRequest) -> str:
         """为翻译请求生成一个唯一的、确定性的缓存键。"""
-        # v3.x 优化: 使用 payload 的哈希值代替完整的序列化字符串，
-        # 以减少内存占用和提高查找效率。
         payload_str = json.dumps(
             request.source_payload,
             sort_keys=True,
@@ -72,19 +69,21 @@ class TranslationCache:
     async def get_cached_result(self, request: TranslationRequest) -> Optional[str]:
         """从缓存中异步、安全地获取翻译结果。"""
         key = self.generate_cache_key(request)
-        async with self._lock:
-            return self.cache.get(key)
+        # 修复：读取操作现在是无锁的，以提高并发性能。
+        # cachetools 自身的 get 操作是线程安全的，对于 asyncio 来说，
+        # 在没有 await 的情况下，单次操作是原子的，因此在这里是安全的。
+        return self.cache.get(key)
 
     async def cache_translation_result(
         self, request: TranslationRequest, result: str
     ) -> None:
         """异步、安全地将翻译结果存入缓存。"""
         key = self.generate_cache_key(request)
-        async with self._lock:
+        async with self._write_lock:
             self.cache[key] = result
 
     async def clear_cache(self) -> None:
         """异步、安全地清空整个缓存。"""
-        async with self._lock:
+        async with self._write_lock:
             self.cache.clear()
             self._initialize_cache()

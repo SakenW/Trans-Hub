@@ -58,7 +58,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-                # 修复：确保 json 序列化时保留非 ASCII 字符
+
                 def _jsonb_encoder(value: Any) -> str:
                     return json.dumps(value, ensure_ascii=False)
 
@@ -83,7 +83,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def close(self) -> None:
         """关闭数据库连接池和所有相关连接。"""
-        # 修复：在关闭连接前，先移除监听器，确保资源被正确释放
         if (
             self._notification_listener_conn
             and not self._notification_listener_conn.is_closed()
@@ -390,16 +389,12 @@ class PostgresPersistenceHandler(PersistenceHandler):
     ) -> dict[str, int]:
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
-
-        # 修复：在 Python 端计算精确的 cutoff_date
         cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
-
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # 修复：在 SQL 中直接使用 TIMESTAMPTZ 类型进行比较
                     del_jobs_sql = """
                         DELETE FROM th_jobs
                         WHERE last_requested_at < $1
@@ -510,24 +505,33 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """[实现] 使用 `LISTEN/NOTIFY` 监听数据库通知。"""
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
-        if (
-            not self._notification_listener_conn
-            or self._notification_listener_conn.is_closed()
-        ):
-            self._notification_listener_conn = await self._pool.acquire()
+
+        listener_conn = None
+        try:
+            listener_conn = await self._pool.acquire()
             self._notification_queue = asyncio.Queue()
-            await self._notification_listener_conn.add_listener(
+            await listener_conn.add_listener(
                 self.NOTIFICATION_CHANNEL, self._notification_callback
             )
             logger.info(
                 "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
             )
 
-        assert self._notification_queue is not None
-        while True:
-            try:
+            assert self._notification_queue is not None
+            while True:
                 payload = await self._notification_queue.get()
                 yield payload
-            except asyncio.CancelledError:
-                logger.info("通知监听器被取消。")
-                break
+        except asyncio.CancelledError:
+            logger.info("通知监听器被取消。")
+        finally:
+            # 修复：确保在生成器退出时（无论何种原因），都清理资源
+            if listener_conn:
+                try:
+                    await listener_conn.remove_listener(
+                        self.NOTIFICATION_CHANNEL, self._notification_callback
+                    )
+                except Exception as e:
+                    logger.warning("移除监听器时出错", error=str(e))
+                finally:
+                    await self._pool.release(listener_conn)
+                    logger.info("PostgreSQL 通知监听器资源已释放。")

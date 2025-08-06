@@ -5,7 +5,7 @@ v3.0.0 重大更新：适配结构化载荷（payload）和新的核心类型。
 """
 
 import asyncio
-from typing import Any, Dict, Optional, Protocol, Union
+from typing import Any, List, Optional, Protocol, Tuple, Union
 
 import structlog
 
@@ -171,7 +171,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             batch, target_lang, p_context
         )
 
-        # 修复：在调用引擎前，先校验 payload 结构，分离出无效项
         valid_items, payload_error_results = self._validate_payload_structure(
             uncached_items, target_lang, p_context
         )
@@ -205,7 +204,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         processed_results: list[TranslationResult] = list(cached_results)
         processed_results.extend(payload_error_results)
         retryable_items: list[ContentItem] = []
-        item_map = {item.translation_id: item for item in batch}
 
         for item, output in zip(valid_items, engine_outputs):
             if isinstance(output, EngineError) and output.is_retryable:
@@ -216,7 +214,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 processed_results.append(result)
 
-        await self._cache_new_results(processed_results, p_context, item_map)
+        await self._cache_new_results(processed_results, p_context)
         return processed_results, retryable_items
 
     def _validate_payload_structure(
@@ -229,9 +227,12 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         valid_items: list[ContentItem] = []
         failed_results: list[TranslationResult] = []
         for item in items:
-            if self.PAYLOAD_TEXT_KEY not in item.source_payload:
+            text_value = item.source_payload.get(self.PAYLOAD_TEXT_KEY)
+            # 修复：同时检查类型和是否为空字符串
+            if not isinstance(text_value, str) or not text_value.strip():
                 error_msg = (
-                    f"源载荷 (source_payload) 缺少必需的 '{self.PAYLOAD_TEXT_KEY}' 键。"
+                    f"源载荷 (source_payload) 中的 '{self.PAYLOAD_TEXT_KEY}' 字段"
+                    "缺失、非字符串或为空。"
                 )
                 logger.warning(
                     error_msg,
@@ -279,18 +280,23 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         engine_context: Optional[BaseContextModel],
     ) -> list[Union[EngineSuccess, EngineError]]:
         """[私有] 调用活动引擎翻译一批未缓存的项。"""
-        # 此处已假设 item 经过了 _validate_payload_structure 的校验
         texts_to_translate = [
             str(item.source_payload.get(self.PAYLOAD_TEXT_KEY)) for item in items
         ]
 
-        source_langs = {item.source_lang for item in items}
-        if len(source_langs) == 1:
-            batch_source_lang = source_langs.pop() or p_context.config.source_lang
+        # 修复：在推断源语言时过滤掉 None 值
+        source_langs = {
+            item.source_lang for item in items if item.source_lang is not None
+        }
+
+        if len(source_langs) <= 1:
+            batch_source_lang = (
+                source_langs.pop() if source_langs else p_context.config.source_lang
+            )
         else:
             logger.warning(
                 "批次中包含多种源语言，将回退到全局源语言配置。",
-                found_langs=list(source_langs),
+                found_langs=sorted(list(source_langs)),
             )
             batch_source_lang = p_context.config.source_lang
 
@@ -305,43 +311,43 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         self,
         results: list[TranslationResult],
         p_context: ProcessingContext,
-        item_map: Dict[str, ContentItem],
     ) -> None:
         """[私有] 将新获得的成功翻译结果存入缓存。"""
-        tasks = []
+        # 修复：构建一个包含任务和其对应翻译ID的元组列表
+        tasks_with_ids: List[Tuple[asyncio.Task, str]] = []
+
         for res in results:
             if (
                 res.status == TranslationStatus.TRANSLATED
                 and not res.from_cache
                 and res.translated_payload is not None
             ):
-                original_item = item_map.get(res.translation_id)
-                if not original_item:
-                    continue
-
                 request = TranslationRequest(
                     source_payload=res.original_payload,
-                    source_lang=original_item.source_lang
-                    or p_context.config.source_lang,
+                    source_lang=p_context.config.source_lang,  # 简化处理，因为缓存键已足够独特
                     target_lang=res.target_lang,
                     context_hash=res.context_hash,
                 )
                 if self.PAYLOAD_TEXT_KEY in res.translated_payload:
                     translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
-                    tasks.append(
+                    task = asyncio.create_task(
                         p_context.cache.cache_translation_result(
                             request, str(translated_text)
                         )
                     )
-        if tasks:
-            # 修复：使用 return_exceptions=True 实现容错的缓存写入
+                    tasks_with_ids.append((task, res.translation_id))
+
+        if tasks_with_ids:
+            tasks = [t for t, _ in tasks_with_ids]
             cache_results = await asyncio.gather(*tasks, return_exceptions=True)
             for i, result in enumerate(cache_results):
                 if isinstance(result, Exception):
+                    # 修复：使用正确的 translation_id
+                    translation_id = tasks_with_ids[i][1]
                     logger.warning(
                         "写入翻译缓存时发生错误，主流程不受影响。",
                         error=result,
-                        translation_id=results[i].translation_id,
+                        translation_id=translation_id,
                         exc_info=False,
                     )
 
