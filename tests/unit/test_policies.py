@@ -88,7 +88,6 @@ def sample_batch() -> list[ContentItem]:
             context_id="uuid-context-1",
             source_payload={"text": "Hello", "metadata": "do_not_touch"},
             context={"domain": "testing"},
-            # v4.0 修复：为 ContentItem 添加 source_lang 字段
             source_lang="en",
         )
     ]
@@ -140,3 +139,39 @@ async def test_policy_handles_engine_failure(
     assert result.error == "API limit reached"
     assert result.translated_payload is None
     assert result.original_payload == {"text": "Hello", "metadata": "do_not_touch"}
+
+
+@pytest.mark.asyncio
+async def test_policy_handles_engine_returning_mismatched_results(
+    mock_processing_context: ProcessingContext,
+    mock_active_engine: AsyncMock,
+) -> None:
+    """测试当引擎返回数量不匹配的结果时，策略能将批次中所有项标记为失败。"""
+    # GIVEN: 一个包含2个任务的批次
+    batch = [
+        ContentItem(
+            translation_id="uuid-1", business_id="b-1", content_id="c-1",
+            source_payload={"text": "text1"}, context=None, source_lang="en", context_id=None
+        ),
+        ContentItem(
+            translation_id="uuid-2", business_id="b-2", content_id="c-2",
+            source_payload={"text": "text2"}, context=None, source_lang="en", context_id=None
+        ),
+    ]
+
+    # WHEN: 引擎只返回了1个结果
+    mock_active_engine.atranslate_batch.return_value = [
+        EngineSuccess(translated_text="mocked")
+    ]
+    policy = DefaultProcessingPolicy()
+
+    results = await policy.process_batch(
+        batch, "de", mock_processing_context, mock_active_engine
+    )
+
+    # THEN: 两个任务都应该被标记为失败
+    assert len(results) == 2
+    for result in results:
+        assert result.status == TranslationStatus.FAILED
+        assert result.error is not None
+        assert "不匹配" in result.error
