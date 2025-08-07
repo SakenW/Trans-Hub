@@ -124,31 +124,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
                 if current_batch_size <= 0:
                     break
+
                 batch_items: list[ContentItem] = []
                 async with self._transaction() as tx:
                     status_placeholders = ",".join("?" for _ in statuses)
-                    find_ids_sql = f"""
-                        SELECT id
-                        FROM th_translations
-                        WHERE lang_code = ? AND status IN ({status_placeholders})
-                        ORDER BY context_id, last_updated_at ASC
-                        LIMIT ?
-                    """
-                    params = (
-                        [lang_code] + [s.value for s in statuses] + [current_batch_size]
-                    )
-                    cursor = await tx.execute(find_ids_sql, params)
-                    rows = await cursor.fetchall()
-                    if not rows:
-                        break
-                    batch_ids = [row["id"] for row in rows]
-                    id_placeholders = ",".join("?" for _ in batch_ids)
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    await tx.execute(
-                        f"UPDATE th_translations SET status = ?, last_updated_at = ? "
-                        f"WHERE id IN ({id_placeholders})",
-                        [TranslationStatus.TRANSLATING.value, now_iso] + batch_ids,
-                    )
+                    # --- 核心优化：第一步就获取所有需要的详细信息 ---
                     find_details_sql = f"""
                         SELECT
                             t.id as translation_id,
@@ -161,11 +141,32 @@ class SQLitePersistenceHandler(PersistenceHandler):
                         FROM th_translations t
                         JOIN th_content c ON t.content_id = c.id
                         LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-                        WHERE t.id IN ({id_placeholders})
+                        WHERE t.lang_code = ? AND t.status IN ({status_placeholders})
                         ORDER BY t.context_id, t.last_updated_at ASC
+                        LIMIT ?
                     """
-                    details_cursor = await tx.execute(find_details_sql, batch_ids)
-                    detail_rows = await details_cursor.fetchall()
+                    params = (
+                        [lang_code] + [s.value for s in statuses] + [current_batch_size]
+                    )
+                    cursor = await tx.execute(find_details_sql, params)
+                    rows = await cursor.fetchall()
+                    await cursor.close()
+
+                    if not rows:
+                        break
+
+                    batch_ids = [row["translation_id"] for row in rows]
+                    id_placeholders = ",".join("?" for _ in batch_ids)
+                    now_iso = datetime.now(timezone.utc).isoformat()
+
+                    # --- 第二步：只执行状态更新 ---
+                    await tx.execute(
+                        f"UPDATE th_translations SET status = ?, last_updated_at = ? "
+                        f"WHERE id IN ({id_placeholders})",
+                        [TranslationStatus.TRANSLATING.value, now_iso] + batch_ids,
+                    )
+
+                    # --- 第三步（已移除）：不再需要再次查询详细信息 ---
                     batch_items = [
                         ContentItem(
                             translation_id=r["translation_id"],
@@ -180,10 +181,9 @@ class SQLitePersistenceHandler(PersistenceHandler):
                             ),
                             source_lang=r["source_lang"],
                         )
-                        for r in detail_rows
+                        for r in rows
                     ]
-                    await cursor.close()
-                    await details_cursor.close()
+
                 if not batch_items:
                     break
                 yield batch_items
