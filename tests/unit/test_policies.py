@@ -4,7 +4,7 @@
 v3.0.0 更新：全面重写以测试基于结构化载荷（payload）的处理逻辑。
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -148,9 +148,7 @@ async def test_policy_passes_none_source_lang_to_engine(
     mock_processing_context: ProcessingContext,
     mock_active_engine: AsyncMock,
 ) -> None:
-    """
-    测试当任务和全局配置均未提供源语言时，策略是否向引擎传递 None。
-    """
+    """测试当任务和全局配置均未提供源语言时，策略是否向引擎传递 None。"""
     # GIVEN: 全局配置和任务项都没有 source_lang
     mock_processing_context.config.source_lang = None
     batch_without_lang = [
