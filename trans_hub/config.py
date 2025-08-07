@@ -62,6 +62,7 @@ class TransHubConfig(BaseSettings):
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
+    # 终极修复：Pydantic v2 的 field_validator 必须是类方法
     @field_validator("source_lang")
     @classmethod
     def validate_source_lang_code(cls, v: str | None) -> str | None:
