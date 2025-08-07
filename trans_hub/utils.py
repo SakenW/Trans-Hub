@@ -4,12 +4,15 @@
 
 这些函数被设计为无状态的、纯粹的辅助工具，用于执行如哈希计算、格式校验等常见任务。
 v3.1 修订：移除了易产生误导的 `get_database_url` 函数，并增强了语言代码校验。
+v3.2 修订: 全面采用 langcodes 库进行语言代码校验。
 """
 
 import hashlib
 import json
-import re
 from typing import Any
+
+from langcodes import Language
+from langcodes.tag_parser import LanguageTagError
 
 from trans_hub.core.types import GLOBAL_CONTEXT_SENTINEL
 
@@ -48,9 +51,10 @@ def get_context_hash(context: dict[str, Any] | None) -> str:
 
 def validate_lang_codes(lang_codes: list[str]) -> None:
     """
-    校验语言代码列表中的每个代码是否符合 BCP 47 的常见格式。
+    使用 `langcodes` 库校验语言代码列表中的每个代码是否符合 BCP 47 规范
+    且包含一个有效的语言子标签。
 
-    如果任何一个代码格式无效，则抛出 ValueError。
+    如果任何一个代码格式无法被解析或缺少语言子标签，则抛出 ValueError。
 
     Args:
         lang_codes: 一个包含语言代码字符串的列表。
@@ -59,10 +63,23 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
         ValueError: 如果任何一个语言代码格式无效。
 
     """
-    # v3.1 修复：改进的正则表达式，以更好地匹配 BCP 47，例如 'en', 'zh-CN', 'es-419'
-    lang_code_pattern = re.compile(
-        r"^[a-z]{2,3}(-[A-Z][a-z0-9]{1,3})?(-[A-Z]{2}|-[0-9]{3})?$"
-    )
+    import re
+
+    # 语言子标签应该由 2-3 个字母组成 (BCP 47)
+    # https://www.rfc-editor.org/rfc/rfc5646.html#section-2.2.1
+    language_subtag_pattern = re.compile(r"^[a-zA-Z]{2,3}$")
+
     for code in lang_codes:
-        if not lang_code_pattern.match(code):
-            raise ValueError(f"提供的语言代码 '{code}' 格式无效。")
+        try:
+            lang = Language.get(code)
+            if not lang.language:
+                raise LanguageTagError(
+                    f"The tag '{code}' is a valid BCP-47 tag, but does not contain a language subtag."
+                )
+            # 额外检查：语言子标签必须符合 2-3 个字母的规范
+            if not language_subtag_pattern.match(lang.language):
+                raise LanguageTagError(
+                    f"The language subtag '{lang.language}' in tag '{code}' does not conform to the expected format (2-3 alphabetic characters)."
+                )
+        except LanguageTagError as e:
+            raise ValueError(f"提供的语言代码 '{code}' 格式无效。原因: {e}") from e

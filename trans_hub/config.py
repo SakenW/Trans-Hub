@@ -5,10 +5,11 @@ import enum
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.cache import CacheConfig
+from trans_hub.utils import validate_lang_codes
 
 
 class EngineName(str, enum.Enum):
@@ -60,6 +61,13 @@ class TransHubConfig(BaseSettings):
     engine_configs: dict[str, Any] = Field(default_factory=dict)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
+    @field_validator("source_lang")
+    def validate_source_lang_code(self, v: str | None) -> str | None:
+        """在配置加载时验证 source_lang 字段。"""
+        if v is not None:
+            validate_lang_codes([v])
+        return v
 
     @property
     def db_path(self) -> str:

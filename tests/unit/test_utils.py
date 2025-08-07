@@ -27,16 +27,53 @@ def test_get_context_hash_with_nested_dict() -> None:
     assert get_context_hash(context1) == get_context_hash(context2)
 
 
-def test_validate_lang_codes_valid() -> None:
-    """测试有效的语言代码能通过校验。"""
-    validate_lang_codes(["en", "zh-CN", "fr", "es-419"])
-    validate_lang_codes(["de"])
+@pytest.mark.parametrize(
+    "valid_codes",
+    [
+        ["en"],
+        ["zh-CN"],
+        ["de", "fr", "es-419"],
+        ["en-US"],
+        # 测试 langcodes 的标准化能力（这些都是可接受的输入）
+        ["EN"],
+        ["en-gb"],
+        ["en_GB"],
+        ["fr-CA"],
+        ["zh-Hant"],
+        # langcodes 将其视为有效
+        ["en-Toolong"],
+    ],
+)
+def test_validate_lang_codes_accepts_valid_and_normalizable_tags(
+    valid_codes: list[str],
+) -> None:
+    """测试有效的和可标准化的语言代码都能通过校验，不引发异常。"""
+    try:
+        validate_lang_codes(valid_codes)
+    except ValueError as e:
+        pytest.fail(
+            f"validate_lang_codes() 错误地对有效代码 {valid_codes} 引发了异常: {e}"
+        )
 
 
 @pytest.mark.parametrize(
-    "invalid_code", ["EN", "zh_cn", "german", "e", "en-cn", "en-USA"]
+    "invalid_code, expected_error_part",
+    [
+        ("german", "Expected a language code, got 'german'"),
+        ("e", "Expected a language code, got 'e'"),
+        ("123", "does not conform to the expected format (2-3 alphabetic characters)"),
+        ("a-DE", "Expected a language code, got 'a'"),
+        ("zh-CN-", "Expected 1-8 alphanumeric characters, got ''"),
+    ],
 )
-def test_validate_lang_codes_invalid(invalid_code: str) -> None:
-    """测试无效的语言代码会引发 ValueError。"""
-    with pytest.raises(ValueError, match=f"'{invalid_code}' 格式无效"):
+def test_validate_lang_codes_rejects_invalid_tags(
+    invalid_code: str, expected_error_part: str
+) -> None:
+    """测试真正无效的语言代码会引发 ValueError，并检查错误信息。"""
+    with pytest.raises(ValueError) as excinfo:
         validate_lang_codes([invalid_code])
+
+    # 验证我们自己的中文包装错误信息存在
+    assert f"提供的语言代码 '{invalid_code}' 格式无效" in str(excinfo.value)
+    # 验证来自底层 langcodes 库的英文原因也存在
+    assert expected_error_part in str(excinfo.value)
