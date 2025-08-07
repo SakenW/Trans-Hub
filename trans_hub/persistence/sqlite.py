@@ -128,7 +128,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 batch_items: list[ContentItem] = []
                 async with self._transaction() as tx:
                     status_placeholders = ",".join("?" for _ in statuses)
-                    # --- 核心优化：第一步就获取所有需要的详细信息 ---
                     find_details_sql = f"""
                         SELECT
                             t.id as translation_id,
@@ -159,14 +158,12 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     id_placeholders = ",".join("?" for _ in batch_ids)
                     now_iso = datetime.now(timezone.utc).isoformat()
 
-                    # --- 第二步：只执行状态更新 ---
                     await tx.execute(
                         f"UPDATE th_translations SET status = ?, last_updated_at = ? "
                         f"WHERE id IN ({id_placeholders})",
                         [TranslationStatus.TRANSLATING.value, now_iso] + batch_ids,
                     )
 
-                    # --- 第三步（已移除）：不再需要再次查询详细信息 ---
                     batch_items = [
                         ContentItem(
                             translation_id=r["translation_id"],
@@ -306,10 +303,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     WHERE content_id = ? AND {context_clause} AND lang_code IN ({placeholders})
                 """
                 await tx.execute(sql, tuple(update_params))
+            
             insert_sql = """
                 INSERT OR IGNORE INTO th_translations
-                (id, content_id, context_id, lang_code, source_lang, engine_version, created_at, last_updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, content_id, context_id, lang_code, source_lang, engine_version, created_at, last_updated_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
             """
             params = [
                 (
@@ -392,13 +390,11 @@ class SQLitePersistenceHandler(PersistenceHandler):
     async def garbage_collect(
         self, retention_days: int, dry_run: bool = False, _now: datetime | None = None
     ) -> dict[str, int]:
-        # --- 核心修复 ---
         now = _now if _now is not None else datetime.now(timezone.utc)
         cutoff_date = (now.date() - timedelta(days=retention_days)).isoformat()
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
 
         async with self._transaction() as tx:
-            # 清理过期的 jobs
             if dry_run:
                 cursor = await tx.execute(
                     "SELECT COUNT(*) FROM th_jobs WHERE DATE(last_requested_at) < ?",
@@ -414,8 +410,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 stats["deleted_jobs"] = cursor.rowcount
             await cursor.close()
 
-            # --- 核心修复：修正了 SQL 语法 ---
-            # `DELETE FROM` 后面必须直接跟表名，不能是别名
             orphan_content_sql = """
                 FROM th_content
                 WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = th_content.id)
@@ -426,7 +420,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 res = await cursor.fetchone()
                 stats["deleted_content"] = res[0] if res else 0
             else:
-                # 修正：直接使用 `DELETE FROM th_content`
                 cursor = await tx.execute(
                     f"DELETE FROM th_content WHERE id IN (SELECT id {orphan_content_sql})"
                 )
@@ -442,7 +435,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 res = await cursor.fetchone()
                 stats["deleted_contexts"] = res[0] if res else 0
             else:
-                # 修正：直接使用 `DELETE FROM th_contexts`
                 cursor = await tx.execute(
                     f"DELETE FROM th_contexts WHERE id IN (SELECT id {orphan_context_sql})"
                 )

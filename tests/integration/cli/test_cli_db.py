@@ -12,19 +12,18 @@ def test_db_migrate_success(
 ) -> None:
     """
     测试 `db migrate` 命令成功时，是否调用了正确的后端函数。
-
-    Args:
-        cli_runner: Typer 测试运行器。
-        mock_cli_backend: 激活后端的 mock。
-        mocker: pytest-mock 提供的 mocker fixture。
-
+    [核心修改] 现在测试 Alembic 的 command.upgrade 是否被调用。
     """
-    mock_apply = mocker.patch("trans_hub.cli.db.apply_migrations")
+    # [核心修改] 我们 mock 的目标是 alembic.command.upgrade，它被 db.py 导入。
+    mock_upgrade = mocker.patch("trans_hub.cli.db.command.upgrade")
     result = cli_runner.invoke(app, ["db", "migrate"])
 
     assert result.exit_code == 0
     assert "数据库迁移成功完成" in result.stdout
-    mock_apply.assert_called_once()
+    # [核心修改] 断言新的 mock 目标被调用。
+    # 我们需要断言它被调用了一次，并且第二个参数是 "head"。
+    mock_upgrade.assert_called_once()
+    assert mock_upgrade.call_args[0][1] == "head"
 
 
 def test_db_migrate_handles_exception(
@@ -32,15 +31,11 @@ def test_db_migrate_handles_exception(
 ) -> None:
     """
     测试 `db migrate` 在后端函数抛出异常时的行为。
-
-    Args:
-        cli_runner: Typer 测试运行器。
-        mock_cli_backend: 激活后端的 mock。
-        mocker: pytest-mock 提供的 mocker fixture。
-
+    [核心修改] 现在测试 Alembic 的 command.upgrade 抛出异常。
     """
+    # [核心修改] 让新的 mock 目标抛出异常。
     mocker.patch(
-        "trans_hub.cli.db.apply_migrations", side_effect=RuntimeError("DB locked")
+        "trans_hub.cli.db.command.upgrade", side_effect=RuntimeError("DB locked")
     )
     result = cli_runner.invoke(app, ["db", "migrate"])
 

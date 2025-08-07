@@ -1,7 +1,7 @@
 # trans_hub/config.py
-"""本模块使用 Pydantic 定义了 Trans-Hub 项目的主配置模型和相关的子模型。"""
 
 import enum
+import os
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -24,31 +24,23 @@ class LoggingConfig(BaseModel):
 
 
 class RetryPolicyConfig(BaseModel):
-    """重试策略配置。"""
-
-    # 修复：为所有数值型参数添加正数校验
     max_attempts: int = Field(default=2, gt=0)
     initial_backoff: float = Field(default=1.0, gt=0)
     max_backoff: float = Field(default=60.0, gt=0)
 
-    # --- 核心修复 ---
-    # 添加模型验证器以确保回退策略的逻辑一致性。
     @model_validator(mode="after")
     def check_backoff_consistency(self) -> "RetryPolicyConfig":
-        """验证 max_backoff 不小于 initial_backoff。"""
         if self.max_backoff < self.initial_backoff:
             raise ValueError("max_backoff 必须大于或等于 initial_backoff")
         return self
 
 
 class TransHubConfig(BaseSettings):
-    """Trans-Hub 的主配置对象，聚合了所有子配置。"""
-
     model_config = SettingsConfigDict(
         env_prefix="TH_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    database_url: str = "sqlite:///transhub.db"
+    database_url: str = "sqlite+aiosqlite:///transhub.db"
     active_engine: EngineName = EngineName.TRANSLATORS
     batch_size: int = Field(default=50, gt=0)
     source_lang: str | None = Field(default=None)
@@ -62,11 +54,9 @@ class TransHubConfig(BaseSettings):
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
-    # 终极修复：Pydantic v2 的 field_validator 必须是类方法
     @field_validator("source_lang")
     @classmethod
     def validate_source_lang_code(cls, v: str | None) -> str | None:
-        """在配置加载时验证 source_lang 字段。"""
         if v is not None:
             validate_lang_codes([v])
         return v
@@ -74,9 +64,19 @@ class TransHubConfig(BaseSettings):
     @property
     def db_path(self) -> str:
         parsed_url = urlparse(self.database_url)
-        if parsed_url.scheme != "sqlite":
-            raise ValueError("db_path 属性仅在 database_url 为 'sqlite' 时可用。")
-        path = parsed_url.netloc + parsed_url.path
-        if path.startswith("/") and ":" not in path:
-            return path[1:]
+        # --- [核心修复] 检查 scheme 是否以 'sqlite' 开头 ---
+        if not parsed_url.scheme.startswith("sqlite"):
+            raise ValueError("db_path 属性仅在 database_url 为 sqlite 类型时可用。")
+        
+        # 从 URL 中提取路径部分 (例如, '///path/to/db.sqlite' -> '/path/to/db.sqlite')
+        path = parsed_url.path
+        
+        # 移除 Windows 驱动器号前的斜杠 (例如, '/C:/...' -> 'C:/...')
+        if os.name == 'nt' and path.startswith('/') and len(path) > 2 and path[2] == ':':
+            path = path[1:]
+            
+        # 移除 Unix/macOS 绝对路径前的多余斜杠
+        while path.startswith('//'):
+            path = path[1:]
+
         return path

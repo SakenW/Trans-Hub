@@ -6,19 +6,18 @@ from trans_hub.core.exceptions import ConfigurationError
 from trans_hub.core.interfaces import PersistenceHandler
 
 
-# v4.0 规划：根据 URL scheme 动态选择持久化处理器
 def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
     """根据配置创建并返回一个具体的持久化处理器实例。"""
     db_url = config.database_url
 
+    # --- [核心修复] 检查 scheme 是否以 'sqlite' 开头 ---
     if db_url.startswith("sqlite"):
         from .sqlite import SQLitePersistenceHandler
-
+        # [核心修复] 向 SQLitePersistenceHandler 传递纯净的文件路径
         return SQLitePersistenceHandler(db_path=config.db_path)
-    elif db_url.startswith("postgresql") or db_url.startswith("postgres"):
+    elif db_url.startswith("postgresql"):
         try:
             from .postgres import PostgresPersistenceHandler
-
             return PostgresPersistenceHandler(dsn=db_url)
         except ImportError as e:
             raise ConfigurationError(
@@ -29,7 +28,6 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
         raise ConfigurationError(f"不支持的数据库类型或驱动: '{db_url}'")
 
 
-# 为了向后兼容和类型提示，仍然导出默认的 SQLite 实现
 from .sqlite import SQLitePersistenceHandler as DefaultPersistenceHandler
 
 __all__ = [

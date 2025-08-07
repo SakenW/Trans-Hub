@@ -1,5 +1,4 @@
 # tests/integration/cli/conftest.py
-# (此文件无需修改，保持原样)
 """为 CLI 集成测试提供专用的、基于 mock 的 Fixtures。"""
 
 from collections.abc import Generator
@@ -39,8 +38,13 @@ def mock_coordinator(mocker: MockerFixture) -> Generator[AsyncMock, None, None]:
 
 @pytest.fixture
 def mock_cli_backend(mocker: MockerFixture, mock_coordinator: AsyncMock) -> None:
-    """修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。"""
+    """
+    修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。
+    [核心修改] 现在 patch Alembic 的 command.upgrade。
+    """
     mocker.patch(
         "trans_hub.cli.utils.create_coordinator", return_value=mock_coordinator
     )
-    mocker.patch("trans_hub.cli.db.apply_migrations")
+    # [核心修改] 我们不再 patch 一个不存在的函数，而是 patch alembic.command.upgrade
+    # 这个函数现在被 trans_hub.cli.db 模块导入和使用。
+    mocker.patch("trans_hub.cli.db.command.upgrade")

@@ -248,9 +248,16 @@ async def test_garbage_collection_workflow_and_date_boundary(
     report1 = await coordinator.run_garbage_collection(
         expiration_days=retention_days, dry_run=False, _now=now_for_test
     )
+    # 添加调试信息
+    print(f"第一次GC报告: {report1}")
+    # 打印数据库中的当前内容
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("SELECT business_id FROM th_content")
+        contents = await cursor.fetchall()
+        print(f"GC后剩余的内容: {[row[0] for row in contents]}")
     # THEN: 验证只有过期的 job 被删除
-    assert report1.get("deleted_jobs", 0) == 1
-    assert report1.get("deleted_content", 0) == 0
+    assert report1.get("deleted_jobs", 0) == 1, f"期望删除1个job，实际删除了{report1.get('deleted_jobs', 0)}个"
+    assert report1.get("deleted_content", 0) == 0, f"期望删除0个content，实际删除了{report1.get('deleted_content', 0)}个"
 
     # 步骤 3: 手动移除与 stale_bid 关联的翻译记录，使其成为孤立内容
     async with aiosqlite.connect(db_path) as db:
@@ -265,8 +272,15 @@ async def test_garbage_collection_workflow_and_date_boundary(
     report2 = await coordinator.run_garbage_collection(
         expiration_days=retention_days, dry_run=False, _now=now_for_test
     )
+    # 添加调试信息
+    print(f"第二次GC报告: {report2}")
+    # 打印数据库中的当前内容
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("SELECT business_id FROM th_content")
+        contents = await cursor.fetchall()
+        print(f"GC后剩余的内容: {[row[0] for row in contents]}")
     # THEN: 验证孤立的 content 被删除
-    assert report2.get("deleted_content", 0) == 1
+    assert report2.get("deleted_content", 0) == 1, f"期望删除1个content，实际删除了{report2.get('deleted_content', 0)}个"
     assert (
         await coordinator.get_translation(business_id=stale_bid, target_lang="de")
         is None

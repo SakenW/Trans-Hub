@@ -65,7 +65,7 @@ def test_config() -> TransHubConfig:
     db_file = f"e2e_test_{os.urandom(4).hex()}.db"
     db_path = (TEST_DIR / db_file).resolve()
     return TransHubConfig(
-        database_url=f"sqlite:///{db_path}",
+        database_url=f"sqlite+aiosqlite:///{db_path}",
         active_engine=EngineName.DEBUG,
         source_lang="en",
     )

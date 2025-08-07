@@ -95,8 +95,9 @@ types-cachetools = ">=5.3.1"
 pytest-mock = "^3.14.1"
 alembic = "^1.13.1"
 sqlalchemy = "^2.0.31"
-nest-asyncio = "^1.6.0"  # <-- [新增] 解决事件循环嵌套问题的关键
+# nest-asyncio = "^1.6.0"  # <-- [新增] 解决事件循环嵌套问题的关键
 psycopg2-binary = "^2.9.9" # <-- [新增] 为 SQLAlchemy/Alembic 提供同步驱动
+greenlet = "^3.0.3" # <-- [新增] SQLAlchemy 异步模式需要
 
 [tool.ruff]
 line-length = 88
