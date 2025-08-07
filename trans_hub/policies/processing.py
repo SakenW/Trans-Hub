@@ -294,7 +294,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             # --- 核心修复：当源语言未指定时，正确返回 None ---
             return item.source_lang or p_context.config.source_lang
 
-        sorted_items = sorted(items, key=get_sort_key)
+        # mypy 在这里无法正确推断 key 的类型，因此我们忽略它
+        sorted_items = sorted(items, key=get_sort_key)  # type: ignore
         grouped_by_lang = groupby(sorted_items, key=get_sort_key)
 
         # 2. 创建并发任务，并保存每个任务对应的原始项目组
