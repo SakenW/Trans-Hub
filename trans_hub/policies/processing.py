@@ -377,6 +377,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     engine_version=active_engine.VERSION,
                 )
                 if self.PAYLOAD_TEXT_KEY in res.translated_payload:
+                    # --- 核心修复 ---
+                    # 移除了冗余的 str() 强制转换，因为我们知道这里的类型已经是 str。
                     translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
                     task = asyncio.create_task(
                         p_context.cache.cache_translation_result(
