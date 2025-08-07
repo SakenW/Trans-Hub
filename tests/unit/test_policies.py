@@ -4,7 +4,7 @@
 v3.0.0 更新：全面重写以测试基于结构化载荷（payload）的处理逻辑。
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,8 +17,6 @@ from trans_hub.core import (
     TranslationStatus,
 )
 from trans_hub.core.interfaces import PersistenceHandler
-
-# 修复：导入 BaseTranslationEngine 以进行更精确的 mock
 from trans_hub.engines.base import BaseTranslationEngine
 from trans_hub.policies import DefaultProcessingPolicy
 
@@ -59,12 +57,10 @@ def mock_cache() -> AsyncMock:
 @pytest.fixture
 def mock_active_engine() -> AsyncMock:
     """创建一个翻译引擎的 mock 对象。"""
-    # 修复：使用 spec=BaseTranslationEngine 来确保接口一致性
     mock = AsyncMock(spec=BaseTranslationEngine)
     mock.atranslate_batch.return_value = [EngineSuccess(translated_text="mocked")]
     mock.ACCEPTS_CONTEXT = False
     mock.validate_and_parse_context = MagicMock(return_value=MagicMock())
-    # 修复：为新属性提供 mock 值
     mock.name = "debug"
     mock.VERSION = "test-ver-1.0"
     return mock
@@ -145,6 +141,40 @@ async def test_policy_handles_engine_failure(
     assert result.error == "API limit reached"
     assert result.translated_payload is None
     assert result.original_payload == {"text": "Hello", "metadata": "do_not_touch"}
+
+
+@pytest.mark.asyncio
+async def test_policy_passes_none_source_lang_to_engine(
+    mock_processing_context: ProcessingContext,
+    mock_active_engine: AsyncMock,
+) -> None:
+    """
+    测试当任务和全局配置均未提供源语言时，策略是否向引擎传递 None。
+    """
+    # GIVEN: 全局配置和任务项都没有 source_lang
+    mock_processing_context.config.source_lang = None
+    batch_without_lang = [
+        ContentItem(
+            translation_id="uuid-no-lang-1",
+            business_id="biz-no-lang",
+            content_id="c-no-lang-1",
+            source_payload={"text": "Some text"},
+            context=None,
+            source_lang=None,
+            context_id=None,
+        )
+    ]
+    policy = DefaultProcessingPolicy()
+
+    # WHEN: 处理该批次
+    await policy.process_batch(
+        batch_without_lang, "de", mock_processing_context, mock_active_engine
+    )
+
+    # THEN: 验证引擎被调用时，source_lang 参数是 None
+    mock_active_engine.atranslate_batch.assert_awaited_once()
+    call_args = mock_active_engine.atranslate_batch.call_args
+    assert call_args.kwargs["source_lang"] is None
 
 
 @pytest.mark.asyncio

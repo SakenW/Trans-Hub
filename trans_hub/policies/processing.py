@@ -289,12 +289,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         [私有] 调用活动引擎翻译一批未缓存的项。
         此方法保证返回的结果列表与输入的 `items` 列表顺序完全一致。
         """
-        # --- 核心修复 ---
-        # 采用更健壮的分组、并发、重组逻辑
-
         # 1. 定义排序键并排序，以便 `groupby` 能正确工作
-        def get_sort_key(item: ContentItem) -> str:
-            return item.source_lang or p_context.config.source_lang or "unknown"
+        def get_sort_key(item: ContentItem) -> str | None:
+            # --- 核心修复：当源语言未指定时，正确返回 None ---
+            return item.source_lang or p_context.config.source_lang
 
         sorted_items = sorted(items, key=get_sort_key)
         grouped_by_lang = groupby(sorted_items, key=get_sort_key)
@@ -377,8 +375,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     engine_version=active_engine.VERSION,
                 )
                 if self.PAYLOAD_TEXT_KEY in res.translated_payload:
-                    # --- 核心修复 ---
-                    # 移除了冗余的 str() 强制转换，因为我们知道这里的类型已经是 str。
                     translated_text = res.translated_payload[self.PAYLOAD_TEXT_KEY]
                     task = asyncio.create_task(
                         p_context.cache.cache_translation_result(
