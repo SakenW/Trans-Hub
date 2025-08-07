@@ -289,6 +289,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         [私有] 调用活动引擎翻译一批未缓存的项。
         此方法保证返回的结果列表与输入的 `items` 列表顺序完全一致。
         """
+
         # 1. 定义排序键并排序，以便 `groupby` 能正确工作
         def get_sort_key(item: ContentItem) -> str | None:
             # --- 核心修复：当源语言未指定时，正确返回 None ---
