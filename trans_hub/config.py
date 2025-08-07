@@ -63,7 +63,8 @@ class TransHubConfig(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     @field_validator("source_lang")
-    def validate_source_lang_code(self, v: str | None) -> str | None:
+    @classmethod
+    def validate_source_lang_code(cls, v: str | None) -> str | None:
         """在配置加载时验证 source_lang 字段。"""
         if v is not None:
             validate_lang_codes([v])

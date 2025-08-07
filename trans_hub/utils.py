@@ -9,12 +9,17 @@ v3.2 修订: 全面采用 langcodes 库进行语言代码校验。
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from langcodes import Language
 from langcodes.tag_parser import LanguageTagError
 
 from trans_hub.core.types import GLOBAL_CONTEXT_SENTINEL
+
+# 语言子标签应该由 2-3 个字母组成 (BCP 47)
+# https://www.rfc-editor.org/rfc/rfc5646.html#section-2.2.1
+LANGUAGE_SUBTAG_PATTERN = re.compile(r"^[a-zA-Z]{2,3}$")
 
 
 def get_context_hash(context: dict[str, Any] | None) -> str:
@@ -52,9 +57,9 @@ def get_context_hash(context: dict[str, Any] | None) -> str:
 def validate_lang_codes(lang_codes: list[str]) -> None:
     """
     使用 `langcodes` 库校验语言代码列表中的每个代码是否符合 BCP 47 规范
-    且包含一个有效的语言子标签。
+    且包含一个有效的、2-3个字母的语言子标签。
 
-    如果任何一个代码格式无法被解析或缺少语言子标签，则抛出 ValueError。
+    如果任何一个代码格式无法被解析或不符合业务规则，则抛出 ValueError。
 
     Args:
         lang_codes: 一个包含语言代码字符串的列表。
@@ -63,12 +68,6 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
         ValueError: 如果任何一个语言代码格式无效。
 
     """
-    import re
-
-    # 语言子标签应该由 2-3 个字母组成 (BCP 47)
-    # https://www.rfc-editor.org/rfc/rfc5646.html#section-2.2.1
-    language_subtag_pattern = re.compile(r"^[a-zA-Z]{2,3}$")
-
     for code in lang_codes:
         try:
             lang = Language.get(code)
@@ -77,7 +76,7 @@ def validate_lang_codes(lang_codes: list[str]) -> None:
                     f"The tag '{code}' is a valid BCP-47 tag, but does not contain a language subtag."
                 )
             # 额外检查：语言子标签必须符合 2-3 个字母的规范
-            if not language_subtag_pattern.match(lang.language):
+            if not LANGUAGE_SUBTAG_PATTERN.match(lang.language):
                 raise LanguageTagError(
                     f"The language subtag '{lang.language}' in tag '{code}' does not conform to the expected format (2-3 alphabetic characters)."
                 )

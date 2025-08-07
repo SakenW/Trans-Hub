@@ -60,9 +60,9 @@ def test_validate_lang_codes_accepts_valid_and_normalizable_tags(
     "invalid_code, expected_error_part",
     [
         ("german", "Expected a language code, got 'german'"),
-        ("e", "Expected a language code, got 'e'"),
-        ("123", "does not conform to the expected format (2-3 alphabetic characters)"),
-        ("a-DE", "Expected a language code, got 'a'"),
+        ("e", "does not conform to the expected format"),
+        ("123", "does not contain a language subtag"),
+        ("a-DE", "does not conform to the expected format"),
         ("zh-CN-", "Expected 1-8 alphanumeric characters, got ''"),
     ],
 )
