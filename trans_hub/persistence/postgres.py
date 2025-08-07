@@ -1,14 +1,9 @@
 # trans_hub/persistence/postgres.py
-"""
-提供了基于 asyncpg 的 PostgreSQL 持久化实现。
-
-本模块是 `PersistenceHandler` 协议的 PostgreSQL 具体实现，
-为 Trans-Hub 提供了高性能、高并发的生产级数据后端。
-"""
 
 import asyncio
 import json
 import re
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -33,13 +28,10 @@ logger = structlog.get_logger(__name__)
 
 
 class _DryRunError(Exception):
-    """一个内部异常，用于在 dry_run 模式下安全地回滚事务。"""
-
     pass
 
 
 class PostgresPersistenceHandler(PersistenceHandler):
-    """`PersistenceHandler` 协议的 PostgreSQL 实现。"""
 
     SUPPORTS_NOTIFICATIONS = True
     NOTIFICATION_CHANNEL = "new_translation_task"
@@ -56,19 +48,23 @@ class PostgresPersistenceHandler(PersistenceHandler):
         logger.info("PostgreSQL 持久层已配置")
 
     async def connect(self) -> None:
-        """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-                # --- 核心修复 ---
-                # 为 JSON 编码器添加 ensure_ascii=False，以保留 Unicode 字符
+                connect_dsn = self.dsn
+                if connect_dsn.startswith("postgresql+asyncpg"):
+                    connect_dsn = connect_dsn.replace("postgresql+asyncpg", "postgresql", 1)
+
+                # [修正] 코덱 설정은 JSON 데이터를 자동으로 파싱하고 덤프하는 역할을 합니다.
+                # asyncpg가 JSON/JSONB를 자동으로 처리하도록 설정합니다.
                 def _jsonb_encoder(value: Any) -> str:
                     return json.dumps(value, ensure_ascii=False)
 
                 def _jsonb_decoder(value: str) -> Any:
                     return json.loads(value)
-
+                
+                assert asyncpg is not None
                 self._pool = await asyncpg.create_pool(
-                    self.dsn,
+                    dsn=connect_dsn,
                     min_size=5,
                     max_size=20,
                     init=lambda conn: conn.set_type_codec(
@@ -76,6 +72,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         encoder=_jsonb_encoder,
                         decoder=_jsonb_decoder,
                         schema="pg_catalog",
+                        format='text' # 명시적으로 텍스트 포맷을 사용하도록 지정
                     ),
                 )
                 logger.info("已连接到 PostgreSQL 数据库并创建连接池")
@@ -83,20 +80,19 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 logger.error("连接 PostgreSQL 数据库失败", exc_info=True)
                 raise DatabaseError(f"数据库连接失败: {e}") from e
 
+    # ... (close, reset_stale_tasks 保持不变) ...
     async def close(self) -> None:
-        """关闭数据库连接池和所有相关连接。"""
         if (
             self._notification_listener_conn
             and not self._notification_listener_conn.is_closed()
         ):
-            # 先移除监听器再关闭连接
             if self._pool:
                 try:
+                    assert asyncpg is not None
                     await self._notification_listener_conn.remove_listener(
                         self.NOTIFICATION_CHANNEL, self._notification_callback
                     )
-                except asyncpg.InterfaceError:  # pragma: no cover
-                    # 连接可能已失效，忽略错误
+                except asyncpg.InterfaceError:
                     pass
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
@@ -106,7 +102,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
             logger.info("已关闭与 PostgreSQL 数据库的连接池")
 
     async def reset_stale_tasks(self) -> None:
-        """[实现] 在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
         sql = """
@@ -124,6 +119,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     )
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"重置陈旧任务失败: {e}") from e
+
 
     async def stream_translatable_items(
         self,
@@ -179,8 +175,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                             context_id=str(r["context_id"])
                             if r["context_id"]
                             else None,
-                            source_payload=r["source_payload_json"],
-                            context=r["context_payload_json"],
+                            # [核心修复] 手动反序列化, 因为 asyncpg 的 codec 可能不总是生效
+                            source_payload=json.loads(r["source_payload_json"]) if isinstance(r["source_payload_json"], str) else r["source_payload_json"],
+                            context=json.loads(r["context_payload_json"]) if r["context_payload_json"] and isinstance(r["context_payload_json"], str) else r["context_payload_json"],
                             source_lang=r["source_lang"],
                         )
                         for r in detail_rows
@@ -190,6 +187,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
             yield items
             processed_count += len(items)
 
+    # ... (ensure_content_and_context, create_pending_translations 保持不变) ...
     async def ensure_content_and_context(
         self,
         business_id: str,
@@ -200,26 +198,43 @@ class PostgresPersistenceHandler(PersistenceHandler):
             raise DatabaseError("数据库连接池未初始化")
         async with self._pool.acquire() as conn:
             try:
+                existing_id_row = await conn.fetchrow(
+                    "SELECT id FROM th_content WHERE business_id = $1", business_id
+                )
+                
+                content_id = str(existing_id_row['id']) if existing_id_row else str(uuid.uuid4())
+                
                 content_sql = """
-                    INSERT INTO th_content (business_id, source_payload_json) VALUES ($1, $2)
+                    INSERT INTO th_content (id, business_id, source_payload_json) VALUES ($1, $2, $3)
                     ON CONFLICT (business_id) DO UPDATE SET
                         source_payload_json = EXCLUDED.source_payload_json,
                         updated_at = (now() at time zone 'utc')
                     RETURNING id;
                 """
+                source_payload_str = json.dumps(source_payload, ensure_ascii=False)
                 content_row = await conn.fetchrow(
-                    content_sql, business_id, source_payload
+                    content_sql, content_id, business_id, source_payload_str
                 )
                 assert content_row
                 content_id = str(content_row["id"])
+
                 context_id: str | None = None
                 if context:
                     context_hash = get_context_hash(context)
+                    
+                    existing_ctx_id_row = await conn.fetchrow(
+                        "SELECT id FROM th_contexts WHERE context_hash = $1", context_hash
+                    )
+                    
+                    ctx_id = str(existing_ctx_id_row['id']) if existing_ctx_id_row else str(uuid.uuid4())
+                    
                     context_sql = """
-                        INSERT INTO th_contexts (context_hash, context_payload_json) VALUES ($1, $2)
+                        INSERT INTO th_contexts (id, context_hash, context_payload_json) VALUES ($1, $2, $3)
                         ON CONFLICT (context_hash) DO NOTHING RETURNING id;
                     """
-                    ctx_row = await conn.fetchrow(context_sql, context_hash, context)
+                    context_str = json.dumps(context, ensure_ascii=False)
+                    ctx_row = await conn.fetchrow(context_sql, ctx_id, context_hash, context_str)
+                    
                     if not ctx_row:
                         ctx_row = await conn.fetchrow(
                             "SELECT id FROM th_contexts WHERE context_hash = $1",
@@ -227,12 +242,14 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         )
                     assert ctx_row
                     context_id = str(ctx_row["id"])
+
+                job_id = str(uuid.uuid4())
                 await conn.execute(
                     """
-                    INSERT INTO th_jobs (content_id, last_requested_at) VALUES ($1, (now() at time zone 'utc'))
+                    INSERT INTO th_jobs (id, content_id, last_requested_at) VALUES ($1, $2, (now() at time zone 'utc'))
                     ON CONFLICT (content_id) DO UPDATE SET last_requested_at = (now() at time zone 'utc');
                     """,
-                    content_id,
+                    job_id, content_id
                 )
                 return content_id, context_id
             except asyncpg.PostgresError as e:
@@ -252,22 +269,25 @@ class PostgresPersistenceHandler(PersistenceHandler):
         try:
             async with self._pool.acquire() as conn:
                 if force_retranslate:
-                    sql = """
-                        INSERT INTO th_translations AS t (content_id, context_id, lang_code, source_lang, engine_version)
-                        SELECT $1, $2, lang.code, $3, $4 FROM unnest($5::text[]) AS lang(code)
-                        ON CONFLICT (content_id, context_id, lang_code) DO UPDATE SET
-                            status = 'PENDING', source_lang = EXCLUDED.source_lang,
-                            engine_version = EXCLUDED.engine_version, translation_payload_json = NULL,
-                            error = NULL, last_updated_at = (now() at time zone 'utc');
+                    update_sql = """
+                        UPDATE th_translations SET
+                            status = 'PENDING', source_lang = $4,
+                            engine_version = $5, translation_payload_json = NULL,
+                            error = NULL, last_updated_at = (now() at time zone 'utc')
+                        WHERE content_id = $1 
+                          AND COALESCE(context_id::text, 'NULL') = COALESCE($2::text, 'NULL')
+                          AND lang_code = ANY($3::text[]);
                     """
-                else:
-                    sql = """
-                        INSERT INTO th_translations (content_id, context_id, lang_code, source_lang, engine_version)
-                        SELECT $1, $2, lang.code, $3, $4 FROM unnest($5::text[]) AS lang(code)
-                        ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
-                    """
+                    await conn.execute(update_sql, content_id, context_id, target_langs, source_lang, engine_version)
+
+                insert_sql = """
+                    INSERT INTO th_translations (id, content_id, context_id, lang_code, source_lang, engine_version, status)
+                    SELECT gen_random_uuid(), $1, $2, lang.code, $3, $4, 'PENDING'
+                    FROM unnest($5::text[]) AS lang(code)
+                    ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
+                """
                 await conn.execute(
-                    sql,
+                    insert_sql,
                     content_id,
                     context_id,
                     source_lang,
@@ -283,7 +303,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         params = [
             (
                 res.status.value,
-                res.translated_payload,
+                json.dumps(res.translated_payload, ensure_ascii=False) if res.translated_payload else None,
                 res.engine,
                 res.error,
                 res.translation_id,
@@ -300,7 +320,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 await conn.executemany(sql, params)
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"保存翻译结果失败: {e}") from e
-
+    
     async def find_translation(
         self, business_id: str, target_lang: str, context: dict[str, Any] | None = None
     ) -> TranslationResult | None:
@@ -322,11 +342,15 @@ class PostgresPersistenceHandler(PersistenceHandler):
             raise DatabaseError(f"查找翻译失败: {e}") from e
         if not row:
             return None
+        # [修正] 从数据库读取时也需要反序列化
+        original_payload = json.loads(row["source_payload_json"]) if isinstance(row["source_payload_json"], str) else row["source_payload_json"]
+        translated_payload = json.loads(row["translation_payload_json"]) if row["translation_payload_json"] and isinstance(row["translation_payload_json"], str) else row["translation_payload_json"]
+        
         return TranslationResult(
             translation_id=str(row["translation_id"]),
             business_id=business_id,
-            original_payload=row["source_payload_json"],
-            translated_payload=row["translation_payload_json"],
+            original_payload=original_payload,
+            translated_payload=translated_payload,
             target_lang=target_lang,
             status=TranslationStatus(row["status"]),
             engine=row["engine"],
@@ -344,6 +368,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         now = _now if _now is not None else datetime.now(timezone.utc)
         cutoff_date = now.date() - timedelta(days=retention_days)
 
+        # [核心修复] _parse_delete_status 接受 str
         def _parse_delete_status(status: str) -> int:
             match = re.search(r"DELETE\s(\d+)", status)
             return int(match.group(1)) if match else 0
@@ -372,7 +397,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         )
                         stats["deleted_content"] = res if res else 0
                     else:
-                        status = await conn.execute(f"DELETE {orphan_content_sql}")
+                        status = await conn.execute(f"DELETE FROM th_content WHERE id IN (SELECT id {orphan_content_sql})")
                         stats["deleted_content"] = _parse_delete_status(status)
 
                     orphan_context_sql = """ FROM th_contexts ctx WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)"""
@@ -382,7 +407,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         )
                         stats["deleted_contexts"] = res if res else 0
                     else:
-                        status = await conn.execute(f"DELETE {orphan_context_sql}")
+                        status = await conn.execute(f"DELETE FROM th_contexts WHERE id IN (SELECT id {orphan_context_sql})")
                         stats["deleted_contexts"] = _parse_delete_status(status)
 
                     if dry_run:
@@ -393,7 +418,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
             return stats
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"垃圾回收失败: {e}") from e
-
+    # ... (rest of the file remains the same) ...
     async def move_to_dlq(
         self,
         item: ContentItem,
@@ -414,8 +439,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         item.translation_id,
-                        item.source_payload,
-                        item.context,
+                        json.dumps(item.source_payload, ensure_ascii=False),
+                        json.dumps(item.context, ensure_ascii=False) if item.context else None,
                         target_lang,
                         error_message,
                         engine_name,
@@ -446,6 +471,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     not self._notification_listener_conn
                     or self._notification_listener_conn.is_closed()
                 ):
+                    assert asyncpg is not None
                     self._notification_listener_conn = await self._pool.acquire()
                     self._notification_queue = asyncio.Queue()
                     await self._notification_listener_conn.add_listener(
@@ -465,6 +491,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     and self._notification_listener_conn
                     and not self._notification_listener_conn.is_closed()
                 ):
+                    assert asyncpg is not None
                     await self._notification_listener_conn.remove_listener(
                         self.NOTIFICATION_CHANNEL, self._notification_callback
                     )

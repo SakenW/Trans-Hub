@@ -12,7 +12,6 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
-# --- [核心修改] 导入 Alembic ---
 from alembic import command
 from alembic.config import Config
 
@@ -33,8 +32,8 @@ TEST_DIR = Path(__file__).parent.parent / "test_output"
 
 PG_DATABASE_URL = os.getenv("TH_DATABASE_URL", "")
 requires_postgres = pytest.mark.skipif(
-    not PG_DATABASE_URL.startswith("postgres"),
-    reason="需要设置 TH_DATABASE_URL 为 PostgreSQL 连接字符串以运行此测试",
+    not PG_DATABASE_URL.startswith("postgresql+asyncpg"),
+    reason="需要设置 TH_DATABASE_URL 为 postgresql+asyncpg://... 格式来运行此测试",
 )
 
 
@@ -43,29 +42,20 @@ def setup_test_environment() -> Generator[None, None, None]:
     """配置全局测试环境，对整个测试会话生效一次。"""
     TEST_DIR.mkdir(exist_ok=True)
     yield
-    # 为了调试，暂时禁用测试后的自动清理
-    # if os.getenv("CI") is None:
-    #     shutil.rmtree(TEST_DIR)
+    if os.getenv("CI") is None and os.path.exists(TEST_DIR):
+        shutil.rmtree(TEST_DIR)
 
 
-# --- [核心修改] 新增 Alembic 迁移辅助函数 ---
 def _run_migrations(db_url: str):
     """
-    一个辅助函数，用于在测试环境中以编程方式运行 Alembic 迁移。
-    它会动态地将测试用的数据库 URL 传递给 Alembic。
+    一个同步的辅助函数，用于在测试环境中以编程方式运行 Alembic 迁移。
     """
-    # 确定 alembic.ini 的绝对路径
     alembic_cfg_path = Path(__file__).parent.parent.parent / "alembic.ini"
     if not alembic_cfg_path.is_file():
         raise FileNotFoundError(f"Alembic config not found at {alembic_cfg_path}")
 
-    # 创建 Alembic 配置对象
     alembic_cfg = Config(str(alembic_cfg_path))
-
-    # [关键] 覆盖 alembic.ini 中的 sqlalchemy.url，使其指向我们的临时测试数据库
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
-
-    # 执行升级到最新版本 ("head")
     command.upgrade(alembic_cfg, "head")
 
 
@@ -73,7 +63,6 @@ def _run_migrations(db_url: str):
 def test_config() -> TransHubConfig:
     """为每个测试提供一个隔离的 TransHubConfig 实例（默认使用 SQLite）。"""
     db_file = f"e2e_test_{os.urandom(4).hex()}.db"
-    # 使用绝对路径以避免相对路径问题
     db_path = (TEST_DIR / db_file).resolve()
     return TransHubConfig(
         database_url=f"sqlite:///{db_path}",
@@ -88,13 +77,10 @@ async def coordinator(
 ) -> AsyncGenerator[Coordinator, None]:
     """提供一个完全初始化、可用于端到端测试的真实 Coordinator 实例 (SQLite)。"""
     db_url = test_config.database_url
-    
-    # 确保父目录存在
     if db_url.startswith("sqlite:///"):
         db_file_path = Path(test_config.db_path)
         db_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # --- [核心修改] 使用 Alembic 进行数据库初始化 ---
     _run_migrations(db_url)
 
     handler: PersistenceHandler = create_persistence_handler(test_config)
@@ -112,30 +98,40 @@ async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
     """提供一个连接到临时测试数据库并应用了 Schema 的 PostgresPersistenceHandler。"""
     import asyncpg  # 延迟导入
 
-    main_dsn = PG_DATABASE_URL
-    parsed = urlparse(main_dsn)
+    main_dsn_sqlalchemy = PG_DATABASE_URL
+    parsed = urlparse(main_dsn_sqlalchemy)
     db_name = f"test_db_{os.urandom(4).hex()}"
-    server_dsn = parsed._replace(path="").geturl()
+    
+    # --- [核心修复] 创建一个 asyncpg 能理解的 DSN 用于管理操作 ---
+    main_dsn_asyncpg = main_dsn_sqlalchemy.replace("postgresql+asyncpg", "postgresql", 1)
+    parsed_asyncpg = urlparse(main_dsn_asyncpg)
+    server_dsn_asyncpg = parsed_asyncpg._replace(path="").geturl()
 
-    conn = await asyncpg.connect(dsn=server_dsn)
+    conn = None
     try:
+        conn = await asyncpg.connect(dsn=server_dsn_asyncpg)
         await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
         await conn.execute(f'CREATE DATABASE "{db_name}"')
     finally:
-        await conn.close()
+        if conn:
+            await conn.close()
+    
+    # 用于 Alembic 和 TransHubConfig 的 DSN (SQLAlchemy 格式)
+    test_db_dsn_sqlalchemy = parsed._replace(path=f"/{db_name}").geturl()
 
-    test_db_dsn = parsed._replace(path=f"/{db_name}").geturl()
+    _run_migrations(test_db_dsn_sqlalchemy)
 
-    # --- [核心修改] 使用 Alembic 进行数据库初始化 ---
-    _run_migrations(test_db_dsn)
-
-    handler = create_persistence_handler(TransHubConfig(database_url=test_db_dsn))
+    handler_config = TransHubConfig(database_url=test_db_dsn_sqlalchemy)
+    handler = create_persistence_handler(handler_config)
     await handler.connect()
+    
     yield handler
+    
     await handler.close()
 
-    conn = await asyncpg.connect(dsn=server_dsn)
     try:
+        conn = await asyncpg.connect(dsn=server_dsn_asyncpg)
         await conn.execute(f'DROP DATABASE "{db_name}" WITH (FORCE)')
     finally:
-        await conn.close()
+        if conn:
+            await conn.close()
