@@ -60,9 +60,11 @@ def test_validate_lang_codes_accepts_valid_and_normalizable_tags(
     "invalid_code, expected_error_part",
     [
         ("german", "Expected a language code, got 'german'"),
-        # 核心修复：更新期望的错误信息
         ("e", "Expected a language code, got 'e'"),
-        ("123", "does not conform to the expected format (2-3 alphabetic characters)"),
+        (
+            "123",
+            "The tag '123' is a valid BCP-47 tag, but does not contain a language subtag.",
+        ),
         ("a-DE", "Expected a language code, got 'a'"),
         ("zh-CN-", "Expected 1-8 alphanumeric characters, got ''"),
     ],
@@ -78,4 +80,3 @@ def test_validate_lang_codes_rejects_invalid_tags(
     assert f"提供的语言代码 '{invalid_code}' 格式无效" in str(excinfo.value)
     # 验证来自底层 langcodes 库的英文原因也存在
     assert expected_error_part in str(excinfo.value)
-    
