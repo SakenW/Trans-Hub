@@ -59,7 +59,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-
+                # --- 核心修复 ---
+                # 为 JSON 编码器添加 ensure_ascii=False，以保留 Unicode 字符
                 def _jsonb_encoder(value: Any) -> str:
                     return json.dumps(value, ensure_ascii=False)
 
@@ -88,6 +89,15 @@ class PostgresPersistenceHandler(PersistenceHandler):
             self._notification_listener_conn
             and not self._notification_listener_conn.is_closed()
         ):
+            # 先移除监听器再关闭连接
+            if self._pool:
+                try:
+                    await self._notification_listener_conn.remove_listener(
+                        self.NOTIFICATION_CHANNEL, self._notification_callback
+                    )
+                except asyncpg.InterfaceError:  # pragma: no cover
+                    # 连接可能已失效，忽略错误
+                    pass
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
         if self._pool:
@@ -341,8 +351,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # --- 核心修复：修正了日期比较逻辑 ---
-                    # 直接将 TIMESTAMPTZ 字段转换为 date 类型进行比较
                     job_where_clause = "WHERE (last_requested_at::date) < $1"
                     if dry_run:
                         res = await conn.fetchval(
@@ -356,11 +364,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         )
                         stats["deleted_jobs"] = _parse_delete_status(status)
 
-                    orphan_content_sql = """
-                        FROM th_content c
-                        WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                          AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
-                    """
+                    orphan_content_sql = """ FROM th_content c WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
+                                             AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)"""
                     if dry_run:
                         res = await conn.fetchval(
                             f"SELECT COUNT(*) {orphan_content_sql}"
@@ -370,10 +375,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         status = await conn.execute(f"DELETE {orphan_content_sql}")
                         stats["deleted_content"] = _parse_delete_status(status)
 
-                    orphan_context_sql = """
-                        FROM th_contexts ctx
-                        WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
-                    """
+                    orphan_context_sql = """ FROM th_contexts ctx WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)"""
                     if dry_run:
                         res = await conn.fetchval(
                             f"SELECT COUNT(*) {orphan_context_sql}"
