@@ -17,6 +17,7 @@ from pytest_mock import MockerFixture
 
 from trans_hub import Coordinator, EngineName
 from trans_hub.core import (
+    ContentItem,
     EngineSuccess,
     TranslationResult,
     TranslationStatus,
@@ -88,6 +89,70 @@ async def test_request_with_specific_source_lang_overrides_global_config(
     call_args = mock_translate.call_args
     assert call_args.kwargs["source_lang"] == override_source_lang
     assert call_args.kwargs["source_lang"] != coordinator.config.source_lang
+
+
+@pytest.mark.asyncio
+async def test_process_pending_handles_context_groups_concurrently(
+    coordinator: Coordinator,
+) -> None:
+    """验证 Coordinator 能并发处理不同上下文的任务小组，而不是串行阻塞。"""
+    # GIVEN: 两个不同上下文的翻译请求
+    ctx1 = {"id": "ctx1"}
+    ctx2 = {"id": "ctx2"}
+    await coordinator.request(
+        "test.concurrent.ctx1", {"text": "text1"}, ["de"], context=ctx1
+    )
+    await coordinator.request(
+        "test.concurrent.ctx2", {"text": "text2"}, ["de"], context=ctx2
+    )
+
+    # 用 Events 来控制和观察 mock 函数的执行流程
+    processing_started_events = {
+        "ctx1": asyncio.Event(),
+        "ctx2": asyncio.Event(),
+    }
+    can_finish_event = asyncio.Event()
+
+    original_process_batch = coordinator.processing_policy.process_batch
+
+    async def controlled_process_batch(
+        batch: list[ContentItem], *args: Any, **kwargs: Any
+    ) -> list[TranslationResult]:
+        # 识别当前批次属于哪个上下文
+        context_id = (
+            batch[0].context.get("id") if batch and batch[0].context else "unknown"
+        )
+        # 发出“已开始处理”信号
+        if context_id in processing_started_events:
+            processing_started_events[context_id].set()
+        # 等待“可以完成”的信号
+        await can_finish_event.wait()
+        # 调用原始实现来返回有效结果
+        return await original_process_batch(batch, *args, **kwargs)
+
+    async def consume_all() -> list[TranslationResult]:
+        return [res async for res in coordinator.process_pending_translations("de")]
+
+    with patch.object(
+        coordinator.processing_policy,
+        "process_batch",
+        side_effect=controlled_process_batch,
+    ):
+        # WHEN: 在后台启动 worker
+        consumer_task = asyncio.create_task(consume_all())
+
+        # THEN: 验证两个上下文小组都已开始处理，即使我们还未允许任何一个完成
+        # 这证明了它们是并发启动的
+        await asyncio.wait_for(processing_started_events["ctx1"].wait(), timeout=1)
+        await asyncio.wait_for(processing_started_events["ctx2"].wait(), timeout=1)
+
+        # 现在，允许所有处理完成
+        can_finish_event.set()
+        results = await consumer_task
+
+        # 最终验证结果
+        assert len(results) == 2
+        assert {res.original_payload["text"] for res in results} == {"text1", "text2"}
 
 
 @pytest.mark.skipif(

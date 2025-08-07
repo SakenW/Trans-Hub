@@ -28,8 +28,6 @@ from .core import (
 from .engine_registry import ENGINE_REGISTRY, discover_engines
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
-
-# --- 核心修复 ---
 from .utils import validate_lang_codes
 
 if TYPE_CHECKING:
@@ -205,16 +203,38 @@ class Coordinator:
             if not batch:
                 continue
 
+            # --- 核心优化：并发处理所有上下文小组 ---
+            tasks = []
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
-                batch_results = await self.processing_policy.process_batch(
-                    items_group,
-                    target_lang,
-                    self.processing_context,
-                    active_engine,
+                task = asyncio.create_task(
+                    self.processing_policy.process_batch(
+                        items_group,
+                        target_lang,
+                        self.processing_context,
+                        active_engine,
+                    )
                 )
-                await self.handler.save_translation_results(batch_results)
-                for result in batch_results:
+                tasks.append(task)
+
+            if not tasks:
+                continue
+
+            # 等待所有小组并发处理完成
+            list_of_results_or_errors = await asyncio.gather(
+                *tasks, return_exceptions=True
+            )
+
+            all_results: list[TranslationResult] = []
+            for res_or_err in list_of_results_or_errors:
+                if isinstance(res_or_err, list):
+                    all_results.extend(res_or_err)
+                elif isinstance(res_or_err, Exception):
+                    logger.error("一个上下文小组在处理时发生异常", exc_info=res_or_err)
+
+            if all_results:
+                await self.handler.save_translation_results(all_results)
+                for result in all_results:
                     yield result
 
     async def request(
@@ -229,9 +249,6 @@ class Coordinator:
         """[操作层入口] 提交一个新的翻译请求。"""
         self._check_is_active()
 
-        # --- 核心修复 ---
-        # 在方法入口处对所有传入的语言代码进行 BCP-47 格式校验。
-        # 这确保了无效的输入会立即失败，而不是污染下游系统。
         try:
             validate_lang_codes(target_langs)
             if source_lang:
@@ -244,7 +261,7 @@ class Coordinator:
                 source_lang=source_lang,
                 error=str(e),
             )
-            raise  # 重新抛出异常，让调用者处理
+            raise
 
         op = self._execute_request_operation(
             business_id=business_id,
