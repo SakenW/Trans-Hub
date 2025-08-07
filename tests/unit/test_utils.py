@@ -63,7 +63,7 @@ def test_validate_lang_codes_accepts_valid_and_normalizable_tags(
         ("e", "Expected a language code, got 'e'"),
         (
             "123",
-            "The tag '123' is a valid BCP-47 tag, but does not contain a language subtag.",
+            "The language subtag '123' in tag '123' does not conform to the expected format (2-3 alphabetic characters).",
         ),
         ("a-DE", "Expected a language code, got 'a'"),
         ("zh-CN-", "Expected 1-8 alphanumeric characters, got ''"),
