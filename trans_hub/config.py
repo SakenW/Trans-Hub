@@ -5,7 +5,7 @@ import enum
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trans_hub.cache import CacheConfig
@@ -29,6 +29,15 @@ class RetryPolicyConfig(BaseModel):
     max_attempts: int = Field(default=2, gt=0)
     initial_backoff: float = Field(default=1.0, gt=0)
     max_backoff: float = Field(default=60.0, gt=0)
+
+    # --- 核心修复 ---
+    # 添加模型验证器以确保回退策略的逻辑一致性。
+    @model_validator(mode="after")
+    def check_backoff_consistency(self) -> "RetryPolicyConfig":
+        """验证 max_backoff 不小于 initial_backoff。"""
+        if self.max_backoff < self.initial_backoff:
+            raise ValueError("max_backoff 必须大于或等于 initial_backoff")
+        return self
 
 
 class TransHubConfig(BaseSettings):

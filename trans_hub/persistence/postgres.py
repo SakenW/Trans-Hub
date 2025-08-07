@@ -83,7 +83,10 @@ class PostgresPersistenceHandler(PersistenceHandler):
 
     async def close(self) -> None:
         """关闭数据库连接池和所有相关连接。"""
-        if self._notification_listener_conn:
+        if (
+            self._notification_listener_conn
+            and not self._notification_listener_conn.is_closed()
+        ):
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
         if self._pool:
@@ -240,7 +243,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                             "SELECT id FROM th_contexts WHERE context_hash = $1",
                             context_hash,
                         )
-                    context_id = str(ctx_row["id"])
+                    context_id = str(ctx_row["id"]) if ctx_row else None
 
                 await conn.execute(
                     """
@@ -481,7 +484,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         engine_version,
                     )
                     await conn.execute(
-                        "DELETE FROM th_translations WHERE id = $1", item.translation_id
+                        "DELETE FROM th_translations WHERE id = $1::uuid",
+                        item.translation_id,
                     )
                 logger.info(
                     "任务已成功移至死信队列", translation_id=item.translation_id
@@ -501,26 +505,40 @@ class PostgresPersistenceHandler(PersistenceHandler):
         async def _internal_generator() -> AsyncGenerator[str, None]:
             if not self._pool:
                 raise DatabaseError("数据库连接池未初始化")
-            if (
-                not self._notification_listener_conn
-                or self._notification_listener_conn.is_closed()
-            ):
-                self._notification_listener_conn = await self._pool.acquire()
-                self._notification_queue = asyncio.Queue()
-                await self._notification_listener_conn.add_listener(
-                    self.NOTIFICATION_CHANNEL, self._notification_callback
-                )
-                logger.info(
-                    "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
-                )
 
-            assert self._notification_queue is not None
-            while True:
-                try:
+            # --- 核心修复 ---
+            # 将资源获取和清理逻辑包裹在 try...finally 中，确保无论如何都能执行清理
+            try:
+                if (
+                    not self._notification_listener_conn
+                    or self._notification_listener_conn.is_closed()
+                ):
+                    self._notification_listener_conn = await self._pool.acquire()
+                    self._notification_queue = asyncio.Queue()
+                    await self._notification_listener_conn.add_listener(
+                        self.NOTIFICATION_CHANNEL, self._notification_callback
+                    )
+                    logger.info(
+                        "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
+                    )
+
+                assert self._notification_queue is not None
+                while True:
                     payload = await self._notification_queue.get()
                     yield payload
-                except asyncio.CancelledError:
-                    logger.info("通知监听器被取消。")
-                    break
+            finally:
+                logger.warning("PostgreSQL 通知监听器正在关闭和清理资源...")
+                if (
+                    self._pool
+                    and self._notification_listener_conn
+                    and not self._notification_listener_conn.is_closed()
+                ):
+                    await self._notification_listener_conn.remove_listener(
+                        self.NOTIFICATION_CHANNEL, self._notification_callback
+                    )
+                    await self._pool.release(self._notification_listener_conn)
+                self._notification_listener_conn = None
+                self._notification_queue = None
+                logger.info("PostgreSQL 通知监听器资源已成功清理。")
 
         return _internal_generator()

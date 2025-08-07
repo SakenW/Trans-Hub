@@ -29,6 +29,9 @@ from .engine_registry import ENGINE_REGISTRY, discover_engines
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 
+# --- 核心修复 ---
+from .utils import validate_lang_codes
+
 if TYPE_CHECKING:
     from .engines.base import BaseTranslationEngine
 
@@ -225,6 +228,23 @@ class Coordinator:
     ) -> None:
         """[操作层入口] 提交一个新的翻译请求。"""
         self._check_is_active()
+
+        # --- 核心修复 ---
+        # 在方法入口处对所有传入的语言代码进行 BCP-47 格式校验。
+        # 这确保了无效的输入会立即失败，而不是污染下游系统。
+        try:
+            validate_lang_codes(target_langs)
+            if source_lang:
+                validate_lang_codes([source_lang])
+        except ValueError as e:
+            logger.error(
+                "Coordinator.request 收到无效的语言代码",
+                business_id=business_id,
+                target_langs=target_langs,
+                source_lang=source_lang,
+                error=str(e),
+            )
+            raise  # 重新抛出异常，让调用者处理
 
         op = self._execute_request_operation(
             business_id=business_id,

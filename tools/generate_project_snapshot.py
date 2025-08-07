@@ -1,6 +1,7 @@
 # tools/generate_project_snapshot.py
 """生成项目完整快照的工具，用于快速分享给AI协作伙伴。"""
 
+import os
 from pathlib import Path
 
 # 定义需要排除的目录和文件
@@ -12,11 +13,15 @@ EXCLUDED_DIRS = {
     ".mypy_cache",
     ".vscode",
     "dist",
+    ".ruff_cache",
 }
 EXCLUDED_SUFFIXES = {".db", ".db-wal", ".db-shm"}
 
 # 定义需要特别包含的隐藏文件和目录
 INCLUDE_SPECIFIC_HIDDEN = {".env.example", "pyproject.toml", ".github/workflows/ci.yml"}
+
+# 定义需要包含的文件类型
+INCLUDE_SUFFIXES = {".py", ".sql"}
 
 
 def should_include(path: Path, root_path: Path) -> bool:
@@ -26,7 +31,7 @@ def should_include(path: Path, root_path: Path) -> bool:
     if str(relative_path) in INCLUDE_SPECIFIC_HIDDEN:
         return True
 
-    # 排除隐藏文件和目录
+    # 排除隐藏文件和目录 (除了特别包含的)
     if (
         any(part.startswith(".") for part in path.parts)
         and str(relative_path) not in INCLUDE_SPECIFIC_HIDDEN
@@ -41,6 +46,10 @@ def should_include(path: Path, root_path: Path) -> bool:
     if path.suffix in EXCLUDED_SUFFIXES:
         return False
 
+    # 对于文件，确保它具有我们想要包含的后缀
+    if path.is_file():
+        return path.suffix in INCLUDE_SUFFIXES
+
     return True
 
 
@@ -48,39 +57,64 @@ def generate_snapshot(
     root_path: str = ".", output_file: str = "project_snapshot.txt"
 ) -> None:
     """生成项目快照文件。"""
-    root = Path(root_path)
-    # 修正输出路径，确保脚本在任何地方运行都能找到正确位置
-    output_path = root / "project_snapshot.txt"
+    root = Path(root_path).resolve()
+    # 确保输出到 tools 目录下
+    output_dir = root / "tools"
+    output_dir.mkdir(exist_ok=True)
+    output_path = output_dir / output_file
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("# Trans-Hub 项目完整快照\n\n")
 
-        # 获取并写入目录结构
+        # 获取并写入目录结构（到最深层级）
         f.write("## 目录结构\n\n")
-        all_paths = sorted(root.rglob("*"))
+        # 使用 os.walk 确保遍历到最深层级
+        for root_dir, dirs, files in os.walk(root):
+            # 过滤掉不应该包含的目录
+            dirs[:] = [
+                d
+                for d in dirs
+                if not any(excluded in root_dir for excluded in EXCLUDED_DIRS)
+                and d not in EXCLUDED_DIRS
+            ]
 
-        for path in all_paths:
-            if path.resolve() == output_path.resolve():
-                continue
-            if not should_include(path, root):
-                continue
-
-            relative_path = path.relative_to(root)
-            depth = len(relative_path.parts) - 1
+            # 计算相对路径和缩进
+            relative_path = Path(root_dir).relative_to(root)
+            depth = len(relative_path.parts)
             indent = "  " * depth
 
-            if path.is_dir():
-                f.write(f"{indent}- {path.name}/\n")
-            else:
-                f.write(f"{indent}- {path.name}\n")
+            # 写入当前目录
+            if depth > 0:
+                f.write(f"{indent}- {Path(root_dir).name}/\n")
+
+            # 写入文件
+            for file in sorted(files):
+                file_path = Path(root_dir) / file
+                file_path.relative_to(root)
+                if should_include(file_path, root):
+                    file_indent = "  " * (depth + 1)
+                    f.write(f"{file_indent}- {file}\n")
 
         # 写入文件内容
         f.write("\n## 文件内容\n\n")
 
-        for file_path in all_paths:
-            if file_path.resolve() == output_path.resolve():
+        # 再次遍历以获取文件内容
+        all_files = []
+        for root_dir, _, files in os.walk(root):
+            # 过滤掉不应该包含的目录
+            if any(excluded in root_dir for excluded in EXCLUDED_DIRS):
                 continue
-            if not file_path.is_file() or not should_include(file_path, root):
+
+            for file in files:
+                file_path = Path(root_dir) / file
+                if should_include(file_path, root):
+                    all_files.append(file_path)
+
+        # 按相对路径排序
+        all_files.sort(key=lambda x: x.relative_to(root))
+
+        for file_path in all_files:
+            if file_path.resolve() == output_path.resolve():
                 continue
 
             relative_path = file_path.relative_to(root)
@@ -99,7 +133,7 @@ def generate_snapshot(
 def main() -> None:
     """主函数。"""
     print("正在生成项目快照...")
-    # 修正：从脚本所在目录的上级目录开始生成
+    # 项目根目录是当前文件的父目录的父目录
     project_root = Path(__file__).parent.parent
     generate_snapshot(str(project_root))
 

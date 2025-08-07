@@ -84,7 +84,10 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 await self.connection.commit()
         except Exception:
             logger.error("SQLite 事务执行失败，正在回滚", exc_info=True)
-            if self.connection.is_alive() and transaction_started:
+            # --- 核心修复 ---
+            # 移除了对不存在的 .is_alive() 方法的调用。
+            # 直接检查 self._conn 实例是否存在是更安全、更正确的方式。
+            if self._conn and transaction_started:
                 await self.connection.rollback()
             raise
 
