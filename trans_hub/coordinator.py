@@ -25,7 +25,7 @@ from .core import (
     TranslationResult,
     TranslationStatus,
 )
-from .engine_registry import ENGINE_REGISTRY, discover_engines
+from .engine_registry import ENGINE_REGISTRY
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 from .utils import validate_lang_codes
@@ -47,7 +47,8 @@ class Coordinator:
         max_concurrent_requests: int | None = None,
     ) -> None:
         """初始化 Coordinator。"""
-        discover_engines()
+        # --- 核心优化：移除冗余调用，Coordinator 不再负责引擎发现 ---
+        # discover_engines()
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
