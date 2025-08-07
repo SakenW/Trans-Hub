@@ -13,11 +13,13 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
     # --- [核心修复] 检查 scheme 是否以 'sqlite' 开头 ---
     if db_url.startswith("sqlite"):
         from .sqlite import SQLitePersistenceHandler
+
         # [核心修复] 向 SQLitePersistenceHandler 传递纯净的文件路径
         return SQLitePersistenceHandler(db_path=config.db_path)
     elif db_url.startswith("postgresql"):
         try:
             from .postgres import PostgresPersistenceHandler
+
             return PostgresPersistenceHandler(dsn=db_url)
         except ImportError as e:
             raise ConfigurationError(

@@ -7,11 +7,11 @@ import structlog
 import typer
 from rich.console import Console
 
-from trans_hub.cli.state import State
+from alembic import command
 
 # [核心修改] 导入 Alembic 的配置和命令 API
 from alembic.config import Config
-from alembic import command
+from trans_hub.cli.state import State
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -20,9 +20,7 @@ db_app = typer.Typer(help="数据库管理命令")
 
 @db_app.command("migrate")
 def db_migrate(ctx: typer.Context) -> None:
-    """
-    使用 Alembic 对数据库执行所有待处理的迁移，使其达到最新版本。
-    """
+    """使用 Alembic 对数据库执行所有待处理的迁移，使其达到最新版本。"""
     state: State = ctx.obj
     db_path = state.config.database_url
 
@@ -41,10 +39,10 @@ def db_migrate(ctx: typer.Context) -> None:
 
         # 创建 Alembic 配置对象
         alembic_cfg = Config(str(alembic_cfg_path))
-        
+
         # [核心修改] 调用 Alembic 的升级命令
         command.upgrade(alembic_cfg, "head")
-        
+
         console.print("[bold green]✅ 数据库迁移成功完成！[/bold green]")
     except Exception as e:
         logger.error("数据库迁移过程中发生错误。", exc_info=True)

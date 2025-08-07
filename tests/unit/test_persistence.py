@@ -44,7 +44,6 @@ async def test_ensure_content_and_context_creates_all_entities(
     target_langs = ["de", "fr"]
     engine_version = "3.0.0"
 
-    # 修复：patch 正确的查找路径
     with patch("trans_hub.persistence.sqlite.generate_uuid") as mock_uuid:
         mock_uuid.side_effect = [
             "uuid-content-1",
@@ -72,6 +71,8 @@ async def test_ensure_content_and_context_creates_all_entities(
     assert context_id == "uuid-context-1"
 
     async with db_handler.connection.cursor() as cursor:
+        # [核心修复] aiosqlite 的类型存根不够精确，row_factory 期望一个 Callable。
+        # Row 本身是可调用的，但 mypy 无法推断出来。我们忽略这个错误。
         cursor.row_factory = Row
 
         await cursor.execute(

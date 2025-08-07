@@ -1,4 +1,5 @@
 # pyproject.toml
+# [最终审计版]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -28,17 +29,24 @@ classifiers = [
 [tool.poetry.scripts]
 trans-hub = "trans_hub.cli.main:app"
 
-# --- 核心依赖 (保持最精简) ---
+# ==============================================================================
+#  依赖关系定义 (遵循《技术宪章》)
+# ==============================================================================
+
+# --- 核心依赖 (Core Dependencies) ---
 [tool.poetry.dependencies]
 python = ">=3.10, <3.14"
 pydantic = "^2.0"
 structlog = "^23.0"
 pydantic-settings = "^2.0"
-aiosqlite = "^0.20.0"
 cachetools = "^5.3.3"
-langcodes = ">=3.5.0" # <-- [新增] 引入 langcodes 库
+langcodes = ">=3.5.0"
+sqlalchemy = "^2.0.31"
+alembic = "^1.13.1"
+greenlet = "^3.0.3"
+aiosqlite = "^0.20.0"
 
-# --- 可选功能与工具依赖 ---
+# --- 可选功能与驱动 (Optional Features & Drivers) ---
 translators = { version = ">=6.0.1", optional = true }
 openai = { version = ">=1.37.0", optional = true }
 httpx = { version = ">=0.28.1", optional = true }
@@ -47,9 +55,9 @@ typer = { version = ">=0.12.3", optional = true }
 rich = { version = ">=13.0.0", optional = true }
 fastapi = { version = ">=0.111.0", optional = true }
 uvicorn = { version = ">=0.30.1", extras = ["standard"], optional = true }
-markdown-it-py = { version = ">=3.0.0", optional = true } # For tools/docs
+markdown-it-py = { version = ">=3.0.0", optional = true }
 asyncpg = { version = ">=0.29.0", optional = true }
-questionary = { version = "^2.0.1", optional = true } # For CLI
+questionary = { version = "^2.0.1", optional = true }
 
 # --- 可选依赖分组 (Extras) ---
 [tool.poetry.extras]
@@ -60,14 +68,13 @@ cli = ["typer", "rich", "questionary"]
 api = ["fastapi", "uvicorn"]
 postgres = ["asyncpg"]
 tools = ["typer", "rich", "markdown-it-py", "openai", "httpx", "questionary"]
-# 优化：'all' extra 不应包含纯文档构建工具
 all = [
     "translators", "openai", "httpx", "prometheus-client",
     "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary",
     "asyncpg"
 ]
 
-# --- 依赖组 ---
+# --- 文档构建依赖 (Docs Dependencies) ---
 [tool.poetry.group.docs.dependencies]
 sphinx = "*"
 sphinx-rtd-theme = "*"
@@ -82,26 +89,41 @@ sphinxcontrib-mermaid = "^1.0.0"
 myst_parser = "^2.0.0"
 sphinx-intl = "^2.3.1"
 
-# --- 开发依赖 ---
-# 优化：dev 组只包含纯粹的开发/测试工具
-# 其他功能性依赖应通过 'poetry install --all-extras --with dev' 安装
+# --- 开发与测试依赖 (Development & Test Dependencies) ---
 [tool.poetry.group.dev.dependencies]
+# 代码质量与格式化
 ruff = ">=0.4.0"
 mypy = ">=1.5"
+
+# 测试框架
 pytest = ">=7.4"
 pytest-cov = ">=4.1"
 pytest-asyncio = ">=0.21.0"
-types-cachetools = ">=5.3.1"
 pytest-mock = "^3.14.1"
-alembic = "^1.13.1"
-sqlalchemy = "^2.0.31"
-# nest-asyncio = "^1.6.0"  # <-- [新增] 解决事件循环嵌套问题的关键
-psycopg2-binary = "^2.9.9" # <-- [新增] 为 SQLAlchemy/Alembic 提供同步驱动
-greenlet = "^3.0.3" # <-- [新增] SQLAlchemy 异步模式需要
+
+# 类型存根
+types-cachetools = ">=5.3.1"
+
+# 数据库工具 (仅在开发/迁移时需要)
+psycopg2-binary = "^2.9.9"
+asyncpg  = "^0.30.0"
+
+# [核心修复] 明确声明所有测试运行时的依赖
+rich = ">=13.0.0"
+typer = ">=0.12.3"
+questionary = "^2.0.1"
+
+# 引擎特定依赖 (用于测试)
+httpx = ">=0.28.1" # <-- [核心修复] 为 OpenAI 引擎测试添加
+openai = ">=1.37.0" # <-- [核心修复] 为 OpenAI 引擎测试添加
+# 我们不把 translators 添加到 dev，让测试根据其是否可用而跳过
+
+# ==============================================================================
+#  工具链配置 (Toolchain Configuration)
+# ==============================================================================
 
 [tool.ruff]
 line-length = 88
-# 优化：将目标版本与项目支持的最低版本对齐
 target-version = "py310"
 
 [tool.ruff.lint]
@@ -110,29 +132,41 @@ ignore = [
     "E501",
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
     "D400", "D401", "D415", "D203", "D212", "D205",
-    "UP007", # 建议使用 X | Y，但我们为了兼容旧版本注解，暂时忽略
-    "E402",  # 修正：将 ruff.toml 的 E402 忽略规则合并于此
+    "UP007",
+    "E402",
 ]
 
 [tool.mypy]
-# 优化：将目标版本与项目支持的最低版本对齐
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 strict = true
 show_error_codes = true
 pretty = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
 
 [[tool.mypy.overrides]]
 module = [
     "translators",
     "markdown_it",
     "prometheus_client",
-    "questionary", # questionary 也没有类型提示
+    "questionary",
     "asyncpg",
-    "asyncpg.exceptions"
+    "asyncpg.exceptions",
+    "typer",
+    "typer.testing",
+    "httpx",
+    "openai",
+    "openai.types.chat",
+    "rich",
+    "rich.console",
+    "rich.panel",
+    "rich.syntax",
+    "rich.table",
+    "rich.text",
+    # [核心修复] 添加 langcodes 和 pytest_mock 以解决 [import-not-found]
+    "langcodes",
+    "langcodes.tag_parser",
+    "pytest_mock"
 ]
 ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-asyncio_mode = "strict"

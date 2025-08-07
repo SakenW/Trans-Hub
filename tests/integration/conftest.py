@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 
 from alembic import command
 from alembic.config import Config
-
 from trans_hub import Coordinator, EngineName, TransHubConfig
 from trans_hub.core.interfaces import PersistenceHandler
 from trans_hub.engine_registry import discover_engines
@@ -46,16 +45,23 @@ def setup_test_environment() -> Generator[None, None, None]:
         shutil.rmtree(TEST_DIR)
 
 
-def _run_migrations(db_url: str):
+def _run_migrations(db_url: str) -> None:
     """
-    一个同步的辅助函数，用于在测试环境中以编程方式运行 Alembic 迁移。
+    一个同步的辅助函数，它负责将异步 URL 转换为同步 URL，
+    然后配置并运行 Alembic 迁移。
     """
+    # ... (函数体保持不变) ...
     alembic_cfg_path = Path(__file__).parent.parent.parent / "alembic.ini"
     if not alembic_cfg_path.is_file():
         raise FileNotFoundError(f"Alembic config not found at {alembic_cfg_path}")
 
     alembic_cfg = Config(str(alembic_cfg_path))
-    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    sync_db_url = db_url.replace("postgresql+asyncpg", "postgresql").replace(
+        "sqlite+aiosqlite", "sqlite"
+    )
+
+    alembic_cfg.set_main_option("sqlalchemy.url", sync_db_url)
     command.upgrade(alembic_cfg, "head")
 
 
@@ -101,9 +107,11 @@ async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
     main_dsn_sqlalchemy = PG_DATABASE_URL
     parsed = urlparse(main_dsn_sqlalchemy)
     db_name = f"test_db_{os.urandom(4).hex()}"
-    
+
     # --- [核心修复] 创建一个 asyncpg 能理解的 DSN 用于管理操作 ---
-    main_dsn_asyncpg = main_dsn_sqlalchemy.replace("postgresql+asyncpg", "postgresql", 1)
+    main_dsn_asyncpg = main_dsn_sqlalchemy.replace(
+        "postgresql+asyncpg", "postgresql", 1
+    )
     parsed_asyncpg = urlparse(main_dsn_asyncpg)
     server_dsn_asyncpg = parsed_asyncpg._replace(path="").geturl()
 
@@ -115,7 +123,7 @@ async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
     finally:
         if conn:
             await conn.close()
-    
+
     # 用于 Alembic 和 TransHubConfig 的 DSN (SQLAlchemy 格式)
     test_db_dsn_sqlalchemy = parsed._replace(path=f"/{db_name}").geturl()
 
@@ -124,9 +132,9 @@ async def postgres_handler() -> AsyncGenerator[PersistenceHandler, None]:
     handler_config = TransHubConfig(database_url=test_db_dsn_sqlalchemy)
     handler = create_persistence_handler(handler_config)
     await handler.connect()
-    
+
     yield handler
-    
+
     await handler.close()
 
     try:

@@ -303,7 +303,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                     WHERE content_id = ? AND {context_clause} AND lang_code IN ({placeholders})
                 """
                 await tx.execute(sql, tuple(update_params))
-            
+
             insert_sql = """
                 INSERT OR IGNORE INTO th_translations
                 (id, content_id, context_id, lang_code, source_lang, engine_version, created_at, last_updated_at, status)

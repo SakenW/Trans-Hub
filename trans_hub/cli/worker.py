@@ -25,9 +25,7 @@ worker_app = typer.Typer(help="启动后台翻译 Worker")
 async def consume_all(coordinator: Coordinator, lang: str, reason: str) -> int:
     """消费指定语言的所有待办任务并返回处理数量。"""
     processed_count = 0
-    logger.info(f"开始处理任务 ({reason})...")
-    # v3.20 修复：`process_pending_translations` 现在是一个同步方法，返回一个异步生成器
-    # 我们需要在 `async for` 中直接使用它。
+    logger.info(f"开始处理任务 ({reason})...", lang=lang)
     async for result in coordinator.process_pending_translations(lang):
         processed_count += 1
         original_text = result.original_payload.get(
@@ -42,7 +40,7 @@ async def consume_all(coordinator: Coordinator, lang: str, reason: str) -> int:
             error=result.error,
         )
     if processed_count > 0:
-        logger.info(f"本轮处理完成，共处理 {processed_count} 个任务。")
+        logger.info(f"本轮处理完成，共处理 {processed_count} 个任务。", lang=lang)
     return processed_count
 
 
@@ -64,12 +62,15 @@ async def notification_loop(
     coordinator: Coordinator, lang: str, shutdown_event: asyncio.Event
 ) -> None:
     """基于 LISTEN/NOTIFY 的事件驱动循环。"""
-    # v3.20 修复：`listen_for_notifications` 是一个同步方法，返回异步生成器
     notification_generator = coordinator.handler.listen_for_notifications()
     logger.info("正在等待新任务通知...", lang=lang)
     while not shutdown_event.is_set():
         try:
-            notification_task = asyncio.create_task(notification_generator.__anext__())
+            # [核心修复] 为任务添加明确的类型注解，以解决 [var-annotated] 错误。
+            # 我们知道 listen_for_notifications 会 yield 字符串。
+            notification_task: asyncio.Task[str] = asyncio.create_task(
+                notification_generator.__anext__()
+            )
             shutdown_task = asyncio.create_task(shutdown_event.wait())
             done, pending = await asyncio.wait(
                 [notification_task, shutdown_task],
@@ -91,7 +92,7 @@ async def notification_loop(
         except asyncio.CancelledError:
             break
         except StopAsyncIteration:
-            logger.warning("通知生成器已停止，Worker 将退出。")
+            logger.warning("通知生成器已停止，Worker 将退出。", lang=lang)
             break
         except Exception:
             logger.error("通知循环中发生未知错误", lang=lang, exc_info=True)

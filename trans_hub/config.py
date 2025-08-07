@@ -67,16 +67,21 @@ class TransHubConfig(BaseSettings):
         # --- [核心修复] 检查 scheme 是否以 'sqlite' 开头 ---
         if not parsed_url.scheme.startswith("sqlite"):
             raise ValueError("db_path 属性仅在 database_url 为 sqlite 类型时可用。")
-        
+
         # 从 URL 中提取路径部分 (例如, '///path/to/db.sqlite' -> '/path/to/db.sqlite')
         path = parsed_url.path
-        
+
         # 移除 Windows 驱动器号前的斜杠 (例如, '/C:/...' -> 'C:/...')
-        if os.name == 'nt' and path.startswith('/') and len(path) > 2 and path[2] == ':':
+        if (
+            os.name == "nt"
+            and path.startswith("/")
+            and len(path) > 2
+            and path[2] == ":"
+        ):
             path = path[1:]
-            
+
         # 移除 Unix/macOS 绝对路径前的多余斜杠
-        while path.startswith('//'):
+        while path.startswith("//"):
             path = path[1:]
 
         return path
