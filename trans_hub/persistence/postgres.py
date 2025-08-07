@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -58,9 +59,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
         """建立与数据库的连接池。"""
         if self._pool is None:
             try:
-                # v3.x 最终修复: 编解码器必须是同步函数。
+
                 def _jsonb_encoder(value: Any) -> str:
-                    return json.dumps(value)
+                    return json.dumps(value, ensure_ascii=False)
 
                 def _jsonb_decoder(value: str) -> Any:
                     return json.loads(value)
@@ -99,10 +100,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
         sql = """
-            UPDATE th_translations
-            SET
-                status = 'PENDING',
-                error = NULL
+            UPDATE th_translations SET status = 'PENDING', error = NULL
             WHERE status = 'TRANSLATING'
               AND last_updated_at < (now() at time zone 'utc') - interval '1 hour'
             RETURNING id;
@@ -124,13 +122,10 @@ class PostgresPersistenceHandler(PersistenceHandler):
         batch_size: int,
         limit: int | None = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
-        """[实现] 使用 `SELECT ... FOR UPDATE SKIP LOCKED` 从 PG 流式获取任务。"""
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
-
         processed_count = 0
         status_values = tuple(s.value for s in statuses)
-
         while limit is None or processed_count < limit:
             current_batch_size = min(
                 batch_size,
@@ -138,50 +133,32 @@ class PostgresPersistenceHandler(PersistenceHandler):
             )
             if current_batch_size <= 0:
                 break
-
             items: list[ContentItem] = []
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     locked_ids_sql = """
-                        SELECT id
-                        FROM th_translations
+                        SELECT id FROM th_translations
                         WHERE lang_code = $1 AND status = ANY($2)
                         ORDER BY context_id, last_updated_at ASC
-                        LIMIT $3
-                        FOR UPDATE SKIP LOCKED;
+                        LIMIT $3 FOR UPDATE SKIP LOCKED;
                     """
                     locked_rows = await conn.fetch(
                         locked_ids_sql, lang_code, status_values, current_batch_size
                     )
                     if not locked_rows:
                         break
-
                     batch_ids = [row["id"] for row in locked_rows]
                     await conn.execute(
-                        """
-                        UPDATE th_translations
-                        SET
-                            status = 'TRANSLATING',
-                            last_updated_at = (now() at time zone 'utc')
-                        WHERE id = ANY($1);
-                        """,
+                        "UPDATE th_translations SET status = 'TRANSLATING', last_updated_at = (now() at time zone 'utc') WHERE id = ANY($1);",
                         batch_ids,
                     )
-
                     details_sql = """
-                        SELECT
-                            t.id AS translation_id,
-                            c.business_id,
-                            t.content_id,
-                            t.context_id,
-                            t.source_lang,
-                            c.source_payload_json,
-                            ctx.context_payload_json
+                        SELECT t.id AS translation_id, c.business_id, t.content_id, t.context_id, t.source_lang,
+                               c.source_payload_json, ctx.context_payload_json
                         FROM th_translations t
                         JOIN th_content c ON t.content_id = c.id
                         LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-                        WHERE t.id = ANY($1)
-                        ORDER BY t.context_id, t.last_updated_at ASC;
+                        WHERE t.id = ANY($1) ORDER BY t.context_id, t.last_updated_at ASC;
                     """
                     detail_rows = await conn.fetch(details_sql, batch_ids)
                     items = [
@@ -214,10 +191,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
         async with self._pool.acquire() as conn:
             try:
                 content_sql = """
-                    INSERT INTO th_content (business_id, source_payload_json)
-                    VALUES ($1, $2)
-                    ON CONFLICT (business_id)
-                    DO UPDATE SET
+                    INSERT INTO th_content (business_id, source_payload_json) VALUES ($1, $2)
+                    ON CONFLICT (business_id) DO UPDATE SET
                         source_payload_json = EXCLUDED.source_payload_json,
                         updated_at = (now() at time zone 'utc')
                     RETURNING id;
@@ -225,17 +200,14 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 content_row = await conn.fetchrow(
                     content_sql, business_id, source_payload
                 )
+                assert content_row
                 content_id = str(content_row["id"])
-
                 context_id: str | None = None
                 if context:
                     context_hash = get_context_hash(context)
                     context_sql = """
-                        INSERT INTO th_contexts (context_hash, context_payload_json)
-                        VALUES ($1, $2)
-                        ON CONFLICT (context_hash)
-                        DO NOTHING
-                        RETURNING id;
+                        INSERT INTO th_contexts (context_hash, context_payload_json) VALUES ($1, $2)
+                        ON CONFLICT (context_hash) DO NOTHING RETURNING id;
                     """
                     ctx_row = await conn.fetchrow(context_sql, context_hash, context)
                     if not ctx_row:
@@ -243,14 +215,12 @@ class PostgresPersistenceHandler(PersistenceHandler):
                             "SELECT id FROM th_contexts WHERE context_hash = $1",
                             context_hash,
                         )
-                    context_id = str(ctx_row["id"]) if ctx_row else None
-
+                    assert ctx_row
+                    context_id = str(ctx_row["id"])
                 await conn.execute(
                     """
-                    INSERT INTO th_jobs (content_id, last_requested_at)
-                    VALUES ($1, (now() at time zone 'utc'))
-                    ON CONFLICT (content_id)
-                    DO UPDATE SET last_requested_at = (now() at time zone 'utc');
+                    INSERT INTO th_jobs (content_id, last_requested_at) VALUES ($1, (now() at time zone 'utc'))
+                    ON CONFLICT (content_id) DO UPDATE SET last_requested_at = (now() at time zone 'utc');
                     """,
                     content_id,
                 )
@@ -273,31 +243,18 @@ class PostgresPersistenceHandler(PersistenceHandler):
             async with self._pool.acquire() as conn:
                 if force_retranslate:
                     sql = """
-                        INSERT INTO th_translations AS t (
-                            content_id, context_id, lang_code, source_lang,
-                            engine_version
-                        )
-                        SELECT $1, $2, lang.code, $3, $4
-                        FROM unnest($5::text[]) AS lang(code)
-                        ON CONFLICT (content_id, context_id, lang_code)
-                        DO UPDATE SET
-                            status = 'PENDING',
-                            source_lang = EXCLUDED.source_lang,
-                            engine_version = EXCLUDED.engine_version,
-                            translation_payload_json = NULL,
-                            error = NULL,
-                            last_updated_at = (now() at time zone 'utc');
+                        INSERT INTO th_translations AS t (content_id, context_id, lang_code, source_lang, engine_version)
+                        SELECT $1, $2, lang.code, $3, $4 FROM unnest($5::text[]) AS lang(code)
+                        ON CONFLICT (content_id, context_id, lang_code) DO UPDATE SET
+                            status = 'PENDING', source_lang = EXCLUDED.source_lang,
+                            engine_version = EXCLUDED.engine_version, translation_payload_json = NULL,
+                            error = NULL, last_updated_at = (now() at time zone 'utc');
                     """
                 else:
                     sql = """
-                        INSERT INTO th_translations (
-                            content_id, context_id, lang_code, source_lang,
-                            engine_version
-                        )
-                        SELECT $1, $2, lang.code, $3, $4
-                        FROM unnest($5::text[]) AS lang(code)
-                        ON CONFLICT (content_id, context_id, lang_code)
-                        DO NOTHING;
+                        INSERT INTO th_translations (content_id, context_id, lang_code, source_lang, engine_version)
+                        SELECT $1, $2, lang.code, $3, $4 FROM unnest($5::text[]) AS lang(code)
+                        ON CONFLICT (content_id, context_id, lang_code) DO NOTHING;
                     """
                 await conn.execute(
                     sql,
@@ -324,13 +281,8 @@ class PostgresPersistenceHandler(PersistenceHandler):
             for res in results
         ]
         sql = """
-            UPDATE th_translations
-            SET
-                status = $1,
-                translation_payload_json = $2,
-                engine = $3,
-                error = $4,
-                last_updated_at = (now() at time zone 'utc')
+            UPDATE th_translations SET status = $1, translation_payload_json = $2,
+                engine = $3, error = $4, last_updated_at = (now() at time zone 'utc')
             WHERE id = $5::uuid AND status = 'TRANSLATING';
         """
         try:
@@ -340,32 +292,18 @@ class PostgresPersistenceHandler(PersistenceHandler):
             raise DatabaseError(f"保存翻译结果失败: {e}") from e
 
     async def find_translation(
-        self,
-        business_id: str,
-        target_lang: str,
-        context: dict[str, Any] | None = None,
+        self, business_id: str, target_lang: str, context: dict[str, Any] | None = None
     ) -> TranslationResult | None:
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
         context_hash = get_context_hash(context)
         sql = """
-            SELECT
-                t.id AS translation_id,
-                c.source_payload_json,
-                t.translation_payload_json,
-                t.status,
-                t.engine,
-                t.error
-            FROM th_translations t
-            JOIN th_content c
-                ON t.content_id = c.id
-            LEFT JOIN th_contexts ctx
-                ON t.context_id = ctx.id
-            WHERE c.business_id = $1
-              AND t.lang_code = $2
-              AND COALESCE(ctx.context_hash, '__GLOBAL__') = $3
-            ORDER BY t.last_updated_at DESC
-            LIMIT 1;
+            SELECT t.id AS translation_id, c.source_payload_json, t.translation_payload_json,
+                   t.status, t.engine, t.error
+            FROM th_translations t JOIN th_content c ON t.content_id = c.id
+            LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
+            WHERE c.business_id = $1 AND t.lang_code = $2 AND COALESCE(ctx.context_hash, '__GLOBAL__') = $3
+            ORDER BY t.last_updated_at DESC LIMIT 1;
         """
         try:
             async with self._pool.acquire() as conn:
@@ -388,62 +326,62 @@ class PostgresPersistenceHandler(PersistenceHandler):
         )
 
     async def garbage_collect(
-        self,
-        retention_days: int,
-        dry_run: bool = False,
-        _now: datetime | None = None,
+        self, retention_days: int, dry_run: bool = False, _now: datetime | None = None
     ) -> dict[str, int]:
         if not self._pool:
             raise DatabaseError("数据库连接池未初始化")
         stats = {"deleted_jobs": 0, "deleted_content": 0, "deleted_contexts": 0}
         now = _now if _now is not None else datetime.now(timezone.utc)
-        cutoff_date = now - timedelta(days=retention_days)
+        cutoff_date = now.date() - timedelta(days=retention_days)
+
+        def _parse_delete_status(status: str) -> int:
+            match = re.search(r"DELETE\s(\d+)", status)
+            return int(match.group(1)) if match else 0
 
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    del_jobs_sql = """
-                        DELETE FROM th_jobs
-                        WHERE last_requested_at < $1
-                        RETURNING id;
-                    """
+                    # --- 核心修复：修正了日期比较逻辑 ---
+                    # 直接将 TIMESTAMPTZ 字段转换为 date 类型进行比较
+                    job_where_clause = "WHERE (last_requested_at::date) < $1"
                     if dry_run:
-                        del_jobs_sql = """
-                            SELECT id
-                            FROM th_jobs
-                            WHERE last_requested_at < $1;
-                        """
-                    stats["deleted_jobs"] = len(
-                        await conn.fetch(del_jobs_sql, cutoff_date)
-                    )
+                        res = await conn.fetchval(
+                            f"SELECT COUNT(*) FROM th_jobs {job_where_clause}",
+                            cutoff_date,
+                        )
+                        stats["deleted_jobs"] = res if res else 0
+                    else:
+                        status = await conn.execute(
+                            f"DELETE FROM th_jobs {job_where_clause}", cutoff_date
+                        )
+                        stats["deleted_jobs"] = _parse_delete_status(status)
 
-                    del_content_sql = """
-                        DELETE FROM th_content c
+                    orphan_content_sql = """
+                        FROM th_content c
                         WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
                           AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id)
-                        RETURNING id;
                     """
                     if dry_run:
-                        del_content_sql = """
-                            SELECT id
-                            FROM th_content c
-                            WHERE NOT EXISTS (SELECT 1 FROM th_jobs j WHERE j.content_id = c.id)
-                              AND NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.content_id = c.id);
-                        """
-                    stats["deleted_content"] = len(await conn.fetch(del_content_sql))
+                        res = await conn.fetchval(
+                            f"SELECT COUNT(*) {orphan_content_sql}"
+                        )
+                        stats["deleted_content"] = res if res else 0
+                    else:
+                        status = await conn.execute(f"DELETE {orphan_content_sql}")
+                        stats["deleted_content"] = _parse_delete_status(status)
 
-                    del_contexts_sql = """
-                        DELETE FROM th_contexts ctx
+                    orphan_context_sql = """
+                        FROM th_contexts ctx
                         WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id)
-                        RETURNING id;
                     """
                     if dry_run:
-                        del_contexts_sql = """
-                            SELECT id
-                            FROM th_contexts ctx
-                            WHERE NOT EXISTS (SELECT 1 FROM th_translations t WHERE t.context_id = ctx.id);
-                        """
-                    stats["deleted_contexts"] = len(await conn.fetch(del_contexts_sql))
+                        res = await conn.fetchval(
+                            f"SELECT COUNT(*) {orphan_context_sql}"
+                        )
+                        stats["deleted_contexts"] = res if res else 0
+                    else:
+                        status = await conn.execute(f"DELETE {orphan_context_sql}")
+                        stats["deleted_contexts"] = _parse_delete_status(status)
 
                     if dry_run:
                         raise _DryRunError()
@@ -469,11 +407,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                 async with conn.transaction():
                     await conn.execute(
                         """
-                        INSERT INTO th_dead_letter_queue (
-                            translation_id, original_payload_json,
-                            context_payload_json, target_lang_code,
-                            last_error_message, engine_name, engine_version
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        INSERT INTO th_dead_letter_queue (translation_id, original_payload_json,
+                            context_payload_json, target_lang_code, last_error_message, engine_name, engine_version)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         item.translation_id,
                         item.source_payload,
@@ -500,14 +436,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
             await self._notification_queue.put(payload)
 
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
-        """[实现] 使用 `LISTEN/NOTIFY` 监听数据库通知。"""
-
         async def _internal_generator() -> AsyncGenerator[str, None]:
             if not self._pool:
                 raise DatabaseError("数据库连接池未初始化")
-
-            # --- 核心修复 ---
-            # 将资源获取和清理逻辑包裹在 try...finally 中，确保无论如何都能执行清理
             try:
                 if (
                     not self._notification_listener_conn
@@ -521,7 +452,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     logger.info(
                         "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
                     )
-
                 assert self._notification_queue is not None
                 while True:
                     payload = await self._notification_queue.get()

@@ -6,6 +6,7 @@
 一个可用的 PostgreSQL 连接字符串来运行。
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -82,14 +83,15 @@ async def test_pg_garbage_collect_workflow_and_date_boundary(
     # GIVEN: 准备测试数据和确定的时间
     retention_days = 2
     now_for_test = datetime(2024, 1, 5, 12, 0, 0, tzinfo=timezone.utc)
+    # cutoff_date 的计算结果应该是 2024-01-03。任何在此日期之前的数据都应被删除。
 
     stale_bid = "pg.item.stale"
-    # 此项刚好过期
-    stale_timestamp = now_for_test - timedelta(days=retention_days, microseconds=1)
+    # 此项时间戳现在明确早于截止日期
+    stale_timestamp = datetime(2024, 1, 2, 23, 59, 59, tzinfo=timezone.utc)
 
     fresh_bid = "pg.item.fresh"
-    # 此项刚好未过期
-    fresh_timestamp = now_for_test - timedelta(days=retention_days)
+    # 此项时间戳现在正好是截止日期的第一秒，不应被删除
+    fresh_timestamp = datetime(2024, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
 
     # 步骤 1: 创建所有数据
     stale_content_id, _ = await postgres_handler.ensure_content_and_context(
@@ -107,6 +109,7 @@ async def test_pg_garbage_collect_workflow_and_date_boundary(
         "trans_hub.persistence.postgres"
     ).persistence.postgres.PostgresPersistenceHandler
     assert isinstance(postgres_handler, postgres_handler_impl)
+    assert postgres_handler._pool is not None
     async with postgres_handler._pool.acquire() as conn:
         await conn.execute(
             "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = $2",
@@ -128,6 +131,7 @@ async def test_pg_garbage_collect_workflow_and_date_boundary(
     assert report1["deleted_content"] == 0
 
     # 步骤 3: 手动删除 stale_content 的关联翻译，使其彻底孤立
+    assert postgres_handler._pool is not None
     async with postgres_handler._pool.acquire() as conn:
         await conn.execute(
             "DELETE FROM th_translations WHERE content_id = $1", stale_content_id
@@ -141,6 +145,7 @@ async def test_pg_garbage_collect_workflow_and_date_boundary(
     assert report2["deleted_content"] == 1
 
     # 最终验证
+    assert postgres_handler._pool is not None
     async with postgres_handler._pool.acquire() as conn:
         stale_content = await conn.fetchrow(
             "SELECT 1 FROM th_content WHERE id = $1", stale_content_id
@@ -150,3 +155,82 @@ async def test_pg_garbage_collect_workflow_and_date_boundary(
         )
         assert stale_content is None
         assert fresh_content is not None
+
+
+@pytest.mark.asyncio
+async def test_pg_listen_for_notifications_cleans_up_on_cancel(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """
+    测试当一个正在监听通知的协程被取消时，它能正确地移除监听器
+    并将数据库连接释放回池中，防止资源泄漏。
+    """
+    # GIVEN: 一个活动的 PG 持久化处理器
+    handler_impl = __import__(
+        "trans_hub.persistence.postgres"
+    ).persistence.postgres.PostgresPersistenceHandler
+    assert isinstance(postgres_handler, handler_impl)
+    pool = postgres_handler._pool
+    assert pool is not None
+
+    # --- 核心修复 ---
+    # 使用正确的 API: get_idle_size()
+    initial_idle_size = pool.get_idle_size()
+
+    # WHEN: 启动一个监听任务然后立即取消它
+    notification_generator = postgres_handler.listen_for_notifications()
+    consume_task = asyncio.create_task(notification_generator.__anext__())
+
+    await asyncio.sleep(0.01)
+
+    # --- 核心修复 ---
+    assert pool.get_idle_size() == initial_idle_size - 1
+
+    consume_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consume_task
+
+    await asyncio.sleep(0.01)
+
+    # THEN: 验证连接是否已归还给池
+    # --- 核心修复 ---
+    final_idle_size = pool.get_idle_size()
+    assert final_idle_size == initial_idle_size, "连接未被释放回池中"
+    assert postgres_handler._notification_listener_conn is None, "监听器连接未被清理"
+    assert postgres_handler._notification_queue is None, "通知队列未被清理"
+
+
+@pytest.mark.asyncio
+async def test_pg_garbage_collect_uses_direct_delete(
+    postgres_handler: PersistenceHandler,
+) -> None:
+    """
+    验证 PostgreSQL 的垃圾回收使用直接的 DELETE 而不是 'DELETE ... RETURNING'，
+    以优化内存和网络开销，并正确使用日期比较。
+    """
+    handler_impl = __import__(
+        "trans_hub.persistence.postgres"
+    ).persistence.postgres.PostgresPersistenceHandler
+    assert isinstance(postgres_handler, handler_impl)
+    assert postgres_handler._pool is not None
+
+    now = datetime.now(timezone.utc)
+    stale_timestamp = now - timedelta(days=6)
+    stale_content_id, _ = await postgres_handler.ensure_content_and_context(
+        "pg.gc.direct.item", {"text": "stale"}, None
+    )
+    async with postgres_handler._pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE th_jobs SET last_requested_at = $1 WHERE content_id = $2",
+            stale_timestamp,
+            stale_content_id,
+        )
+
+    report = await postgres_handler.garbage_collect(retention_days=5, dry_run=False)
+
+    assert report["deleted_jobs"] == 1
+    async with postgres_handler._pool.acquire() as conn:
+        job_row = await conn.fetchrow(
+            "SELECT 1 FROM th_jobs WHERE content_id = $1", stale_content_id
+        )
+        assert job_row is None

@@ -7,7 +7,7 @@ v3.0.0 更新：全面重写以测试基于新架构的端到端工作流。
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -142,15 +142,17 @@ async def test_garbage_collection_workflow_and_date_boundary(
     # GIVEN: 准备测试数据和确定的时间
     retention_days = 2
     now_for_test = datetime(2024, 1, 5, 12, 0, 0, tzinfo=timezone.utc)
+    # cutoff_date 的计算结果应该是 2024-01-03。任何在此日期之前的数据都应被删除。
 
     stale_bid = "item.stale"
-    # 此项刚好过期
-    stale_timestamp = now_for_test - timedelta(days=retention_days, microseconds=1)
+    # --- 核心修复：此项时间戳现在明确早于截止日期 ---
+    stale_timestamp = datetime(2024, 1, 2, 23, 59, 59, tzinfo=timezone.utc)
 
     fresh_bid = "item.fresh"
-    # 此项刚好未过期
-    fresh_timestamp = now_for_test - timedelta(days=retention_days)
+    # --- 核心修复：此项时间戳现在正好是截止日期的第一秒，不应被删除 ---
+    fresh_timestamp = datetime(2024, 1, 3, 0, 0, 0, tzinfo=timezone.utc)
 
+    # ... (测试的其余部分保持不变) ...
     # 步骤 1: 创建所有数据
     await coordinator.request(
         business_id=stale_bid, source_payload={"text": "stale"}, target_langs=["de"]
@@ -160,7 +162,7 @@ async def test_garbage_collection_workflow_and_date_boundary(
     )
     _ = [res async for res in coordinator.process_pending_translations("de")]
 
-    # 步骤 2: 手动设置时间戳以模拟过期和非过期数据
+    # 步骤 2: 手动设置时间戳
     handler = coordinator.handler
     assert isinstance(handler, SQLitePersistenceHandler)
     db_path = handler.db_path
@@ -177,7 +179,7 @@ async def test_garbage_collection_workflow_and_date_boundary(
         )
         await db.commit()
 
-    # WHEN: 运行第一次GC，应该只删除过期的 job
+    # WHEN: 运行第一次GC
     report1 = await coordinator.run_garbage_collection(
         expiration_days=retention_days, dry_run=False, _now=now_for_test
     )
