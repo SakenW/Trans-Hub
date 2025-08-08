@@ -1,7 +1,6 @@
 # trans_hub/cli/worker.py
 """
 处理后台 Worker 运行的 CLI 命令。
-v3.0.0 更新：调整日志输出以适配结构化载荷（payload）。
 """
 
 import asyncio
@@ -66,8 +65,6 @@ async def notification_loop(
     logger.info("正在等待新任务通知...", lang=lang)
     while not shutdown_event.is_set():
         try:
-            # [核心修复] 为任务添加明确的类型注解，以解决 [var-annotated] 错误。
-            # 我们知道 listen_for_notifications 会 yield 字符串。
             notification_task: asyncio.Task[str] = asyncio.create_task(
                 notification_generator.__anext__()
             )
@@ -79,6 +76,9 @@ async def notification_loop(
 
             for task in pending:
                 task.cancel()
+                # [核心修复] 必须 await 被取消的任务以允许其清理和传播 CancelledError。
+                # 使用 return_exceptions=True 确保即使任务已取消，gather 也不会抛出异常。
+                await asyncio.gather(task, return_exceptions=True)
 
             if shutdown_task in done:
                 break
@@ -105,9 +105,7 @@ async def _run_worker_loop(
     loop = asyncio.get_running_loop()
 
     def _signal_handler(signum: int, frame: Any) -> None:
-        logger.warning(
-            "收到停机信号，正在准备优雅关闭...", signal=signal.strsignal(signum)
-        )
+        logger.warning("收到停机信号，正在准备优雅关闭...", signal=signal.strsignal(signum))
         if not shutdown_event.is_set():
             loop.call_soon_threadsafe(shutdown_event.set)
 
@@ -123,23 +121,19 @@ async def _run_worker_loop(
 
     async def process_language(lang: str) -> None:
         await consume_all(coordinator, lang, f"启动时检查积压任务 ({lang})")
-
         if not use_notifications:
             await polling_loop(coordinator, lang, shutdown_event)
-            return
+        else:
+            await notification_loop(coordinator, lang, shutdown_event)
 
-        await notification_loop(coordinator, lang, shutdown_event)
-
-    worker_tasks = [
-        asyncio.create_task(process_language(lang)) for lang in target_langs
-    ]
+    worker_tasks = [asyncio.create_task(process_language(lang)) for lang in target_langs]
     for task in worker_tasks:
         coordinator.track_task(task)
 
     await shutdown_event.wait()
 
 
-@worker_app.command("start")
+@worker_app.command("start") # type: ignore[misc]
 def worker_start(
     ctx: typer.Context,
     target_langs: Annotated[

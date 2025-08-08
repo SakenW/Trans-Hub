@@ -1,5 +1,7 @@
 # trans_hub/coordinator.py
-"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
+"""
+本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
+"""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -21,16 +23,12 @@ from .core import (
     TranslationStatus,
 )
 from .engine_registry import ENGINE_REGISTRY
-
-# [核心修复] 将 BaseTranslationEngine 的导入移出 TYPE_CHECKING 块，
-# 以解决类型注解在运行时（类定义时）引发的 NameError。
-from .engines.base import BaseTranslationEngine
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 from .utils import validate_lang_codes
+from .engines.base import BaseTranslationEngine
 
 if TYPE_CHECKING:
-    # 保持块结构以备将来用于纯类型提示的导入
     pass
 
 logger = structlog.get_logger(__name__)
@@ -46,13 +44,11 @@ class Coordinator:
         rate_limiter: RateLimiter | None = None,
         max_concurrent_requests: int | None = None,
     ) -> None:
-        """初始化 Coordinator。"""
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
         self.rate_limiter = rate_limiter
         self.initialized = False
-        # 现在 BaseTranslationEngine 在运行时是已知的
         self._engine_instances: dict[str, BaseTranslationEngine[Any]] = {}
         self._request_semaphore: asyncio.Semaphore | None = None
         if max_concurrent_requests and max_concurrent_requests > 0:
@@ -70,42 +66,32 @@ class Coordinator:
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
     def _check_is_active(self) -> None:
-        """检查协调器是否处于活动状态。"""
         if self._shutting_down or not self.initialized:
             raise RuntimeError("Coordinator is not active (closed or not initialized).")
 
     @property
     def active_engine(self) -> "BaseTranslationEngine[Any]":
-        """获取当前活动的翻译引擎实例。"""
         self._check_is_active()
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> "BaseTranslationEngine[Any]":
-        """根据引擎名称获取或创建引擎实例（惰性加载和动态配置解析）。"""
         if engine_name not in self._engine_instances:
             engine_class = ENGINE_REGISTRY.get(engine_name)
             if not engine_class:
-                raise EngineNotFoundError(
-                    f"引擎 '{engine_name}' 未在引擎注册表中找到。"
-                )
+                raise EngineNotFoundError(f"引擎 '{engine_name}' 未在引擎注册表中找到。")
             engine_config_model = engine_class.CONFIG_MODEL
             raw_config_data = self.config.engine_configs.get(engine_name, {})
             try:
                 engine_config_instance = engine_config_model(**raw_config_data)
             except Exception as e:
-                raise ConfigurationError(
-                    f"解析引擎 '{engine_name}' 的配置失败: {e}"
-                ) from e
-            self._engine_instances[engine_name] = engine_class(
-                config=engine_config_instance
-            )
+                raise ConfigurationError(f"解析引擎 '{engine_name}' 的配置失败: {e}") from e
+            self._engine_instances[engine_name] = engine_class(config=engine_config_instance)
             logger.info("引擎实例创建成功。", engine_name=engine_name)
         return self._engine_instances[engine_name]
 
     async def switch_engine(self, engine_name: str) -> None:
-        """切换当前的活动翻译引擎。"""
         self._check_is_active()
         if engine_name == self.config.active_engine.value:
             return
@@ -126,6 +112,7 @@ class Coordinator:
         logger.info("协调器初始化开始...")
         await self.handler.connect()
         await self.handler.reset_stale_tasks()
+
         init_tasks = [
             instance.initialize()
             for instance in self._engine_instances.values()
@@ -136,8 +123,12 @@ class Coordinator:
         )
         if not active_engine_instance.initialized:
             init_tasks.append(active_engine_instance.initialize())
+
         if init_tasks:
-            await asyncio.gather(*list(set(init_tasks)))
+            # [核心修复] 移除无效的 `list(set(...))` 去重逻辑。
+            # 协程对象是唯一的，不需要去重，且 set 会打乱顺序。
+            await asyncio.gather(*init_tasks)
+
         self.initialized = True
         logger.info("协调器初始化完成。", active_engine=self.config.active_engine.value)
 
@@ -147,7 +138,6 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
-        """[公共 API] 返回一个异步生成器来处理待处理任务。"""
         return self._process_and_track(target_lang, batch_size, limit)
 
     async def _process_and_track(
@@ -156,7 +146,6 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
-        """[内部] 包装 process_pending_translations 以传播取消信号。"""
         self._check_is_active()
         try:
             async for result in self._internal_process_pending(
@@ -173,7 +162,6 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
-        """[解析层] 处理指定语言的待处理翻译任务。"""
         active_engine = self.active_engine
         engine_batch_policy = getattr(
             active_engine.config, "max_batch_size", self.config.batch_size
@@ -193,11 +181,8 @@ class Coordinator:
             if not batch:
                 continue
 
-            # 我们需要跟踪哪个任务对应哪个批次，以便在异常时进行恢复。
-            task_to_batch_map: dict[
-                asyncio.Task[list[TranslationResult]], list[ContentItem]
-            ] = {}
-
+            task_to_batch_map: dict[asyncio.Task[list[TranslationResult]], list[ContentItem]] = {}
+            
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
                 task = asyncio.create_task(
@@ -213,26 +198,16 @@ class Coordinator:
             if not task_to_batch_map:
                 continue
 
-            # [核心修复] 使用 asyncio.gather 简化逻辑。它能更直接地返回结果或异常。
             results_or_exceptions = await asyncio.gather(
                 *task_to_batch_map.keys(), return_exceptions=True
             )
 
             all_results: list[TranslationResult] = []
-            # 迭代原始任务列表和结果列表，它们是一一对应的
-            for task, res_or_exc in zip(
-                task_to_batch_map.keys(), results_or_exceptions, strict=False
-            ):
+            for task, res_or_exc in zip(task_to_batch_map.keys(), results_or_exceptions):
                 original_batch = task_to_batch_map[task]
-
+                
                 if isinstance(res_or_exc, Exception):
-                    # [核心修复] 当任务本身（process_batch）抛出未捕获的异常时，
-                    # 我们将该批次的所有项目构建为 FAILED 结果，以避免它们卡在 TRANSLATING 状态。
-                    logger.error(
-                        "一个上下文小组在处理时发生严重异常，将重置该批次任务",
-                        exc_info=res_or_exc,
-                        batch_size=len(original_batch),
-                    )
+                    logger.error("一个上下文小组在处理时发生严重异常", exc_info=res_or_exc, batch_size=len(original_batch))
                     failed_results = [
                         TranslationResult(
                             translation_id=item.translation_id,
@@ -242,9 +217,7 @@ class Coordinator:
                             status=TranslationStatus.FAILED,
                             from_cache=False,
                             error=f"批次处理异常: {res_or_exc.__class__.__name__}: {res_or_exc}",
-                            context_hash=self.processing_policy._get_context_hash(
-                                item.context
-                            ),
+                            context_hash=self.processing_policy._get_context_hash(item.context),
                         )
                         for item in original_batch
                     ]
