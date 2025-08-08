@@ -1,5 +1,4 @@
 # trans_hub/coordinator.py
-"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -129,7 +128,6 @@ class Coordinator:
             init_tasks.append(active_engine_instance.initialize())
 
         if init_tasks:
-            # [核心修复] 移除无效的 `list(set(...))` 去重逻辑。
             # 协程对象是唯一的，不需要去重，且 set 会打乱顺序。
             await asyncio.gather(*init_tasks)
 
@@ -204,6 +202,7 @@ class Coordinator:
             if not task_to_batch_map:
                 continue
 
+            # [核心修复] 使用 return_exceptions=True 捕获所有异常，包括 BaseException 子类
             results_or_exceptions = await asyncio.gather(
                 *task_to_batch_map.keys(), return_exceptions=True
             )
@@ -214,7 +213,19 @@ class Coordinator:
             ):
                 original_batch = task_to_batch_map[task]
 
-                if isinstance(res_or_exc, Exception):
+                # [核心修复] 将异常检查扩大到 BaseException，以正确处理 CancelledError 等。
+                if isinstance(res_or_exc, BaseException):
+                    # 如果是取消错误，则不应将其视为数据处理失败。
+                    # 它将被传播，由上层（如 worker 循环）处理。
+                    if isinstance(res_or_exc, asyncio.CancelledError):
+                        logger.warning(
+                            "一个上下文小组的处理任务被取消",
+                            batch_size=len(original_batch),
+                        )
+                        # 我们不为这些任务创建 FAILED 结果，因为它们的状态没有改变。
+                        continue
+
+                    # 对于其他严重错误（非 Exception 子类），记录为严重失败。
                     logger.error(
                         "一个上下文小组在处理时发生严重异常",
                         exc_info=res_or_exc,
@@ -353,6 +364,7 @@ class Coordinator:
                 task.cancel()
 
             # [核心修复] 检查并记录已取消任务的异常结果。
+            # 这对于诊断在关闭期间发生的非 CancelledError 异常至关重要。
             cancelled_tasks_results = await asyncio.gather(
                 *self._active_tasks, return_exceptions=True
             )

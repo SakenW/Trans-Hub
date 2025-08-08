@@ -1,5 +1,4 @@
 # trans_hub/persistence/postgres.py
-"""提供了基于 asyncpg 的 PostgreSQL 持久化实现。"""
 
 import asyncio
 import json
@@ -33,7 +32,6 @@ class _DryRunError(Exception):
 
 
 class PostgresPersistenceHandler(PersistenceHandler):
-    # ... (all methods up to find_translation are unchanged and correct) ...
     SUPPORTS_NOTIFICATIONS = True
     NOTIFICATION_CHANNEL = "new_translation_task"
 
@@ -88,8 +86,9 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     await self._notification_listener_conn.remove_listener(
                         self.NOTIFICATION_CHANNEL, self._notification_callback
                     )
+                # [核心修复] 记录接口错误而不是静默忽略，以提高可见性
                 except asyncpg.InterfaceError:
-                    pass
+                    logger.warning("移除监听器失败，连接可能已关闭", exc_info=True)
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
         if self._pool:
@@ -358,7 +357,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
         if not row:
             return None
 
-        # [核心修复] 对所有从数据库读出的 JSON 字段进行防御性反序列化
         original_payload = (
             json.loads(row["source_payload_json"])
             if isinstance(row["source_payload_json"], str)
@@ -521,9 +519,16 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     and not self._notification_listener_conn.is_closed()
                 ):
                     assert asyncpg is not None
-                    await self._notification_listener_conn.remove_listener(
-                        self.NOTIFICATION_CHANNEL, self._notification_callback
-                    )
+                    try:
+                        await self._notification_listener_conn.remove_listener(
+                            self.NOTIFICATION_CHANNEL, self._notification_callback
+                        )
+                    # [核心修复] 记录接口错误而不是静默忽略
+                    except asyncpg.InterfaceError:
+                        logger.warning(
+                            "移除监听器时发生接口错误，连接可能已被外部关闭",
+                            exc_info=True,
+                        )
                     await self._pool.release(self._notification_listener_conn)
                 self._notification_listener_conn = None
                 self._notification_queue = None
