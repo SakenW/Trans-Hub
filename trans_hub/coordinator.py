@@ -351,12 +351,23 @@ class Coordinator:
             logger.info(f"正在取消 {len(self._active_tasks)} 个活动任务...")
             for task in list(self._active_tasks):
                 task.cancel()
-            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+
+            # [核心修复] 检查并记录已取消任务的异常结果。
+            cancelled_tasks_results = await asyncio.gather(
+                *self._active_tasks, return_exceptions=True
+            )
+            for result in cancelled_tasks_results:
+                # 我们只关心那些不是 CancelledError 的真正异常
+                if isinstance(result, Exception) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.error(
+                        "一个被取消的活动任务在关闭时抛出了异常", exc_info=result
+                    )
 
         logger.info("所有活动任务已处理完毕，正在关闭底层资源...")
         close_tasks = [instance.close() for instance in self._engine_instances.values()]
         if close_tasks:
-            # [核心修复] 检查并记录引擎关闭时发生的异常。
             engine_close_results = await asyncio.gather(
                 *close_tasks, return_exceptions=True
             )

@@ -147,7 +147,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
         final_results: list[EngineBatchItemResult] = []
         for res in results:
-            # [核心修复] `isinstance` 的第二个参数必须是一个类型或类型的元组。
+            # [核心修复] isinstance 的第二个参数必须是类型的元组。
             if isinstance(res, EngineSuccess | EngineError):
                 final_results.append(res)
             elif isinstance(res, BaseException):

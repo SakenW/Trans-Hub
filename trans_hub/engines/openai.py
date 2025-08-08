@@ -188,19 +188,30 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 max_tokens=len(text.encode("utf-8")) * 3 + 150,
             )
 
-            # [核心修复] 对 API 返回结构进行防御性检查，防止因意外的 API 响应（如内容审查）导致崩溃。
             if not response.choices:
                 return EngineError(
                     error_message="API 返回了空的 'choices' 列表。", is_retryable=True
                 )
 
             message = response.choices[0].message
-            if message.content is None:
+            content = message.content
+
+            # [核心修复] 兼容 OpenAI 返回的多种 content 格式 (str 或 list of blocks)
+            translated_text = ""
+            if isinstance(content, str):
+                translated_text = content
+            elif isinstance(content, list):
+                # 如果是列表，遍历所有部分并提取文本内容
+                for part in content:
+                    if hasattr(part, "text"):
+                        translated_text += part.text
+
+            if translated_text is None:  # 再次检查
                 return EngineError(
                     error_message="API 返回的消息内容为 None。", is_retryable=True
                 )
 
-            translated_text = message.content.strip().strip('"')
+            translated_text = translated_text.strip().strip('"')
             if not translated_text:
                 return EngineError(
                     error_message="API 返回了空内容。", is_retryable=True
