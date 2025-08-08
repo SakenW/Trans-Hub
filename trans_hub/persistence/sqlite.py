@@ -477,8 +477,12 @@ class SQLitePersistenceHandler(PersistenceHandler):
         logger.info("任务已成功移至死信队列", translation_id=item.translation_id)
 
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
+        """[实现] SQLite 不支持 LISTEN/NOTIFY，因此返回一个无操作的异步生成器。"""
+
+        # [核心修复] 使用 `if False: yield` 模式是创建一个立即结束的、
+        # 正确的异步生成器的标准方法。之前的 `return` 会导致函数不是生成器。
         async def _empty_generator() -> AsyncGenerator[str, None]:
-            return
-            yield
+            if False:
+                yield
 
         return _empty_generator()

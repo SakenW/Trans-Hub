@@ -1,8 +1,5 @@
 # trans_hub/policies/processing.py
-"""
-本模块定义并实现了具体的翻译处理策略。
-v3.0.0 重大更新：适配结构化载荷（payload）和新的核心类型。
-"""
+"""本模块定义并实现了具体的翻译处理策略。"""
 
 import asyncio
 from itertools import groupby
@@ -34,15 +31,18 @@ class ProcessingPolicy(Protocol):
         target_lang: str,
         context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-    ) -> list[TranslationResult]:
-        """异步处理一批翻译任务。"""
-        ...
+    ) -> list[TranslationResult]: ...
+
+    def _get_context_hash(self, context: dict[str, Any] | None) -> str: ...
 
 
 class DefaultProcessingPolicy(ProcessingPolicy):
     """默认的翻译处理策略,实现了包含缓存、重试和DLQ的完整工作流。"""
 
     PAYLOAD_TEXT_KEY = "text"
+
+    def _get_context_hash(self, context: dict[str, Any] | None) -> str:
+        return get_context_hash(context)
 
     async def process_batch(
         self,
@@ -72,7 +72,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         initial_backoff: float,
         max_backoff: float,
     ) -> list[TranslationResult]:
-        """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
             raw_context_dict = batch[0].context if batch else None
@@ -152,7 +151,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 retry_count=len(items_to_process),
             )
             await asyncio.sleep(backoff_time)
-
         return final_results
 
     async def _process_single_translation_attempt(
@@ -163,23 +161,18 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         engine_context: BaseContextModel | None,
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
-        """[私有] 执行单次翻译尝试，分离出成功、失败和可重试的项。"""
         cached_results, uncached_items = await self._separate_cached_items(
             batch, target_lang, p_context, active_engine
         )
-
         valid_items, payload_error_results = self._validate_payload_structure(
             uncached_items, target_lang, p_context
         )
-
         if not valid_items:
             return cached_results + payload_error_results, []
 
         engine_outputs = await self._translate_uncached_items(
             valid_items, target_lang, p_context, active_engine, engine_context
         )
-
-        # 这一步长度检查现在变得更加重要和可靠
         if len(engine_outputs) != len(valid_items):
             error_msg = (
                 f"引擎返回结果数量 ({len(engine_outputs)}) 与输入数量 "
@@ -201,7 +194,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         processed_results.extend(payload_error_results)
         retryable_items: list[ContentItem] = []
 
-        # 因为 `_translate_uncached_items` 保证了顺序，现在可以安全地使用 zip
         for item, output in zip(valid_items, engine_outputs, strict=True):
             if isinstance(output, EngineError) and output.is_retryable:
                 retryable_items.append(item)
@@ -211,7 +203,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 )
                 processed_results.append(result)
 
-        # 传入完整的原始批次 item_map 以便缓存逻辑查找
         await self._cache_new_results(
             processed_results,
             p_context,
@@ -226,7 +217,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         target_lang: str,
         p_context: ProcessingContext,
     ) -> tuple[list[ContentItem], list[TranslationResult]]:
-        """[新增] 校验 payload 结构，分离有效和无效项。"""
         valid_items: list[ContentItem] = []
         failed_results: list[TranslationResult] = []
         for item in items:
@@ -255,7 +245,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
-        """[私有] 从批处理中分离出已缓存和未缓存的项。"""
         cached_results: list[TranslationResult] = []
         uncached_items: list[ContentItem] = []
         for item in batch:
@@ -285,21 +274,14 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         engine_context: BaseContextModel | None,
     ) -> list[Union[EngineSuccess, EngineError]]:
-        """
-        [私有] 调用活动引擎翻译一批未缓存的项。
-        此方法保证返回的结果列表与输入的 `items` 列表顺序完全一致。
-        """
+        def get_sort_key(item: ContentItem) -> str:
+            # [核心修复] 当源语言为 None 时返回空字符串，确保所有键都是可比较的字符串类型，
+            # 从而避免 sorted() 在处理混合类型（str 和 None）时抛出 TypeError。
+            return item.source_lang or p_context.config.source_lang or ""
 
-        # 1. 定义排序键并排序，以便 `groupby` 能正确工作
-        def get_sort_key(item: ContentItem) -> str | None:
-            # --- 核心修复：当源语言未指定时，正确返回 None ---
-            return item.source_lang or p_context.config.source_lang
-
-        # mypy 在这里无法正确推断 key 的类型，因此我们忽略它
-        sorted_items = sorted(items, key=get_sort_key)  # type: ignore
+        sorted_items = sorted(items, key=get_sort_key)
         grouped_by_lang = groupby(sorted_items, key=get_sort_key)
 
-        # 2. 创建并发任务，并保存每个任务对应的原始项目组
         tasks = []
         item_groups_for_tasks: list[list[ContentItem]] = []
 
@@ -309,24 +291,19 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             texts_to_translate = [
                 item.source_payload[self.PAYLOAD_TEXT_KEY] for item in item_list
             ]
-
             task = active_engine.atranslate_batch(
                 texts=texts_to_translate,
                 target_lang=target_lang,
-                source_lang=source_lang_key,
+                source_lang=source_lang_key or None,
                 context=engine_context,
             )
             tasks.append(task)
 
-        # 3. 并发执行所有翻译任务
         group_results_list = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 4. 将结果安全地映射回每个 translation_id
         result_map: dict[str, Union[EngineSuccess, EngineError]] = {}
 
         for i, group_results in enumerate(group_results_list):
             current_item_group = item_groups_for_tasks[i]
-
             if isinstance(group_results, BaseException):
                 logger.error("一个翻译组的任务执行失败", exc_info=group_results)
                 error_msg = f"引擎执行失败: {group_results.__class__.__name__}"
@@ -342,9 +319,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 for item, result in zip(current_item_group, group_results, strict=True):
                     result_map[item.translation_id] = result
 
-        # 5. 按照原始 `items` 列表的顺序，重新构建最终的输出列表
         final_outputs = [result_map[item.translation_id] for item in items]
-
         return final_outputs
 
     async def _cache_new_results(
@@ -354,9 +329,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         item_map: dict[str, ContentItem],
     ) -> None:
-        """[私有] 将新获得的成功翻译结果存入缓存。"""
         tasks_with_ids: list[tuple[asyncio.Task[None], str]] = []
-
         for res in results:
             if (
                 res.status == TranslationStatus.TRANSLATED
@@ -366,7 +339,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 original_item = item_map.get(res.translation_id)
                 if not original_item:
                     continue
-
                 request = TranslationRequest(
                     source_payload=res.original_payload,
                     source_lang=original_item.source_lang
@@ -384,7 +356,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                         )
                     )
                     tasks_with_ids.append((task, res.translation_id))
-
         if tasks_with_ids:
             tasks = [t for t, _ in tasks_with_ids]
             cache_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -408,13 +379,11 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         cached_text: str | None = None,
         error_override: EngineError | None = None,
     ) -> TranslationResult:
-        """[私有] 根据不同的输入源构建一个标准的 `TranslationResult` 对象。"""
         active_engine_name = p_context.config.active_engine.value
         context_hash = get_context_hash(item.context)
         final_error = error_override or (
             engine_output if isinstance(engine_output, EngineError) else None
         )
-
         if final_error:
             return TranslationResult(
                 translation_id=item.translation_id,
@@ -428,7 +397,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 from_cache=False,
                 context_hash=context_hash,
             )
-
         translated_text: str | None = None
         from_cache = False
         if cached_text is not None:
@@ -441,10 +409,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             engine = active_engine_name
         else:
             raise TypeError("无法为项目构建 TranslationResult：输入参数无效。")
-
         translated_payload = dict(item.source_payload)
         translated_payload[self.PAYLOAD_TEXT_KEY] = translated_text
-
         return TranslationResult(
             translation_id=item.translation_id,
             business_id=item.business_id,

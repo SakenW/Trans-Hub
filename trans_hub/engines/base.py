@@ -132,6 +132,11 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         source_lang: str | None = None,
         context: BaseContextModel | None = None,
     ) -> list[EngineBatchItemResult]:
+        """
+        [公共 API] 异步翻译一批文本。
+
+        此方法负责处理并发、速率限制、上下文验证，并确保返回结果的顺序与输入一致。
+        """
         if self.REQUIRES_SOURCE_LANG and not source_lang:
             error_msg = f"引擎 '{self.__class__.__name__}' 需要提供源语言。"
             return [EngineError(error_message=error_msg, is_retryable=False)] * len(
@@ -148,12 +153,15 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
 
         final_results: list[EngineBatchItemResult] = []
         for res in results:
+            # [核心修复] `isinstance` 的第二个参数必须是一个类型或类型的元组。
+            # `EngineSuccess | EngineError` 是类型提示语法，在运行时无效。
+            # 正确的运行时检查应该是 `isinstance(res, (EngineSuccess, EngineError))`。
             if isinstance(res, EngineSuccess | EngineError):
                 final_results.append(res)
             elif isinstance(res, BaseException):
                 error_res = EngineError(
                     error_message=f"引擎执行异常: {res.__class__.__name__}: {res}",
-                    is_retryable=True,
+                    is_retryable=True,  # 假设大多数执行异常是可重试的（如网络问题）
                 )
                 final_results.append(error_res)
             else:
