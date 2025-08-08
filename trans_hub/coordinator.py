@@ -14,25 +14,29 @@ from .config import EngineName, TransHubConfig
 from .context import ProcessingContext
 from .core import (
     ConfigurationError,
-    ContentItem,  # <-- [核心修复] 添加缺失的导入
+    ContentItem,
     EngineNotFoundError,
     PersistenceHandler,
     TranslationResult,
     TranslationStatus,
 )
 from .engine_registry import ENGINE_REGISTRY
+
+# [核心修复] 将 BaseTranslationEngine 的导入移出 TYPE_CHECKING 块，
+# 以解决类型注解在运行时（类定义时）引发的 NameError。
+from .engines.base import BaseTranslationEngine
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 from .utils import validate_lang_codes
 
 if TYPE_CHECKING:
-    from .engines.base import BaseTranslationEngine
+    # 保持块结构以备将来用于纯类型提示的导入
+    pass
 
 logger = structlog.get_logger(__name__)
 
 
 class Coordinator:
-    # ... (rest of the file is unchanged) ...
     """异步主协调器，是 Trans-Hub 功能的中心枢纽。"""
 
     def __init__(
@@ -42,11 +46,13 @@ class Coordinator:
         rate_limiter: RateLimiter | None = None,
         max_concurrent_requests: int | None = None,
     ) -> None:
+        """初始化 Coordinator。"""
         self.config = config
         self.handler = persistence_handler
         self.cache = TranslationCache(self.config.cache_config)
         self.rate_limiter = rate_limiter
         self.initialized = False
+        # 现在 BaseTranslationEngine 在运行时是已知的
         self._engine_instances: dict[str, BaseTranslationEngine[Any]] = {}
         self._request_semaphore: asyncio.Semaphore | None = None
         if max_concurrent_requests and max_concurrent_requests > 0:
@@ -64,17 +70,20 @@ class Coordinator:
         self.processing_policy: ProcessingPolicy = DefaultProcessingPolicy()
 
     def _check_is_active(self) -> None:
+        """检查协调器是否处于活动状态。"""
         if self._shutting_down or not self.initialized:
             raise RuntimeError("Coordinator is not active (closed or not initialized).")
 
     @property
     def active_engine(self) -> "BaseTranslationEngine[Any]":
+        """获取当前活动的翻译引擎实例。"""
         self._check_is_active()
         return self._get_or_create_engine_instance(self.config.active_engine.value)
 
     def _get_or_create_engine_instance(
         self, engine_name: str
     ) -> "BaseTranslationEngine[Any]":
+        """根据引擎名称获取或创建引擎实例（惰性加载和动态配置解析）。"""
         if engine_name not in self._engine_instances:
             engine_class = ENGINE_REGISTRY.get(engine_name)
             if not engine_class:
@@ -96,6 +105,7 @@ class Coordinator:
         return self._engine_instances[engine_name]
 
     async def switch_engine(self, engine_name: str) -> None:
+        """切换当前的活动翻译引擎。"""
         self._check_is_active()
         if engine_name == self.config.active_engine.value:
             return
@@ -110,6 +120,7 @@ class Coordinator:
         logger.info("成功切换活动引擎。", new_engine=self.config.active_engine.value)
 
     async def initialize(self) -> None:
+        """初始化协调器，包括连接数据库和初始化活动引擎。"""
         if self.initialized:
             return
         logger.info("协调器初始化开始...")
@@ -136,6 +147,7 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
+        """[公共 API] 返回一个异步生成器来处理待处理任务。"""
         return self._process_and_track(target_lang, batch_size, limit)
 
     async def _process_and_track(
@@ -144,6 +156,7 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
+        """[内部] 包装 process_pending_translations 以传播取消信号。"""
         self._check_is_active()
         try:
             async for result in self._internal_process_pending(
@@ -160,6 +173,7 @@ class Coordinator:
         batch_size: int | None = None,
         limit: int | None = None,
     ) -> AsyncGenerator[TranslationResult, None]:
+        """[解析层] 处理指定语言的待处理翻译任务。"""
         active_engine = self.active_engine
         engine_batch_policy = getattr(
             active_engine.config, "max_batch_size", self.config.batch_size
@@ -179,7 +193,7 @@ class Coordinator:
             if not batch:
                 continue
 
-            tasks = []
+            # 我们需要跟踪哪个任务对应哪个批次，以便在异常时进行恢复。
             task_to_batch_map: dict[
                 asyncio.Task[list[TranslationResult]], list[ContentItem]
             ] = {}
@@ -194,24 +208,29 @@ class Coordinator:
                         active_engine,
                     )
                 )
-                tasks.append(task)
                 task_to_batch_map[task] = items_group
 
-            if not tasks:
+            if not task_to_batch_map:
                 continue
 
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
+            # [核心修复] 使用 asyncio.gather 简化逻辑。它能更直接地返回结果或异常。
+            results_or_exceptions = await asyncio.gather(
+                *task_to_batch_map.keys(), return_exceptions=True
+            )
 
             all_results: list[TranslationResult] = []
-            for task in done:
+            # 迭代原始任务列表和结果列表，它们是一一对应的
+            for task, res_or_exc in zip(
+                task_to_batch_map.keys(), results_or_exceptions, strict=False
+            ):
                 original_batch = task_to_batch_map[task]
-                try:
-                    result_group = task.result()
-                    all_results.extend(result_group)
-                except Exception as e:
+
+                if isinstance(res_or_exc, Exception):
+                    # [核心修复] 当任务本身（process_batch）抛出未捕获的异常时，
+                    # 我们将该批次的所有项目构建为 FAILED 结果，以避免它们卡在 TRANSLATING 状态。
                     logger.error(
                         "一个上下文小组在处理时发生严重异常，将重置该批次任务",
-                        exc_info=e,
+                        exc_info=res_or_exc,
                         batch_size=len(original_batch),
                     )
                     failed_results = [
@@ -222,7 +241,7 @@ class Coordinator:
                             target_lang=target_lang,
                             status=TranslationStatus.FAILED,
                             from_cache=False,
-                            error=f"批次处理异常: {e.__class__.__name__}: {e}",
+                            error=f"批次处理异常: {res_or_exc.__class__.__name__}: {res_or_exc}",
                             context_hash=self.processing_policy._get_context_hash(
                                 item.context
                             ),
@@ -230,6 +249,8 @@ class Coordinator:
                         for item in original_batch
                     ]
                     all_results.extend(failed_results)
+                elif isinstance(res_or_exc, list):
+                    all_results.extend(res_or_exc)
 
             if all_results:
                 await self.handler.save_translation_results(all_results)
@@ -245,6 +266,7 @@ class Coordinator:
         source_lang: str | None = None,
         force_retranslate: bool = False,
     ) -> None:
+        """[操作层入口] 提交一个新的翻译请求。"""
         self._check_is_active()
         try:
             validate_lang_codes(target_langs)
@@ -282,6 +304,7 @@ class Coordinator:
         source_lang: str | None,
         force_retranslate: bool,
     ) -> None:
+        """[操作层实现] 执行翻译请求的核心数据库操作。"""
         content_id, context_id = await self.handler.ensure_content_and_context(
             business_id=business_id,
             source_payload=source_payload,
@@ -303,6 +326,7 @@ class Coordinator:
         target_lang: str,
         context: dict[str, Any] | None = None,
     ) -> TranslationResult | None:
+        """[解析层] 直接获取一个翻译结果。"""
         self._check_is_active()
         return await self.handler.find_translation(
             business_id=business_id,
@@ -316,6 +340,7 @@ class Coordinator:
         dry_run: bool = False,
         _now: datetime | None = None,
     ) -> dict[str, int]:
+        """运行垃圾回收，清理旧的、无关联的数据。"""
         self._check_is_active()
         days = expiration_days or self.config.gc_retention_days
         return await self.handler.garbage_collect(
@@ -323,10 +348,12 @@ class Coordinator:
         )
 
     def track_task(self, task: asyncio.Task[Any]) -> None:
+        """[公共] 允许外部调用者（如 worker CLI）注册其任务以进行优雅停机。"""
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
 
     async def close(self) -> None:
+        """优雅地关闭协调器和所有相关资源。"""
         if self._shutting_down or not self.initialized:
             return
         logger.info("开始优雅停机...")

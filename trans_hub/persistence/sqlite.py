@@ -1,10 +1,4 @@
 # trans_hub/persistence/sqlite.py
-"""
-提供了基于 aiosqlite 的持久化实现。
-
-本模块是 `PersistenceHandler` 协议的 SQLite 具体实现，
-并适配了 Trans-Hub v3.0 的数据库 Schema。
-"""
 
 import json
 from collections.abc import AsyncGenerator
@@ -89,7 +83,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
             raise
 
     async def reset_stale_tasks(self) -> None:
-        """[实现] 在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
         now_iso = datetime.now(timezone.utc).isoformat()
         async with self._transaction() as tx:
             cursor = await tx.execute(
@@ -204,10 +197,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
             if content_row:
                 content_id = cast(str, content_row["id"])
                 await tx.execute(
-                    """
-                    UPDATE th_content SET source_payload_json = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
+                    "UPDATE th_content SET source_payload_json = ?, updated_at = ? WHERE id = ?",
                     (
                         json.dumps(source_payload, ensure_ascii=False),
                         now_iso,
@@ -217,10 +207,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
             else:
                 content_id = generate_uuid()
                 await tx.execute(
-                    """
-                    INSERT INTO th_content (id, business_id, source_payload_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
+                    "INSERT INTO th_content (id, business_id, source_payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                     (
                         content_id,
                         business_id,
@@ -242,10 +229,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 else:
                     context_id = generate_uuid()
                     await tx.execute(
-                        """
-                        INSERT INTO th_contexts (id, context_hash, context_payload_json, created_at)
-                        VALUES (?, ?, ?, ?)
-                        """,
+                        "INSERT INTO th_contexts (id, context_hash, context_payload_json, created_at) VALUES (?, ?, ?, ?)",
                         (
                             context_id,
                             context_hash,
@@ -440,7 +424,6 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 )
                 stats["deleted_contexts"] = cursor.rowcount
             await cursor.close()
-
         return stats
 
     async def move_to_dlq(

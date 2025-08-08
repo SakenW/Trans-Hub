@@ -72,6 +72,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         initial_backoff: float,
         max_backoff: float,
     ) -> list[TranslationResult]:
+        """[私有] 对批次应用完整的翻译、重试和DLQ逻辑。"""
         validated_engine_context: Union[BaseContextModel, EngineError, None]
         if active_engine.ACCEPTS_CONTEXT:
             raw_context_dict = batch[0].context if batch else None
@@ -134,15 +135,23 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     )
                     for item in retryable_items
                 ]
-                dlq_results = await asyncio.gather(*dlq_tasks, return_exceptions=True)
-                for i, res in enumerate(dlq_results):
-                    if isinstance(res, Exception):
-                        logger.error(
-                            "写入死信队列失败",
-                            translation_id=retryable_items[i].translation_id,
-                            exc_info=res,
-                        )
-                break
+                await asyncio.gather(*dlq_tasks, return_exceptions=True)
+
+                # [核心修复] 为被移入 DLQ 的任务创建并返回 FAILED 结果，
+                # 确保调用方（Coordinator）能够收到任务已终结的明确信号。
+                dlq_results = [
+                    self._build_translation_result(
+                        item,
+                        target_lang,
+                        p_context,
+                        error_override=EngineError(
+                            error_message=error_message, is_retryable=False
+                        ),
+                    )
+                    for item in retryable_items
+                ]
+                final_results.extend(dlq_results)
+                break  # 确保在处理完DLQ后退出循环
 
             items_to_process = retryable_items
             backoff_time = min(initial_backoff * (2**attempt), max_backoff)
@@ -151,6 +160,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 retry_count=len(items_to_process),
             )
             await asyncio.sleep(backoff_time)
+
         return final_results
 
     async def _process_single_translation_attempt(
@@ -161,18 +171,22 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         engine_context: BaseContextModel | None,
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
+        """[私有] 执行单次翻译尝试，分离出成功、失败和可重试的项。"""
         cached_results, uncached_items = await self._separate_cached_items(
             batch, target_lang, p_context, active_engine
         )
+
         valid_items, payload_error_results = self._validate_payload_structure(
             uncached_items, target_lang, p_context
         )
+
         if not valid_items:
             return cached_results + payload_error_results, []
 
         engine_outputs = await self._translate_uncached_items(
             valid_items, target_lang, p_context, active_engine, engine_context
         )
+
         if len(engine_outputs) != len(valid_items):
             error_msg = (
                 f"引擎返回结果数量 ({len(engine_outputs)}) 与输入数量 "
@@ -217,6 +231,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         target_lang: str,
         p_context: ProcessingContext,
     ) -> tuple[list[ContentItem], list[TranslationResult]]:
+        """校验 payload 结构，分离有效和无效项。"""
         valid_items: list[ContentItem] = []
         failed_results: list[TranslationResult] = []
         for item in items:
@@ -245,6 +260,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
     ) -> tuple[list[TranslationResult], list[ContentItem]]:
+        """从批处理中分离出已缓存和未缓存的项。"""
         cached_results: list[TranslationResult] = []
         uncached_items: list[ContentItem] = []
         for item in batch:
@@ -274,6 +290,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         engine_context: BaseContextModel | None,
     ) -> list[Union[EngineSuccess, EngineError]]:
+        """调用活动引擎翻译一批未缓存的项。"""
+
         def get_sort_key(item: ContentItem) -> str:
             # [核心修复] 当源语言为 None 时返回空字符串，确保所有键都是可比较的字符串类型，
             # 从而避免 sorted() 在处理混合类型（str 和 None）时抛出 TypeError。
@@ -329,6 +347,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
         item_map: dict[str, ContentItem],
     ) -> None:
+        """将新获得的成功翻译结果存入缓存。"""
         tasks_with_ids: list[tuple[asyncio.Task[None], str]] = []
         for res in results:
             if (
@@ -379,6 +398,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         cached_text: str | None = None,
         error_override: EngineError | None = None,
     ) -> TranslationResult:
+        """根据不同的输入源构建一个标准的 `TranslationResult` 对象。"""
         active_engine_name = p_context.config.active_engine.value
         context_hash = get_context_hash(item.context)
         final_error = error_override or (
