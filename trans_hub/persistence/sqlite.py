@@ -1,4 +1,5 @@
 # trans_hub/persistence/sqlite.py
+"""提供了基于 aiosqlite 的持久化实现。"""
 
 import json
 from collections.abc import AsyncGenerator
@@ -462,10 +463,12 @@ class SQLitePersistenceHandler(PersistenceHandler):
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[实现] SQLite 不支持 LISTEN/NOTIFY，因此返回一个无操作的异步生成器。"""
 
-        # [核心修复] 使用 `if False: yield` 模式是创建一个立即结束的、
-        # 正确的异步生成器的标准方法。之前的 `return` 会导致函数不是生成器。
+        # [核心修复] 使用 `if False: yield ""` 模式创建一个正确的、
+        # 类型为 AsyncGenerator[str, None] 的无操作异步生成器。
+        # 之前的 `yield` (无值) 会被 mypy 推断为 AsyncGenerator[None, None]，
+        # 导致与接口协议的类型不匹配。
         async def _empty_generator() -> AsyncGenerator[str, None]:
             if False:
-                yield
+                yield ""  # 提供一个假的 str 值以满足类型检查器
 
         return _empty_generator()
