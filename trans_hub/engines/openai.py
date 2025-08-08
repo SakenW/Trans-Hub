@@ -1,4 +1,5 @@
 # trans_hub/engines/openai.py
+"""提供一个使用 OpenAI API 的翻译引擎。"""
 
 import os
 from typing import Any, cast
@@ -194,32 +195,34 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
 
             message = response.choices[0].message
             content = message.content
-
-            # [核心修复] 健壮地处理 OpenAI 返回的多种 content 格式 (str, list, or None)
             translated_text = ""
+
             if isinstance(content, str):
                 translated_text = content
             elif isinstance(content, list):
-                # 如果是列表，遍历所有部分并提取文本内容
+                # [核心修复] 严格处理混合内容块
                 for part in content:
-                    if hasattr(part, "text") and isinstance(part.text, str):
-                        translated_text += part.text
+                    # 确保 part 是一个有 .text 属性的对象，且 .text 是字符串
+                    if not (hasattr(part, "text") and isinstance(part.text, str)):
+                        error_msg = "API 返回了不支持的内容块类型，翻译中止。"
+                        logger.warning(error_msg, received_part=str(part)[:200])
+                        return EngineError(
+                            error_message=error_msg, is_retryable=False
+                        )
+                    translated_text += part.text
 
-            # 如果在处理后，文本依然为空或None
             if not translated_text:
                 if content is None:
                     return EngineError(
                         error_message="API 返回的消息内容为 None。", is_retryable=True
                     )
                 return EngineError(
-                    error_message="API 返回了空内容或不支持的内容结构。",
+                    error_message="API 返回了空内容或仅包含非文本内容。",
                     is_retryable=True,
                 )
 
-            # 移除可能存在的前后引号
             translated_text = translated_text.strip().strip('"')
 
-            # 再次检查，确保不是纯空白字符
             if not translated_text:
                 return EngineError(
                     error_message="API 返回了空或仅包含空白的翻译内容。",

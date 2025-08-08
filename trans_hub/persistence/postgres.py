@@ -1,4 +1,5 @@
 # trans_hub/persistence/postgres.py
+"""提供了基于 asyncpg 的 PostgreSQL 持久化实现。"""
 
 import asyncio
 import json
@@ -86,9 +87,10 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     await self._notification_listener_conn.remove_listener(
                         self.NOTIFICATION_CHANNEL, self._notification_callback
                     )
-                # [核心修复] 记录接口错误而不是静默忽略，以提高可见性
                 except asyncpg.InterfaceError:
-                    logger.warning("移除监听器失败，连接可能已关闭", exc_info=True)
+                    logger.warning(
+                        "移除监听器失败，连接可能已关闭", exc_info=True
+                    )
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
         if self._pool:
@@ -114,6 +116,29 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     )
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"重置陈旧任务失败: {e}") from e
+
+    async def revert_translations_status_to_pending(
+        self, translation_ids: list[str]
+    ) -> None:
+        """[实现] 将一组处于 'TRANSLATING' 状态的任务回滚至 'PENDING'。"""
+        if not translation_ids or not self._pool:
+            return
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE th_translations SET status = $1
+                    WHERE id = ANY($2::uuid[]) AND status = $3
+                    """,
+                    TranslationStatus.PENDING.value,
+                    translation_ids,
+                    TranslationStatus.TRANSLATING.value,
+                )
+            logger.info(
+                "已将一组任务的状态回滚至 PENDING", count=len(translation_ids)
+            )
+        except asyncpg.PostgresError as e:
+            raise DatabaseError(f"回滚翻译状态失败: {e}") from e
 
     async def stream_translatable_items(
         self,
@@ -523,7 +548,6 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         await self._notification_listener_conn.remove_listener(
                             self.NOTIFICATION_CHANNEL, self._notification_callback
                         )
-                    # [核心修复] 记录接口错误而不是静默忽略
                     except asyncpg.InterfaceError:
                         logger.warning(
                             "移除监听器时发生接口错误，连接可能已被外部关闭",

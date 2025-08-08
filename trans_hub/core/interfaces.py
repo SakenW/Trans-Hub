@@ -50,6 +50,15 @@ class PersistenceHandler(Protocol):
         """在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
         ...
 
+    async def revert_translations_status_to_pending(
+        self, translation_ids: list[str]
+    ) -> None:
+        """
+        [新增] 将一组处于 'TRANSLATING' 状态的任务回滚至 'PENDING'。
+        这在任务处理被取消时至关重要，以防止状态悬挂。
+        """
+        ...
+
     def stream_translatable_items(
         self,
         lang_code: str,

@@ -102,6 +102,29 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 logger.warning("系统自愈：重置了遗留的翻译任务", count=cursor.rowcount)
             await cursor.close()
 
+    async def revert_translations_status_to_pending(
+        self, translation_ids: list[str]
+    ) -> None:
+        """[实现] 将一组处于 'TRANSLATING' 状态的任务回滚至 'PENDING'。"""
+        if not translation_ids:
+            return
+        async with self._transaction() as tx:
+            placeholders = ",".join("?" for _ in translation_ids)
+            sql = f"""
+                UPDATE th_translations
+                SET status = ?
+                WHERE id IN ({placeholders}) AND status = ?
+            """
+            params = [
+                TranslationStatus.PENDING.value,
+                *translation_ids,
+                TranslationStatus.TRANSLATING.value,
+            ]
+            await tx.execute(sql, params)
+        logger.info(
+            "已将一组任务的状态回滚至 PENDING", count=len(translation_ids)
+        )
+
     def stream_translatable_items(
         self,
         lang_code: str,
@@ -463,12 +486,8 @@ class SQLitePersistenceHandler(PersistenceHandler):
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[实现] SQLite 不支持 LISTEN/NOTIFY，因此返回一个无操作的异步生成器。"""
 
-        # [核心修复] 使用 `if False: yield ""` 模式创建一个正确的、
-        # 类型为 AsyncGenerator[str, None] 的无操作异步生成器。
-        # 之前的 `yield` (无值) 会被 mypy 推断为 AsyncGenerator[None, None]，
-        # 导致与接口协议的类型不匹配。
         async def _empty_generator() -> AsyncGenerator[str, None]:
             if False:
-                yield ""  # 提供一个假的 str 值以满足类型检查器
+                yield ""
 
         return _empty_generator()

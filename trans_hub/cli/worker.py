@@ -63,37 +63,42 @@ async def notification_loop(
     logger.info("正在等待新任务通知...", lang=lang)
     while not shutdown_event.is_set():
         try:
-            notification_task: asyncio.Task[str] = asyncio.create_task(
-                notification_generator.__anext__()
-            )
+            notification_task = asyncio.create_task(notification_generator.__anext__())
             shutdown_task = asyncio.create_task(shutdown_event.wait())
             done, pending = await asyncio.wait(
                 [notification_task, shutdown_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+            # [核心修复] 确保在处理停机信号前，先检查并处理已完成的通知任务，
+            # 以避免在竞态条件下丢失异常。
+            if notification_task in done:
+                try:
+                    payload = notification_task.result()
+                    logger.info("收到新任务通知!", payload=payload, lang=lang)
+                    await consume_all(coordinator, lang, f"收到通知后处理 ({lang})")
+                    logger.info("正在等待下一次新任务通知...", lang=lang)
+                except Exception:
+                    # 如果获取通知结果时发生错误（例如 StopAsyncIteration 或其他），则记录并准备退出
+                    logger.error("通知生成器或任务处理中发生错误", lang=lang, exc_info=True)
+                    # 发生严重错误时，也应该触发停机
+                    shutdown_event.set()
+
+            # 总是取消未完成的对等任务
             for task in pending:
                 task.cancel()
-                # [核心修复] 必须 await 被取消的任务以允许其清理和传播 CancelledError。
-                # 使用 return_exceptions=True 确保即使任务已取消，gather 也不会抛出异常。
                 await asyncio.gather(task, return_exceptions=True)
 
+            # 在处理完可能已完成的通知后，再检查是否需要停机
             if shutdown_task in done:
                 break
 
-            if notification_task in done:
-                payload = notification_task.result()
-                logger.info("收到新任务通知!", payload=payload, lang=lang)
-                await consume_all(coordinator, lang, f"收到通知后处理 ({lang})")
-                logger.info("正在等待下一次新任务通知...", lang=lang)
-
         except asyncio.CancelledError:
-            break
-        except StopAsyncIteration:
-            logger.warning("通知生成器已停止，Worker 将退出。", lang=lang)
             break
         except Exception:
             logger.error("通知循环中发生未知错误", lang=lang, exc_info=True)
+            # 发生未知错误时，也应该触发停机
+            shutdown_event.set()
 
 
 async def _run_worker_loop(

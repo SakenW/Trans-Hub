@@ -1,4 +1,5 @@
 # trans_hub/coordinator.py
+"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -128,7 +129,6 @@ class Coordinator:
             init_tasks.append(active_engine_instance.initialize())
 
         if init_tasks:
-            # 协程对象是唯一的，不需要去重，且 set 会打乱顺序。
             await asyncio.gather(*init_tasks)
 
         self.initialized = True
@@ -183,77 +183,81 @@ class Coordinator:
             if not batch:
                 continue
 
-            task_to_batch_map: dict[
-                asyncio.Task[list[TranslationResult]], list[ContentItem]
-            ] = {}
+            batch_ids = [item.translation_id for item in batch]
+            try:
+                task_to_batch_map: dict[
+                    asyncio.Task[list[TranslationResult]], list[ContentItem]
+                ] = {}
 
-            for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
-                items_group = list(items_group_iter)
-                task = asyncio.create_task(
-                    self.processing_policy.process_batch(
-                        items_group,
-                        target_lang,
-                        self.processing_context,
-                        active_engine,
+                for _, items_group_iter in groupby(
+                    batch, key=lambda item: item.context_id
+                ):
+                    items_group = list(items_group_iter)
+                    task = asyncio.create_task(
+                        self.processing_policy.process_batch(
+                            items_group,
+                            target_lang,
+                            self.processing_context,
+                            active_engine,
+                        )
                     )
+                    task_to_batch_map[task] = items_group
+
+                if not task_to_batch_map:
+                    continue
+
+                results_or_exceptions = await asyncio.gather(
+                    *task_to_batch_map.keys(), return_exceptions=True
                 )
-                task_to_batch_map[task] = items_group
 
-            if not task_to_batch_map:
-                continue
+                all_results: list[TranslationResult] = []
+                for task, res_or_exc in zip(
+                    task_to_batch_map.keys(), results_or_exceptions, strict=False
+                ):
+                    original_batch = task_to_batch_map[task]
 
-            # [核心修复] 使用 return_exceptions=True 捕获所有异常，包括 BaseException 子类
-            results_or_exceptions = await asyncio.gather(
-                *task_to_batch_map.keys(), return_exceptions=True
-            )
+                    if isinstance(res_or_exc, BaseException):
+                        if isinstance(res_or_exc, asyncio.CancelledError):
+                            # 取消错误将在外层 try/except 块中被捕获并处理
+                            raise res_or_exc
 
-            all_results: list[TranslationResult] = []
-            for task, res_or_exc in zip(
-                task_to_batch_map.keys(), results_or_exceptions, strict=False
-            ):
-                original_batch = task_to_batch_map[task]
-
-                # [核心修复] 将异常检查扩大到 BaseException，以正确处理 CancelledError 等。
-                if isinstance(res_or_exc, BaseException):
-                    # 如果是取消错误，则不应将其视为数据处理失败。
-                    # 它将被传播，由上层（如 worker 循环）处理。
-                    if isinstance(res_or_exc, asyncio.CancelledError):
-                        logger.warning(
-                            "一个上下文小组的处理任务被取消",
+                        logger.error(
+                            "一个上下文小组在处理时发生严重异常",
+                            exc_info=res_or_exc,
                             batch_size=len(original_batch),
                         )
-                        # 我们不为这些任务创建 FAILED 结果，因为它们的状态没有改变。
-                        continue
+                        failed_results = [
+                            TranslationResult(
+                                translation_id=item.translation_id,
+                                business_id=item.business_id,
+                                original_payload=item.source_payload,
+                                target_lang=target_lang,
+                                status=TranslationStatus.FAILED,
+                                from_cache=False,
+                                error=f"批次处理异常: {res_or_exc.__class__.__name__}: {res_or_exc}",
+                                context_hash=self.processing_policy._get_context_hash(
+                                    item.context
+                                ),
+                            )
+                            for item in original_batch
+                        ]
+                        all_results.extend(failed_results)
+                    elif isinstance(res_or_exc, list):
+                        all_results.extend(res_or_exc)
 
-                    # 对于其他严重错误（非 Exception 子类），记录为严重失败。
-                    logger.error(
-                        "一个上下文小组在处理时发生严重异常",
-                        exc_info=res_or_exc,
-                        batch_size=len(original_batch),
-                    )
-                    failed_results = [
-                        TranslationResult(
-                            translation_id=item.translation_id,
-                            business_id=item.business_id,
-                            original_payload=item.source_payload,
-                            target_lang=target_lang,
-                            status=TranslationStatus.FAILED,
-                            from_cache=False,
-                            error=f"批次处理异常: {res_or_exc.__class__.__name__}: {res_or_exc}",
-                            context_hash=self.processing_policy._get_context_hash(
-                                item.context
-                            ),
-                        )
-                        for item in original_batch
-                    ]
-                    all_results.extend(failed_results)
-                elif isinstance(res_or_exc, list):
-                    all_results.extend(res_or_exc)
-
-            if all_results:
-                await self.handler.save_translation_results(all_results)
-                for result in all_results:
-                    yield result
+                if all_results:
+                    await self.handler.save_translation_results(all_results)
+                    for result in all_results:
+                        yield result
+            except asyncio.CancelledError:
+                logger.warning(
+                    "任务批次处理被取消，正在回滚状态...",
+                    batch_size=len(batch_ids),
+                    ids_sample=batch_ids[:5],
+                )
+                await self.handler.revert_translations_status_to_pending(batch_ids)
+                # 重新抛出异常，以便上层调用者（如 _process_and_track）可以捕获并正确处理
+                raise
 
     async def request(
         self,
@@ -363,13 +367,10 @@ class Coordinator:
             for task in list(self._active_tasks):
                 task.cancel()
 
-            # [核心修复] 检查并记录已取消任务的异常结果。
-            # 这对于诊断在关闭期间发生的非 CancelledError 异常至关重要。
             cancelled_tasks_results = await asyncio.gather(
                 *self._active_tasks, return_exceptions=True
             )
             for result in cancelled_tasks_results:
-                # 我们只关心那些不是 CancelledError 的真正异常
                 if isinstance(result, Exception) and not isinstance(
                     result, asyncio.CancelledError
                 ):
