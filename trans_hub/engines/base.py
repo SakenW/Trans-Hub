@@ -148,7 +148,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
         for res in results:
             # [核心修复] `isinstance` 的第二个参数必须是类型的元组，
             # 使用 `|` (PEP 604) 会在运行时引发 TypeError。
-            if isinstance(res, EngineSuccess | EngineError):
+            if isinstance(res, (EngineSuccess, EngineError)):
                 final_results.append(res)
             elif isinstance(res, BaseException):
                 error_res = EngineError(
