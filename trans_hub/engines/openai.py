@@ -64,7 +64,6 @@ class OpenAIEngineConfig(BaseSettings, BaseEngineConfig):
         "or quotes.\n\n"
         'Text to translate: "{text}"'
     )
-    # v3.8 修复：将硬编码的网络参数配置化
     timeout_total: float = 30.0
     timeout_connect: float = 5.0
     max_retries: int = 2
@@ -101,8 +100,8 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 raise ConfigurationError(
                     "OpenAI 引擎配置错误: 缺少 API 密钥 (TH_OPENAI_API_KEY)。"
                 )
+
         assert config.api_key is not None
-        # v3.8 修复：使用配置化的网络参数
         timeout = httpx.Timeout(config.timeout_total, connect=config.timeout_connect)
         self.client: AsyncOpenAI = _AsyncOpenAIClient(
             api_key=config.api_key.get_secret_value(),
@@ -118,8 +117,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             await super().initialize()
             return
         logger.info(
-            "OpenAI 引擎正在初始化并执行健康检查...",
-            endpoint=str(self.config.endpoint),
+            "OpenAI 引擎正在初始化并执行健康检查...", endpoint=str(self.config.endpoint)
         )
         try:
             await self.client.models.list(timeout=10)
@@ -139,7 +137,6 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
             ) from e
         except Exception as e:
             raise ConfigurationError(f"OpenAI 引擎初始化失败: {e}") from e
-
         await super().initialize()
 
     async def close(self) -> None:
@@ -163,6 +160,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
         source_lang: str | None,
         context_config: dict[str, Any],
     ) -> EngineBatchItemResult:
+        """[实现] 执行单次 OpenAI 翻译调用，并对返回结构进行健壮性检查。"""
         final_source_lang = cast(str, source_lang)
         prompt_template = context_config.get(
             "prompt_template", self.config.default_prompt_template
@@ -189,12 +187,27 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                 temperature=temperature,
                 max_tokens=len(text.encode("utf-8")) * 3 + 150,
             )
-            translated_text = response.choices[0].message.content or ""
-            if not translated_text.strip():
+
+            # [核心修复] 对 API 返回结构进行防御性检查，防止因意外的 API 响应（如内容审查）导致崩溃。
+            if not response.choices:
+                return EngineError(
+                    error_message="API 返回了空的 'choices' 列表。", is_retryable=True
+                )
+
+            message = response.choices[0].message
+            if message.content is None:
+                return EngineError(
+                    error_message="API 返回的消息内容为 None。", is_retryable=True
+                )
+
+            translated_text = message.content.strip().strip('"')
+            if not translated_text:
                 return EngineError(
                     error_message="API 返回了空内容。", is_retryable=True
                 )
-            return EngineSuccess(translated_text=translated_text.strip().strip('"'))
+
+            return EngineSuccess(translated_text=translated_text)
+
         except (RateLimitError, InternalServerError, APIConnectionError) as e:
             return EngineError(error_message=str(e), is_retryable=True)
         except (PermissionDeniedError, AuthenticationError, APIStatusError) as e:

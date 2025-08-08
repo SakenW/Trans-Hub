@@ -1,7 +1,5 @@
 # trans_hub/cli/worker.py
-"""
-处理后台 Worker 运行的 CLI 命令。
-"""
+"""处理后台 Worker 运行的 CLI 命令。"""
 
 import asyncio
 import signal
@@ -105,7 +103,9 @@ async def _run_worker_loop(
     loop = asyncio.get_running_loop()
 
     def _signal_handler(signum: int, frame: Any) -> None:
-        logger.warning("收到停机信号，正在准备优雅关闭...", signal=signal.strsignal(signum))
+        logger.warning(
+            "收到停机信号，正在准备优雅关闭...", signal=signal.strsignal(signum)
+        )
         if not shutdown_event.is_set():
             loop.call_soon_threadsafe(shutdown_event.set)
 
@@ -126,14 +126,16 @@ async def _run_worker_loop(
         else:
             await notification_loop(coordinator, lang, shutdown_event)
 
-    worker_tasks = [asyncio.create_task(process_language(lang)) for lang in target_langs]
+    worker_tasks = [
+        asyncio.create_task(process_language(lang)) for lang in target_langs
+    ]
     for task in worker_tasks:
         coordinator.track_task(task)
 
     await shutdown_event.wait()
 
 
-@worker_app.command("start") # type: ignore[misc]
+@worker_app.command("start")
 def worker_start(
     ctx: typer.Context,
     target_langs: Annotated[

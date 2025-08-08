@@ -1,7 +1,5 @@
 # trans_hub/coordinator.py
-"""
-本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。
-"""
+"""本模块包含 Trans-Hub 引擎的主协调器 (Coordinator)。"""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -23,10 +21,10 @@ from .core import (
     TranslationStatus,
 )
 from .engine_registry import ENGINE_REGISTRY
+from .engines.base import BaseTranslationEngine
 from .policies import DefaultProcessingPolicy, ProcessingPolicy
 from .rate_limiter import RateLimiter
 from .utils import validate_lang_codes
-from .engines.base import BaseTranslationEngine
 
 if TYPE_CHECKING:
     pass
@@ -80,14 +78,20 @@ class Coordinator:
         if engine_name not in self._engine_instances:
             engine_class = ENGINE_REGISTRY.get(engine_name)
             if not engine_class:
-                raise EngineNotFoundError(f"引擎 '{engine_name}' 未在引擎注册表中找到。")
+                raise EngineNotFoundError(
+                    f"引擎 '{engine_name}' 未在引擎注册表中找到。"
+                )
             engine_config_model = engine_class.CONFIG_MODEL
             raw_config_data = self.config.engine_configs.get(engine_name, {})
             try:
                 engine_config_instance = engine_config_model(**raw_config_data)
             except Exception as e:
-                raise ConfigurationError(f"解析引擎 '{engine_name}' 的配置失败: {e}") from e
-            self._engine_instances[engine_name] = engine_class(config=engine_config_instance)
+                raise ConfigurationError(
+                    f"解析引擎 '{engine_name}' 的配置失败: {e}"
+                ) from e
+            self._engine_instances[engine_name] = engine_class(
+                config=engine_config_instance
+            )
             logger.info("引擎实例创建成功。", engine_name=engine_name)
         return self._engine_instances[engine_name]
 
@@ -181,8 +185,10 @@ class Coordinator:
             if not batch:
                 continue
 
-            task_to_batch_map: dict[asyncio.Task[list[TranslationResult]], list[ContentItem]] = {}
-            
+            task_to_batch_map: dict[
+                asyncio.Task[list[TranslationResult]], list[ContentItem]
+            ] = {}
+
             for _, items_group_iter in groupby(batch, key=lambda item: item.context_id):
                 items_group = list(items_group_iter)
                 task = asyncio.create_task(
@@ -203,11 +209,17 @@ class Coordinator:
             )
 
             all_results: list[TranslationResult] = []
-            for task, res_or_exc in zip(task_to_batch_map.keys(), results_or_exceptions):
+            for task, res_or_exc in zip(
+                task_to_batch_map.keys(), results_or_exceptions, strict=False
+            ):
                 original_batch = task_to_batch_map[task]
-                
+
                 if isinstance(res_or_exc, Exception):
-                    logger.error("一个上下文小组在处理时发生严重异常", exc_info=res_or_exc, batch_size=len(original_batch))
+                    logger.error(
+                        "一个上下文小组在处理时发生严重异常",
+                        exc_info=res_or_exc,
+                        batch_size=len(original_batch),
+                    )
                     failed_results = [
                         TranslationResult(
                             translation_id=item.translation_id,
@@ -217,7 +229,9 @@ class Coordinator:
                             status=TranslationStatus.FAILED,
                             from_cache=False,
                             error=f"批次处理异常: {res_or_exc.__class__.__name__}: {res_or_exc}",
-                            context_hash=self.processing_policy._get_context_hash(item.context),
+                            context_hash=self.processing_policy._get_context_hash(
+                                item.context
+                            ),
                         )
                         for item in original_batch
                     ]
@@ -329,17 +343,30 @@ class Coordinator:
         """优雅地关闭协调器和所有相关资源。"""
         if self._shutting_down or not self.initialized:
             return
+
         logger.info("开始优雅停机...")
         self._shutting_down = True
+
         if self._active_tasks:
             logger.info(f"正在取消 {len(self._active_tasks)} 个活动任务...")
             for task in list(self._active_tasks):
                 task.cancel()
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
+
         logger.info("所有活动任务已处理完毕，正在关闭底层资源...")
         close_tasks = [instance.close() for instance in self._engine_instances.values()]
         if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
+            # [核心修复] 检查并记录引擎关闭时发生的异常。
+            engine_close_results = await asyncio.gather(
+                *close_tasks, return_exceptions=True
+            )
+            for i, result in enumerate(engine_close_results):
+                if isinstance(result, Exception):
+                    engine_name = list(self._engine_instances.keys())[i]
+                    logger.error(
+                        "关闭引擎时发生异常", engine=engine_name, exc_info=result
+                    )
+
         await self.handler.close()
         self.initialized = False
         logger.info("优雅停机完成。")
