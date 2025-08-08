@@ -206,9 +206,7 @@ class OpenAIEngine(BaseTranslationEngine[OpenAIEngineConfig]):
                     if not (hasattr(part, "text") and isinstance(part.text, str)):
                         error_msg = "API 返回了不支持的内容块类型，翻译中止。"
                         logger.warning(error_msg, received_part=str(part)[:200])
-                        return EngineError(
-                            error_message=error_msg, is_retryable=False
-                        )
+                        return EngineError(error_message=error_msg, is_retryable=False)
                     translated_text += part.text
 
             if not translated_text:

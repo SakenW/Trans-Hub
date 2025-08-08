@@ -121,9 +121,7 @@ class SQLitePersistenceHandler(PersistenceHandler):
                 TranslationStatus.TRANSLATING.value,
             ]
             await tx.execute(sql, params)
-        logger.info(
-            "已将一组任务的状态回滚至 PENDING", count=len(translation_ids)
-        )
+        logger.info("已将一组任务的状态回滚至 PENDING", count=len(translation_ids))
 
     def stream_translatable_items(
         self,

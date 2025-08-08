@@ -80,7 +80,9 @@ async def notification_loop(
                     logger.info("正在等待下一次新任务通知...", lang=lang)
                 except Exception:
                     # 如果获取通知结果时发生错误（例如 StopAsyncIteration 或其他），则记录并准备退出
-                    logger.error("通知生成器或任务处理中发生错误", lang=lang, exc_info=True)
+                    logger.error(
+                        "通知生成器或任务处理中发生错误", lang=lang, exc_info=True
+                    )
                     # 发生严重错误时，也应该触发停机
                     shutdown_event.set()
 

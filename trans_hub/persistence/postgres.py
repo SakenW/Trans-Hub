@@ -88,9 +88,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                         self.NOTIFICATION_CHANNEL, self._notification_callback
                     )
                 except asyncpg.InterfaceError:
-                    logger.warning(
-                        "移除监听器失败，连接可能已关闭", exc_info=True
-                    )
+                    logger.warning("移除监听器失败，连接可能已关闭", exc_info=True)
             await self._notification_listener_conn.close()
             self._notification_listener_conn = None
         if self._pool:
@@ -134,9 +132,7 @@ class PostgresPersistenceHandler(PersistenceHandler):
                     translation_ids,
                     TranslationStatus.TRANSLATING.value,
                 )
-            logger.info(
-                "已将一组任务的状态回滚至 PENDING", count=len(translation_ids)
-            )
+            logger.info("已将一组任务的状态回滚至 PENDING", count=len(translation_ids))
         except asyncpg.PostgresError as e:
             raise DatabaseError(f"回滚翻译状态失败: {e}") from e
 
