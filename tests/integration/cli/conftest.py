@@ -1,6 +1,5 @@
 # tests/integration/cli/conftest.py
-"""为 CLI 集成测试提供专用的、基于 mock 的 Fixtures。"""
-
+"""为 CLI 集成测试提供专用的、基于 mock 的 Fixtures (UIDA 架构版)。"""
 from collections.abc import Generator
 from unittest.mock import AsyncMock
 
@@ -33,18 +32,17 @@ def patch_cli_config(mocker: MockerFixture, mock_cli_config: TransHubConfig) -> 
 @pytest.fixture
 def mock_coordinator(mocker: MockerFixture) -> Generator[AsyncMock, None, None]:
     """提供一个 Coordinator 的 AsyncMock 实例，用于隔离测试 CLI 的逻辑。"""
-    yield mocker.create_autospec(Coordinator, instance=True, spec_set=True)
+    # 使用 autospec 确保 mock 的接口与真实的 Coordinator 类匹配
+    mock = mocker.create_autospec(Coordinator, instance=True, spec_set=True)
+    # 确保 request 方法是异步的
+    mock.request = AsyncMock()
+    yield mock
 
 
 @pytest.fixture
 def mock_cli_backend(mocker: MockerFixture, mock_coordinator: AsyncMock) -> None:
-    """
-    修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。
-    [核心修改] 现在 patch Alembic 的 command.upgrade。
-    """
+    """修补 CLI 命令的后端依赖（Coordinator 创建和数据库迁移）。"""
     mocker.patch(
         "trans_hub.cli.utils.create_coordinator", return_value=mock_coordinator
     )
-    # [核心修改] 我们不再 patch 一个不存在的函数，而是 patch alembic.command.upgrade
-    # 这个函数现在被 trans_hub.cli.db 模块导入和使用。
     mocker.patch("trans_hub.cli.db.command.upgrade")

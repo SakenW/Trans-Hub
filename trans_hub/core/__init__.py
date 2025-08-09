@@ -16,14 +16,15 @@ from .exceptions import (
 )
 from .interfaces import PersistenceHandler
 from .types import (
-    GLOBAL_CONTEXT_SENTINEL,
+    # GLOBAL_CONTEXT_SENTINEL,  <-- [核心修复] 移除此行
     ContentItem,
     EngineBatchItemResult,
     EngineError,
     EngineSuccess,
-    TranslationRequest,
+    # TranslationRequest,       <-- [核心修复] 移除此行
     TranslationResult,
     TranslationStatus,
+    ProcessingContext, # 确保 ProcessingContext 被导出
 )
 
 __all__ = [
@@ -40,8 +41,7 @@ __all__ = [
     "EngineSuccess",
     "EngineError",
     "EngineBatchItemResult",
-    "TranslationRequest",
     "TranslationResult",
     "ContentItem",
-    "GLOBAL_CONTEXT_SENTINEL",
+    "ProcessingContext",
 ]

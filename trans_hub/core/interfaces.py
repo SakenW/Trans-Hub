@@ -1,19 +1,21 @@
 # trans_hub/core/interfaces.py
 """
 本模块使用 typing.Protocol 定义了核心组件的接口协议。
-此版本已完全升级至 UIDA 架构。
+此版本已完全升级至白皮书 Final v1.2。
 """
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Protocol
 
+from trans_hub.core.types import TranslationStatus
+
 if TYPE_CHECKING:
-    from trans_hub.core.types import ContentItem, TranslationResult, TranslationStatus
+    from trans_hub.core.types import ContentItem, TranslationResult
 
 
 class PersistenceHandler(Protocol):
-    """定义了 UIDA 架构下持久化处理器的纯异步接口协议。"""
+    """定义了白皮书 v1.2 下持久化处理器的纯异步接口协议。"""
 
     SUPPORTS_NOTIFICATIONS: bool
 
@@ -82,18 +84,16 @@ class PersistenceHandler(Protocol):
         """在 th_translations 中创建一条新的翻译草稿记录，返回 translation_id。"""
         ...
 
-    async def update_translation_from_tm(
+    async def update_translation(
         self,
         translation_id: str,
-        tm_id: str,
-        translated_payload: dict[str, Any],
-        status: TranslationStatus = TranslationStatus.DRAFT,
+        status: TranslationStatus,
+        translated_payload: dict[str, Any] | None = None,
+        tm_id: str | None = None,
+        engine_name: str | None = None,
+        engine_version: str | None = None,
     ) -> None:
-        """使用 TM 命中的结果更新翻译记录。"""
-        ...
-
-    async def save_translation_results(self, results: list[TranslationResult]) -> None:
-        """[Worker专用] 批量保存来自 Worker 处理后的翻译结果。"""
+        """[Worker专用] 更新单条翻译记录的状态和内容。"""
         ...
 
     async def link_translation_to_tm(self, translation_id: str, tm_id: str) -> None:
@@ -106,28 +106,19 @@ class PersistenceHandler(Protocol):
         """获取指定维度的已发布译文，返回 translated_payload_json 或 None。"""
         ...
 
-    def stream_translatable_items(
+    def stream_draft_translations(
         self,
-        lang_code: str,
-        statuses: list[TranslationStatus],
         batch_size: int,
         limit: int | None = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
-        """流式获取待处理的翻译任务。"""
-        ...
-
-    async def reset_stale_tasks(self) -> None:
-        """[Worker专用] 在启动时重置所有处于“TRANSLATING”状态的旧任务为草稿。"""
+        """流式获取待处理的 'draft' 状态翻译任务。"""
         ...
 
     async def run_garbage_collection(
         self,
         archived_content_retention_days: int,
         unused_tm_retention_days: int,
-        dry_run: bool = False,
+        dry_run: bool,
     ) -> dict[str, int]:
-        """
-        [新] 运行垃圾回收，清理已归档的内容和长期未使用的 TM 条目。
-        返回一个包含被删除项目计数的报告。
-        """
+        """运行垃圾回收。"""
         ...

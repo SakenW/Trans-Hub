@@ -1,17 +1,18 @@
 # trans_hub/persistence/base.py
 """
 提供一个包含所有共享数据库逻辑的、基于 SQLAlchemy ORM Session 的基类。
-此基类采用“统一标识符架构 (UIDA)”，是项目的最终最优实现。
+此基类遵循白皮书 Final v1.2。
 """
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,6 +37,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]):
         self._sessionmaker = sessionmaker
         self._is_sqlite = self._sessionmaker.kw["bind"].dialect.name == "sqlite"
+        self._notification_task: asyncio.Task | None = None
 
     @abstractmethod
     async def connect(self) -> None:
@@ -44,6 +46,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
 
     async def close(self) -> None:
         """[通用实现] 安全地关闭 SQLAlchemy 引擎及其底层连接池。"""
+        if self._notification_task and not self._notification_task.done():
+            self._notification_task.cancel()
         await self._sessionmaker.kw["bind"].dispose()
 
     @abstractmethod
@@ -62,6 +66,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         keys_b64, _, keys_sha = generate_uid_components(keys)
         try:
             async with self._sessionmaker.begin() as session:
+                # 尝试插入
                 stmt = insert(ThContent).values(
                     project_id=project_id,
                     namespace=namespace,
@@ -79,20 +84,17 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     stmt = stmt.on_conflict_on_constraint("uq_content_uida", do_nothing=True)
                 await session.execute(stmt)
 
+                # 无论插入或冲突，都查询 ID
                 select_stmt = select(ThContent.id).where(
                     ThContent.project_id == project_id,
                     ThContent.namespace == namespace,
                     ThContent.keys_sha256_bytes == keys_sha,
                 )
                 result = await session.execute(select_stmt)
-                content_id = result.scalar_one_or_none()
-                if not content_id:
-                    raise DatabaseError("无法在 upsert 后插入或找到内容。")
+                content_id = result.scalar_one()
                 return content_id
-        except IntegrityError as e:
-            raise DatabaseError(f"数据库完整性错误: {e}") from e
         except SQLAlchemyError as e:
-            raise DatabaseError(f"数据库错误: {e}") from e
+            raise DatabaseError(f"Upsert content failed: {e}") from e
 
     async def find_tm_entry(
         self,
@@ -107,7 +109,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     ) -> tuple[str, dict[str, Any]] | None:
         try:
             async with self._sessionmaker() as session:
-                stmt = select(ThTm).where(
+                stmt = select(ThTm.id, ThTm.translated_json).where(
                     ThTm.project_id == project_id,
                     ThTm.namespace == namespace,
                     ThTm.reuse_sha256_bytes == reuse_sha256_bytes,
@@ -117,13 +119,10 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     ThTm.policy_version == policy_version,
                     ThTm.hash_algo_version == hash_algo_version,
                 )
-                result = await session.execute(stmt)
-                tm_entry = result.scalar_one_or_none()
-                if tm_entry:
-                    return tm_entry.id, tm_entry.translated_json
-                return None
+                result = (await session.execute(stmt)).first()
+                return result if result else None
         except SQLAlchemyError as e:
-            raise DatabaseError(f"查找 TM 条目时出错: {e}") from e
+            raise DatabaseError(f"Find TM entry failed: {e}") from e
 
     async def upsert_tm_entry(
         self,
@@ -153,7 +152,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     source_text_json=source_text_json,
                     translated_json=translated_json,
                     quality_score=quality_score,
-                    last_used_at=datetime.now(datetime.UTC),
+                    last_used_at=datetime.now(timezone.utc),
                 )
                 stmt = insert(ThTm).values(values)
                 
@@ -161,6 +160,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     "translated_json": stmt.excluded.translated_json,
                     "quality_score": stmt.excluded.quality_score,
                     "last_used_at": stmt.excluded.last_used_at,
+                    "updated_at": func.now(),
                 }
                 
                 index_elements = [
@@ -171,26 +171,20 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 
                 if self._is_sqlite:
                     stmt = stmt.on_conflict_do_update(
-                        index_elements=index_elements,
-                        set_=update_values,
+                        index_elements=index_elements, set_=update_values
                     )
                 else:
-                    stmt = stmt.on_conflict_on_constraint(
-                        "uq_tm_reuse_key",
-                        do_update_set=update_values
-                    )
+                    stmt = stmt.on_conflict_on_constraint("uq_tm_reuse_key", do_update=update_values)
                 
-                # SQLite doesn't support RETURNING on ON CONFLICT UPDATE, so we do it in two steps.
                 await session.execute(stmt)
-                
+
                 select_stmt = select(ThTm.id).where(
                     *(getattr(ThTm, col) == values[col] for col in index_elements)
                 )
                 result = await session.execute(select_stmt)
-                tm_id = result.scalar_one()
-                return tm_id
+                return result.scalar_one()
         except SQLAlchemyError as e:
-            raise DatabaseError(f"Upsert TM 条目时出错: {e}") from e
+            raise DatabaseError(f"Upsert TM entry failed: {e}") from e
 
     async def create_draft_translation(
         self,
@@ -203,41 +197,57 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker.begin() as session:
                 new_draft = ThTranslations(
-                    project_id=project_id,
+                    project_id=project_id, # App layer must provide this for SQLite
                     content_id=content_id,
                     target_lang=target_lang,
                     variant_key=variant_key,
                     source_lang=source_lang,
-                    status="draft",
+                    status=TranslationStatus.DRAFT.value,
                 )
                 session.add(new_draft)
                 await session.flush()
                 return new_draft.id
+        except IntegrityError: # Already exists, just return the ID
+             async with self._sessionmaker() as session:
+                stmt = select(ThTranslations.id).where(
+                    ThTranslations.content_id == content_id,
+                    ThTranslations.target_lang == target_lang,
+                    ThTranslations.variant_key == variant_key,
+                    ThTranslations.status == TranslationStatus.DRAFT.value,
+                )
+                return (await session.execute(stmt)).scalar_one()
         except SQLAlchemyError as e:
-            raise DatabaseError(f"创建翻译草稿时出错: {e}") from e
+            raise DatabaseError(f"Create draft translation failed: {e}") from e
 
-    async def update_translation_from_tm(
+    async def update_translation(
         self,
         translation_id: str,
-        tm_id: str,
-        translated_payload: dict[str, Any],
-        status: TranslationStatus = TranslationStatus.DRAFT,
+        status: TranslationStatus,
+        translated_payload: dict[str, Any] | None = None,
+        tm_id: str | None = None,
+        engine_name: str | None = None,
+        engine_version: str | None = None,
     ) -> None:
         try:
             async with self._sessionmaker.begin() as session:
+                values_to_update = {"status": status.value}
+                if translated_payload is not None:
+                    values_to_update["translated_payload_json"] = translated_payload
+                if tm_id is not None:
+                    values_to_update["tm_id"] = tm_id
+                if engine_name is not None:
+                    values_to_update["engine_name"] = engine_name
+                if engine_version is not None:
+                    values_to_update["engine_version"] = engine_version
+
                 stmt = (
                     update(ThTranslations)
                     .where(ThTranslations.id == translation_id)
-                    .values(
-                        tm_id=tm_id,
-                        translated_payload_json=translated_payload,
-                        status=status.value,
-                        updated_at=datetime.now(datetime.UTC),
-                    )
+                    .values(**values_to_update)
                 )
                 await session.execute(stmt)
         except SQLAlchemyError as e:
-            raise DatabaseError(f"从 TM 更新翻译时出错: {e}") from e
+            raise DatabaseError(f"Update translation failed: {e}") from e
 
     async def link_translation_to_tm(self, translation_id: str, tm_id: str) -> None:
         try:
@@ -249,7 +259,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     stmt = stmt.on_conflict_on_constraint("uq_tm_links_pair", do_nothing=True)
                 await session.execute(stmt)
         except SQLAlchemyError as e:
-            raise DatabaseError(f"链接 TM 时出错: {e}") from e
+            raise DatabaseError(f"Link translation to TM failed: {e}") from e
 
     async def get_published_translation(
         self, content_id: str, target_lang: str, variant_key: str
@@ -263,10 +273,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     ThTranslations.status == "published",
                 )
                 result = await session.execute(stmt)
-                payload = result.scalar_one_or_none()
-                return payload
+                return result.scalar_one_or_none()
         except SQLAlchemyError as e:
-            raise DatabaseError(f"获取已发布译文时出错: {e}") from e
+            raise DatabaseError(f"Get published translation failed: {e}") from e
 
     async def _build_content_items_from_orm(
         self, session: AsyncSession, orm_results: list[ThTranslations]
@@ -276,9 +285,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         
         content_ids = {obj.content_id for obj in orm_results}
         content_stmt = select(ThContent).where(ThContent.id.in_(content_ids))
-        contents = {
-            c.id: c for c in (await session.execute(content_stmt)).scalars()
-        }
+        contents = {c.id: c for c in (await session.execute(content_stmt)).scalars()}
 
         items = []
         for orm_obj in orm_results:
@@ -304,9 +311,6 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         unused_tm_retention_days: int,
         dry_run: bool = False,
     ) -> dict[str, int]:
-        """
-        [UIDA] 实现垃圾回收逻辑。
-        """
         stats = {
             "deleted_archived_content": 0,
             "deleted_unused_tm_entries": 0,
@@ -344,11 +348,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                         stats["deleted_unused_tm_entries"] = result.rowcount
 
                 if dry_run:
-                    # 在 dry_run 模式下，我们不希望提交任何更改
                     await session.rollback()
-                    logger.info("垃圾回收 (dry run) 完成，事务已回滚。")
-
         except SQLAlchemyError as e:
-            raise DatabaseError(f"垃圾回收失败: {e}") from e
+            raise DatabaseError(f"Garbage collection failed: {e}") from e
 
         return stats

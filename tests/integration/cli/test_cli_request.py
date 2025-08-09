@@ -1,91 +1,76 @@
 # tests/integration/cli/test_cli_request.py
-"""
-测试 `request` 相关 CLI 命令的集成。
-v3.0.0 更新：重写以测试基于业务ID和结构化载荷的新命令接口。
-"""
-
+"""测试 UIDA 架构下的 `request new` CLI 命令。"""
 import json
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import AsyncMock
 
-from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
+from tests.helpers.factories import TEST_NAMESPACE, TEST_PROJECT_ID
 from trans_hub.cli.main import app
 
 
-def test_request_new_calls_async_logic(
-    cli_runner: CliRunner, mocker: MockerFixture, mock_cli_backend: None
-) -> None:
-    """测试 `request new` 命令是否正确调用了其核心异步逻辑。"""
-    mock_async_request = mocker.patch(
-        "trans_hub.cli.request._async_request_new", new_callable=AsyncMock
-    )
-    business_id = "test-123"
-    payload = {"text": "Hello, world!"}
-    payload_str = json.dumps(payload)
-
+def test_request_new_uida_success(
+    cli_runner: CliRunner, mock_coordinator: AsyncMock, mock_cli_backend: None
+):
+    """
+    测试 `request new` 命令能否正确解析 UIDA 参数并调用 Coordinator。
+    """
+    keys = {"view": "home", "id": "title"}
+    source_payload = {"text": "Welcome"}
+    
     result = cli_runner.invoke(
         app,
         [
             "request",
             "new",
-            "--id",
-            business_id,
-            "--payload-json",
-            payload_str,
+            "--project-id",
+            TEST_PROJECT_ID,
+            "--namespace",
+            TEST_NAMESPACE,
+            "--keys-json",
+            json.dumps(keys),
+            "--source-payload-json",
+            json.dumps(source_payload),
+            "--source-lang",
+            "en",
             "--target",
             "de",
-            "--force",
+            "--target",
+            "fr",
         ],
     )
 
-    assert result.exit_code == 0
-    mock_async_request.assert_awaited_once_with(
-        ANY, business_id, payload, ["de"], None, True, None
+    assert result.exit_code == 0, result.stdout
+    assert "翻译请求已成功处理" in result.stdout
+
+    # 验证 Coordinator 的 request 方法是否被正确调用
+    mock_coordinator.request.assert_awaited_once_with(
+        project_id=TEST_PROJECT_ID,
+        namespace=TEST_NAMESPACE,
+        keys=keys,
+        source_payload=source_payload,
+        source_lang="en",
+        target_langs=["de", "fr"],
     )
 
 
-def test_request_new_invalid_lang_code_fails_early(
-    cli_runner: CliRunner, mocker: MockerFixture, mock_cli_backend: None
-) -> None:
-    """测试 `request new` 在提供无效语言代码时失败，且不调用异步逻辑。"""
-    mock_async_request = mocker.patch("trans_hub.cli.request._async_request_new")
+def test_request_new_uida_invalid_json_fails(
+    cli_runner: CliRunner, mock_coordinator: AsyncMock, mock_cli_backend: None
+):
+    """测试当提供无效的 JSON 字符串时，命令是否会提前失败。"""
     result = cli_runner.invoke(
         app,
         [
-            "request",
-            "new",
-            "--id",
-            "t-1",
-            "--payload-json",
-            '{"text":"hi"}',
-            "--target",
-            "invalid-lang",
+            "request", "new",
+            "--project-id", "proj1",
+            "--namespace", "ns1",
+            "--keys-json", '{"key": "value"', # 无效 JSON
+            "--source-payload-json", '{"text": "hi"}',
+            "--source-lang", "en",
+            "--target", "de",
         ],
     )
-    assert result.exit_code == 1
-    assert "语言代码错误" in result.stdout
-    mock_async_request.assert_not_called()
 
-
-def test_request_new_invalid_payload_json_fails_early(
-    cli_runner: CliRunner, mocker: MockerFixture, mock_cli_backend: None
-) -> None:
-    """测试 `request new` 在提供无效 JSON payload 时失败。"""
-    mock_async_request = mocker.patch("trans_hub.cli.request._async_request_new")
-    result = cli_runner.invoke(
-        app,
-        [
-            "request",
-            "new",
-            "--id",
-            "t-1",
-            "--payload-json",
-            '{"text":"hi"',  # 格式错误的 JSON
-            "--target",
-            "de",
-        ],
-    )
     assert result.exit_code == 1
-    assert "Payload 格式错误" in result.stdout
-    mock_async_request.assert_not_called()
+    assert "JSON 格式错误" in result.stdout
+    mock_coordinator.request.assert_not_awaited()
