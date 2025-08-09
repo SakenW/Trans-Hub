@@ -1,4 +1,5 @@
 # trans_hub/coordinator.py
+# [v1.3 - 实现完整生命周期与读取回退]
 """本模块包含 Trans-Hub 引擎的主协调器（白皮书 Final v1.2）。"""
 import asyncio
 from typing import Any
@@ -6,6 +7,7 @@ from typing import Any
 import structlog
 
 from trans_hub._tm.normalizers import normalize_plain_text_for_reuse
+from trans_hub._uida.encoder import generate_uid_components
 from trans_hub._uida.reuse_key import build_reuse_sha256
 from trans_hub.config import TransHubConfig
 from trans_hub.core import (
@@ -124,12 +126,15 @@ class Coordinator:
                     translation_id=translation_id,
                     status=TranslationStatus.REVIEWED,
                     translated_payload=translated_payload,
-                    tm_id=tm_id,
                 )
                 await self.handler.link_translation_to_tm(translation_id, tm_id)
                 logger.info("TM 命中，直接创建待审阅翻译", translation_id=translation_id, tm_id=tm_id)
             else:
                 logger.info("TM 未命中，已创建翻译草稿任务", translation_id=translation_id)
+        
+        if self.handler.SUPPORTS_NOTIFICATIONS:
+            # TODO: Add notification logic here
+            pass
         
         return translation_ids
 
@@ -144,6 +149,19 @@ class Coordinator:
             self._engine_instances[engine_name] = engine_class(config=engine_config)
             logger.info("引擎实例已创建", engine_name=engine_name)
         return self._engine_instances[engine_name]
+
+    async def publish_translation(self, translation_id: str) -> bool:
+        """[新增] 发布一条已审阅的翻译。"""
+        # TODO: 可以在此添加权限、状态前置条件等业务逻辑检查
+        return await self.handler.update_translation_status(
+            translation_id, TranslationStatus.PUBLISHED
+        )
+
+    async def reject_translation(self, translation_id: str) -> bool:
+        """[新增] 拒绝一条已审阅的翻译。"""
+        return await self.handler.update_translation_status(
+            translation_id, TranslationStatus.REJECTED
+        )
 
     async def run_garbage_collection(
         self,
@@ -173,16 +191,47 @@ class Coordinator:
         variant_key: str = '-',
     ) -> dict[str, Any] | None:
         """
-        [v1.2] 获取最终的翻译结果，包含语言和变体回退逻辑。
+        [v1.3 完整实现] 获取最终的翻译结果，包含语言和变体回退逻辑。
+        此方法现在是纯粹的读取操作。
         """
-        content_id = await self.handler.upsert_content(project_id, namespace, keys, {}, 1) # Payload can be empty for reads
-        
-        # 1. 直接查询
-        translation = await self.handler.get_published_translation(content_id, target_lang, variant_key)
+        _, _, keys_sha = generate_uid_components(keys)
+        content_id = await self.handler.get_content_id_by_uida(
+            project_id, namespace, keys_sha
+        )
+        if not content_id:
+            logger.debug("Content not found for UIDA, returning None.", uida_keys=keys)
+            return None
+
+        # 1. 直接查询 (完全匹配)
+        translation = await self.handler.get_published_translation(
+            content_id, target_lang, variant_key
+        )
         if translation:
             return translation
             
-        # TODO: 2. 变体回退
-        # TODO: 3. 语言回退
+        # 2. 变体回退 (如果当前变体不是默认的'-')
+        if variant_key != '-':
+            translation = await self.handler.get_published_translation(
+                content_id, target_lang, '-'
+            )
+            if translation:
+                logger.debug("Found translation via variant fallback.", variant_key=variant_key)
+                return translation
+        
+        # 3. 语言回退
+        fallback_order = await self.handler.get_fallback_order(project_id, target_lang)
+        if fallback_order:
+            for fallback_lang in fallback_order:
+                # 在回退语言时，通常不考虑变体，或只考虑默认变体
+                translation = await self.handler.get_published_translation(
+                    content_id, fallback_lang, '-'
+                )
+                if translation:
+                    logger.debug(
+                        "Found translation via language fallback.",
+                        original_lang=target_lang,
+                        fallback_lang=fallback_lang,
+                    )
+                    return translation
         
         return None

@@ -1,5 +1,5 @@
 # trans_hub/policies/processing.py
-"""本模块定义并实现了白皮书 v1.2 下的翻译处理策略。"""
+# [终极版 v1.8 - 修正 SQLite 并发写入死锁]
 import asyncio
 from typing import Any, Protocol
 
@@ -60,11 +60,10 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             source_lang=item_template.source_lang,
         )
 
-        tasks_to_gather = []
+        success_items = []
         for item, output in zip(batch, engine_outputs):
             if isinstance(output, EngineSuccess):
-                task = asyncio.create_task(self._handle_success(item, output, p_context, active_engine))
-                tasks_to_gather.append(task)
+                success_items.append((item, output))
             elif isinstance(output, EngineError):
                 logger.error(
                     "Engine failed to translate item, it will be retried later.",
@@ -73,12 +72,32 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                     is_retryable=output.is_retryable,
                 )
 
-        if not tasks_to_gather:
+        if not success_items:
             return []
 
-        # 并发处理所有成功的任务
-        results = await asyncio.gather(*tasks_to_gather)
-        return [res for res in results if res is not None]
+        # [终极修复] 根据数据库方言选择并发或串行写入
+        # BasePersistenceHandler 中已经有 _is_sqlite 属性
+        is_sqlite = p_context.handler._is_sqlite
+
+        final_results = []
+        if is_sqlite:
+            # 对于 SQLite，必须串行处理以避免死锁
+            logger.debug("Using serial DB write for SQLite.")
+            for item, output in success_items:
+                result = await self._handle_success(item, output, p_context, active_engine)
+                if result:
+                    final_results.append(result)
+        else:
+            # 对于 PostgreSQL，可以使用并发写入以提高性能
+            logger.debug("Using concurrent DB write for PostgreSQL.")
+            tasks = [
+                self._handle_success(item, output, p_context, active_engine)
+                for item, output in success_items
+            ]
+            results = await asyncio.gather(*tasks)
+            final_results = [res for res in results if res is not None]
+        
+        return final_results
 
     async def _handle_success(
         self,
@@ -88,11 +107,9 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         active_engine: BaseTranslationEngine[Any],
     ) -> TranslationResult | None:
         try:
-            # 1. 构建翻译后的 payload
             translated_payload = dict(item.source_payload)
             translated_payload[self.PAYLOAD_TEXT_KEY] = output.translated_text
 
-            # 2. 构建 TM 复用键
             reuse_policy = {"include_source_fields": [self.PAYLOAD_TEXT_KEY]}
             source_fields_for_reuse = {
                 k: normalize_plain_text_for_reuse(item.source_payload.get(k))
@@ -105,7 +122,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 source_fields=source_fields_for_reuse,
             )
             
-            # 3. 幂等地将新翻译写入 TM
             tm_id = await p_context.handler.upsert_tm_entry(
                 project_id=item.project_id,
                 namespace=item.namespace,
@@ -120,7 +136,6 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 quality_score=0.9 if not output.from_cache else 1.0,
             )
             
-            # 4. 更新翻译记录为 'reviewed'
             await p_context.handler.update_translation(
                 translation_id=item.translation_id,
                 status=TranslationStatus.REVIEWED,
@@ -130,17 +145,17 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 engine_version=active_engine.VERSION,
             )
             
-            # 5. 建立追溯链接
             await p_context.handler.link_translation_to_tm(item.translation_id, tm_id)
             
             return TranslationResult(
                 translation_id=item.translation_id,
                 content_id=item.content_id,
                 status=TranslationStatus.REVIEWED,
-                translated_payload=translated_payload,
-                engine_name=active_engine.name,
-                engine_version=active_engine.VERSION,
             )
         except Exception:
-            logger.error("Failed to handle successful translation result in DB", exc_info=True)
+            logger.error(
+                "Failed to save successful translation result to DB",
+                translation_id=item.translation_id,
+                exc_info=True
+            )
             return None

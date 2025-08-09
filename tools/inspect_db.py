@@ -1,5 +1,6 @@
 # tools/inspect_db.py
-"""一个专业的命令行工具，用于检查和解读 Trans-Hub (v3.2+) 数据库的内容。"""
+# [v4.0 UIDA 版]
+"""一个专业的命令行工具，用于检查和解读 Trans-Hub (v3.0+) 数据库的内容。"""
 
 import argparse
 import asyncio
@@ -8,7 +9,6 @@ import os
 import sys
 from pathlib import Path
 
-# v3.7 修复：将 sys.path 修改逻辑置于顶部，并添加 noqa
 try:
     project_root = Path(__file__).resolve().parent.parent
     if str(project_root) not in sys.path:
@@ -21,7 +21,6 @@ except (ImportError, IndexError):
 import aiosqlite  # noqa: E402
 import structlog  # noqa: E402
 
-# v3.9 修复：导入 RenderableType 以解决 Mypy 错误
 from rich.console import Console, Group, RenderableType  # noqa: E402
 from rich.panel import Panel  # noqa: E402
 from rich.syntax import Syntax  # noqa: E402
@@ -35,14 +34,6 @@ class DatabaseInspector:
     """封装了检查 Trans-Hub 数据库所有逻辑的类。"""
 
     def __init__(self, db_path: str, console: Console):
-        """
-        初始化数据库检查器。
-
-        Args:
-            db_path (str): 目标 SQLite 数据库文件的路径。
-            console (Console): 用于富文本输出的 Rich Console 实例。
-
-        """
         self.db_path = db_path
         self.console = console
         self.conn: aiosqlite.Connection | None = None
@@ -68,17 +59,18 @@ class DatabaseInspector:
         """查询并打印数据库的统计概览信息。"""
         assert self.conn is not None
         self.console.print(
-            Panel("[bold cyan]Trans-Hub 数据库统计概览[/bold cyan]", expand=False)
+            Panel("[bold cyan]Trans-Hub 数据库统计概览 (UIDA v1.2 Schema)[/bold cyan]", expand=False)
         )
         queries = {
-            "总内容条目 (th_content)": "SELECT COUNT(*) FROM th_content;",
-            "总上下文条目 (th_contexts)": "SELECT COUNT(*) FROM th_contexts;",
-            "总关联任务 (th_jobs)": "SELECT COUNT(*) FROM th_jobs;",
-            "总翻译记录 (th_translations)": "SELECT COUNT(*) FROM th_translations;",
-            "待处理 (PENDING)": "SELECT COUNT(*) FROM th_translations WHERE status = 'PENDING';",
-            "翻译中 (TRANSLATING)": "SELECT COUNT(*) FROM th_translations WHERE status = 'TRANSLATING';",
-            "已失败 (FAILED)": "SELECT COUNT(*) FROM th_translations WHERE status = 'FAILED';",
-            "死信队列条目 (DLQ)": "SELECT COUNT(*) FROM th_dead_letter_queue;",
+            "源内容 (th_content)": "SELECT COUNT(*) FROM th_content;",
+            "翻译记录 (th_translations)": "SELECT COUNT(*) FROM th_translations;",
+            "翻译记忆 (th_tm)": "SELECT COUNT(*) FROM th_tm;",
+            "TM 追溯链接 (th_tm_links)": "SELECT COUNT(*) FROM th_tm_links;",
+            "草稿 (draft)": "SELECT COUNT(*) FROM th_translations WHERE status = 'draft';",
+            "待审 (reviewed)": "SELECT COUNT(*) FROM th_translations WHERE status = 'reviewed';",
+            "已发布 (published)": "SELECT COUNT(*) FROM th_translations WHERE status = 'published';",
+            "已拒绝 (rejected)": "SELECT COUNT(*) FROM th_translations WHERE status = 'rejected';",
+            "语言回退策略 (th_locales_fallbacks)": "SELECT COUNT(*) FROM th_locales_fallbacks;",
         }
         table = Table(show_header=False, box=None)
         table.add_column("项目", style="dim")
@@ -102,21 +94,20 @@ class DatabaseInspector:
         query = """
             SELECT
                 t.id AS translation_id,
-                t.lang_code,
+                t.target_lang,
+                t.variant_key,
                 t.status,
-                t.translation_payload_json,
-                t.engine,
-                t.engine_version,
-                t.last_updated_at,
-                c.source_payload_json,
-                ctx.context_payload_json,
-                c.business_id,
-                j.last_requested_at
+                t.revision,
+                t.translated_payload_json,
+                t.engine_name,
+                t.updated_at,
+                c.project_id,
+                c.namespace,
+                c.keys_json_debug,
+                c.source_payload_json
             FROM th_translations t
             JOIN th_content c ON t.content_id = c.id
-            LEFT JOIN th_contexts ctx ON t.context_id = ctx.id
-            LEFT JOIN th_jobs j ON t.content_id = j.content_id
-            ORDER BY t.last_updated_at DESC;
+            ORDER BY c.project_id, c.namespace, t.target_lang, t.updated_at DESC;
         """
         async with self.conn.cursor() as cursor:
             await cursor.execute(query)
@@ -131,73 +122,70 @@ class DatabaseInspector:
     def _build_single_record_panel(self, index: int, row: aiosqlite.Row) -> Panel:
         """为单条记录构建一个包含所有信息的、结构化的 Rich Panel。"""
         status_colors = {
-            "TRANSLATED": "green",
-            "APPROVED": "bright_green",
-            "PENDING": "yellow",
-            "TRANSLATING": "cyan",
-            "FAILED": "red",
+            "published": "green",
+            "reviewed": "cyan",
+            "draft": "yellow",
+            "rejected": "red",
         }
         status_color = status_colors.get(row["status"], "default")
 
+        # --- UIDA 信息 ---
+        uida_table = Table(box=None, show_header=False, padding=(0, 1))
+        uida_table.add_column(style="dim", width=12)
+        uida_table.add_column(style="bright_white")
+        uida_table.add_row("Project ID:", row["project_id"])
+        uida_table.add_row("Namespace:", row["namespace"])
+
         # --- 主要内容 ---
-        original_payload = json.loads(row["source_payload_json"])
-        original_text = original_payload.get("text", str(original_payload))
-
+        source_payload = json.loads(row["source_payload_json"])
+        source_text = source_payload.get("text", str(source_payload))
         translated_text = "[dim]N/A[/dim]"
-        if row["translation_payload_json"]:
-            translated_payload = json.loads(row["translation_payload_json"])
+        if row["translated_payload_json"]:
+            translated_payload = json.loads(row["translated_payload_json"])
             translated_text = translated_payload.get("text", str(translated_payload))
-
+        
         content_table = Table(box=None, show_header=False, padding=(0, 1))
         content_table.add_column(style="dim", width=12)
         content_table.add_column()
-        content_table.add_row("原文:", f"[cyan]{original_text}[/cyan]")
+        content_table.add_row("原文:", f"[cyan]{source_text}[/cyan]")
         content_table.add_row("译文:", f"[cyan]{translated_text}[/cyan]")
 
-        # --- 元数据 ---
+        # --- Keys & 元数据 ---
+        keys_renderable: RenderableType
+        try:
+            parsed_keys = json.loads(row["keys_json_debug"])
+            pretty_json = json.dumps(parsed_keys, indent=2, ensure_ascii=False)
+            keys_renderable = Syntax(pretty_json, "json", theme="monokai", word_wrap=True)
+        except (json.JSONDecodeError, TypeError):
+            keys_renderable = Text(row["keys_json_debug"] or "[dim]N/A[/dim]")
+        
+        keys_panel = Panel(
+            keys_renderable,
+            title="[dim]UIDA Keys[/dim]",
+            border_style="dim",
+            title_align="left",
+            expand=False,
+        )
+
         meta_table = Table(show_header=False, box=None, padding=(0, 1))
         meta_table.add_column(style="dim", width=12)
         meta_table.add_column()
-        if row["business_id"]:
-            meta_table.add_row("业务 ID:", f"[blue]{row['business_id']}[/blue]")
-        meta_table.add_row("更新于:", row["last_updated_at"].split(".")[0])
-        meta_table.add_row(
-            "引擎:", f"{row['engine']} [dim](v{row['engine_version']})[/dim]"
-        )
+        meta_table.add_row("Variant Key:", f"[blue]{row['variant_key']}[/blue]")
+        meta_table.add_row("Revision:", str(row["revision"]))
+        meta_table.add_row("更新于:", str(row["updated_at"]).split(".")[0])
+        if row["engine_name"]:
+            meta_table.add_row("引擎:", row["engine_name"])
 
-        # --- 上下文 ---
-        # v3.9 修复：使用 RenderableType 作为通用类型
-        context_renderable: RenderableType | None = None
-        if row["context_payload_json"]:
-            try:
-                parsed = json.loads(row["context_payload_json"])
-                pretty_json = json.dumps(parsed, indent=2, ensure_ascii=False)
-                context_renderable = Syntax(pretty_json, "json", theme="monokai")
-            except json.JSONDecodeError:
-                context_renderable = Text(row["context_payload_json"])
-
-        # v3.9 修复：使用 List[RenderableType] 作为通用列表类型
-        renderables: list[RenderableType] = [content_table, meta_table]
-        if context_renderable:
-            renderables.append(
-                Panel(
-                    context_renderable,
-                    title="[dim]关联上下文[/dim]",
-                    border_style="dim",
-                    title_align="left",
-                )
-            )
-
-        render_group = Group(*renderables)
+        renderables = Group(uida_table, content_table, keys_panel, meta_table)
 
         title = Text.from_markup(
-            f"记录 #{index} | 状态: [{status_color}]{row['status']}[/{status_color}] | "
-            f"目标: [magenta]{row['lang_code']}[/magenta]"
+            f"记录 #{index} | 状态: [{status_color}]{row['status'].upper()}[/{status_color}] | "
+            f"目标: [magenta]{row['target_lang']}[/magenta]"
         )
-        subtitle = Text.from_markup(f"[dim]ID: {row['translation_id']}[/dim]")
+        subtitle = Text.from_markup(f"[dim]Translation ID: {row['translation_id']}[/dim]")
 
         return Panel(
-            render_group,
+            renderables,
             title=title,
             subtitle=subtitle,
             border_style="bright_blue",
@@ -212,7 +200,7 @@ def main() -> None:
     console = Console(stderr=True)
 
     parser = argparse.ArgumentParser(
-        description="一个用于检查和解读 Trans-Hub (v3.2+) 数据库内容的专业工具。",
+        description="一个用于检查和解读 Trans-Hub (v3.0+) 数据库内容的专业工具。",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(

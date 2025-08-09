@@ -1,4 +1,5 @@
 # tests/helpers/lifecycle.py
+# [v1.4 - 修正缺失的导入]
 """
 封装完整的端到端业务流程，使集成测试更简洁、更具可读性。
 遵循白皮书 Final v1.2。
@@ -10,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
+# [v1.4 核心修正] 添加缺失的导入语句
+from trans_hub._uida.encoder import generate_uid_components
 from trans_hub.db.schema import ThTranslations
 
 if TYPE_CHECKING:
@@ -40,20 +43,21 @@ class AppLifecycleManager:
         await self.run_worker_until_idle()
 
         # 3. 获取并返回结果
-        content_id = await self.handler.upsert_content(
+        _, _, keys_sha = generate_uid_components(request_data["keys"])
+        content_id = await self.handler.get_content_id_by_uida(
             project_id=request_data["project_id"],
             namespace=request_data["namespace"],
-            keys=request_data["keys"],
-            source_payload=request_data["source_payload"],
-            content_version=request_data.get("content_version", 1),
+            keys_sha256_bytes=keys_sha,
         )
 
         final_translations = {}
         async with self.handler._sessionmaker() as session:
             for lang in request_data["target_langs"]:
+                variant_key = request_data.get("variant_key", "-")
                 stmt = select(ThTranslations).where(
                     ThTranslations.content_id == content_id,
                     ThTranslations.target_lang == lang,
+                    ThTranslations.variant_key == variant_key,
                 )
                 result = await session.execute(stmt)
                 translation_obj = result.scalar_one_or_none()
@@ -65,9 +69,7 @@ class AppLifecycleManager:
     async def run_worker_once(self) -> int:
         """
         [v1.2] 模拟 Worker 运行一次，处理所有可用的 'draft' 任务。
-        此方法现在直接调用 coordinator 中的 consume_and_process 逻辑。
         """
-        # 为了测试，我们直接借用 CLI worker 中的核心处理函数
         from trans_hub.cli.worker import consume_and_process
 
         return await consume_and_process(self.coordinator, reason="test_lifecycle_run")

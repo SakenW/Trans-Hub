@@ -1,4 +1,5 @@
 # tests/integration/cli/test_cli_request.py
+# [无修改]
 """测试 UIDA 架构下的 `request new` CLI 命令。"""
 import json
 from unittest.mock import AsyncMock
@@ -51,6 +52,9 @@ def test_request_new_uida_success(
         source_payload=source_payload,
         source_lang="en",
         target_langs=["de", "fr"],
+        # [修正] 测试需要反映默认参数
+        content_version=1,
+        variant_key='-',
     )
 
 

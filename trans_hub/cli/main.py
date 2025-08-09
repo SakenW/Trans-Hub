@@ -1,4 +1,5 @@
 # trans_hub/cli/main.py
+# [v3.1 - 添加 status 子命令]
 """Trans-Hub CLI 的主入口点。"""
 
 from typing import Annotated
@@ -11,6 +12,8 @@ from trans_hub.cli.db import db_app
 from trans_hub.cli.gc import gc_app
 from trans_hub.cli.request import request_app
 from trans_hub.cli.state import State
+# [新增] 导入新的 status 应用
+from trans_hub.cli.status import status_app
 from trans_hub.cli.worker import worker_app
 from trans_hub.config import TransHubConfig
 from trans_hub.engine_registry import discover_engines
@@ -19,7 +22,7 @@ from trans_hub.logging_config import setup_logging
 # 创建主 Typer 应用
 app = typer.Typer(
     name="trans-hub",
-    help="🤖 Trans-Hub: 一个基于 UIDA 的企业级本地化后端引擎。", # <-- 更新帮助文本
+    help="🤖 Trans-Hub: 一个基于 UIDA 的企业级本地化后端引擎。",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -27,6 +30,8 @@ app = typer.Typer(
 # 注册子命令/子应用
 app.add_typer(db_app, name="db")
 app.add_typer(request_app, name="request")
+# [新增] 注册 status 应用
+app.add_typer(status_app, name="status")
 app.add_typer(gc_app, name="gc")
 app.add_typer(worker_app, name="worker")
 
@@ -56,16 +61,11 @@ def main(
 ) -> None:
     """
     主回调函数，在任何子命令执行前运行。
-
-    v3.1 最终修复：确保日志配置先于引擎发现。
     """
     try:
         config = TransHubConfig()
-        # 1. 首先配置日志系统
         setup_logging(log_level=config.logging.level, log_format=config.logging.format)
-        # 2. 然后执行引擎发现
         discover_engines()
-        # 3. 最后将配置存入上下文
         ctx.obj = State(config=config)
     except Exception as e:
         console.print("[bold red]❌ 启动失败：无法加载配置或初始化日志。[/bold red]")

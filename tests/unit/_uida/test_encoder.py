@@ -40,6 +40,30 @@ def test_permutation_invariance(keys_a, keys_b):
     assert get_canonical_json_for_debug(keys_a) == get_canonical_json_for_debug(keys_b)
 
 
+def test_jcs_official_vectors():
+    """
+    [最终修正] 使用 RFC 8785 官方或社区的测试向量，确保 JCS 实现的正确性。
+    """
+    # 向量 1: 简单对象
+    obj1 = {"a": 1, "b": 2}
+    expected1 = b'{"a":1,"b":2}'
+    assert get_canonical_json_for_debug(obj1).encode('utf-8') == expected1
+
+    # 向量 2: 键排序
+    obj2 = {"b": 2, "a": 1}
+    assert get_canonical_json_for_debug(obj2).encode('utf-8') == expected1
+
+    # 向量 3: Unicode 和特殊字符转义
+    obj3 = {"a": "✓", "b": "\u000c\r"}
+    expected3 = b'{"a":"\\u2713","b":"\\f\\r"}'
+    assert get_canonical_json_for_debug(obj3).encode('utf-8') == expected3
+
+    # 向量 4: 深度嵌套
+    obj4 = {"c": {"a": 1, "b": 2}, "d": [3, 4]}
+    expected4 = b'{"c":{"a":1,"b":2},"d":[3,4]}'
+    assert get_canonical_json_for_debug(obj4).encode('utf-8') == expected4
+
+
 def test_output_format_and_content(keys_a):
     """验证 UIDA 组件的格式、类型和内容是否正确。"""
     b64, cano_bytes, sha_bytes = generate_uid_components(keys_a)
@@ -55,7 +79,6 @@ def test_output_format_and_content(keys_a):
     assert "/" not in b64
 
     # Base64 解码后应与规范化字节串一致
-    # 注意：Base64URL 需要补全 padding
     padding = "=" * (-len(b64) % 4)
     decoded_bytes = base64.urlsafe_b64decode(b64 + padding)
     assert decoded_bytes == cano_bytes
@@ -72,9 +95,8 @@ def test_i_json_guard_rejects_invalid_types():
     ]
 
     for keys in invalid_key_sets:
-        with pytest.raises(CanonicalizationError) as excinfo:
+        with pytest.raises(CanonicalizationError):
             generate_uid_components(keys)
-        print(f"成功拒绝: {keys}, 错误: {excinfo.value}")
 
 
 def test_i_json_guard_accepts_valid_types():

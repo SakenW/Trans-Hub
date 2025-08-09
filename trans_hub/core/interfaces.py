@@ -1,7 +1,8 @@
 # trans_hub/core/interfaces.py
+# [v1.3 - 扩展状态管理与读取API]
 """
 本模块使用 typing.Protocol 定义了核心组件的接口协议。
-此版本已完全升级至白皮书 Final v1.2。
+此版本已完全升级至白皮书 Final v1.2，并增加了状态管理接口。
 """
 from __future__ import annotations
 
@@ -29,6 +30,12 @@ class PersistenceHandler(Protocol):
 
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[可选] 监听数据库通知，返回通知的负载。"""
+        ...
+
+    async def get_content_id_by_uida(
+        self, project_id: str, namespace: str, keys_sha256_bytes: bytes
+    ) -> str | None:
+        """[新增] 根据 UIDA 的核心三元组，纯粹地读取 content_id。"""
         ...
 
     async def upsert_content(
@@ -84,6 +91,12 @@ class PersistenceHandler(Protocol):
         """在 th_translations 中创建一条新的翻译草稿记录，返回 translation_id。"""
         ...
 
+    async def update_translation_status(
+        self, translation_id: str, new_status: TranslationStatus
+    ) -> bool:
+        """[新增] 更新单条翻译记录的状态，返回是否成功。"""
+        ...
+
     async def update_translation(
         self,
         translation_id: str,
@@ -98,6 +111,12 @@ class PersistenceHandler(Protocol):
 
     async def link_translation_to_tm(self, translation_id: str, tm_id: str) -> None:
         """在 th_tm_links 中创建一条追溯链接。"""
+        ...
+    
+    async def get_fallback_order(
+        self, project_id: str, locale: str
+    ) -> list[str] | None:
+        """[新增] 获取指定项目和语言的回退顺序。"""
         ...
 
     async def get_published_translation(

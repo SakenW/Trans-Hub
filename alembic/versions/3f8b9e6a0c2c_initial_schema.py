@@ -1,4 +1,5 @@
 # alembic/versions/3f8b9e6a0c2c_initial_schema.py
+# [v1.2.1 - Idempotency Fix]
 """
 TRANS-HUB 数据库初始架构（Final v1.2 · UIDA 版）
 
@@ -35,34 +36,29 @@ def _json_type(dialect_name: str) -> sa.types.TypeEngine:
     根据方言选择 JSON 类型：PostgreSQL 使用 JSONB，其它方言使用通用 JSON。
     """
     if dialect_name == "postgresql":
-        # 使用 JSONB（更优的索引与存储方式），同时将 astext_type 设为 TEXT 以便某些比较/查询
         return postgresql.JSONB(astext_type=sa.Text())
     return sa.JSON()
 
 
 def upgrade() -> None:
     bind = op.get_bind()
-    dialect = bind.dialect.name  # 'postgresql' / 'sqlite' / ...
+    dialect = bind.dialect.name
     JSONType = _json_type(dialect)
 
     # ----------------------------------------------------------------------
     # 0) 定义枚举：译文状态（仅 4 种）
-    #    - PG：创建原生 ENUM
-    #    - 其它：SQLAlchemy 会回退为 CHECK 约束
+    #    [v1.2.1 Idempotency Fix] SQLAlchemy's op.create_table will handle
+    #    the creation of the ENUM type implicitly. The explicit create call
+    #    is redundant and causes errors in test lifecycles.
     # ----------------------------------------------------------------------
     translation_status = sa.Enum(
         "draft", "reviewed", "published", "rejected", name="translation_status"
     )
-    translation_status.create(bind, checkfirst=True)
+    # The following line is removed as it is redundant.
+    # translation_status.create(bind, checkfirst=True)
 
     # ----------------------------------------------------------------------
     # 1) th_content：源内容权威
-    #    - UIDA=(project_id, namespace, keys_sha256_bytes) 唯一
-    #    - keys_sha256_bytes 固定 32 字节（SHA-256 摘要）
-    #    - keys_b64/keys_json_debug 仅用于调试与导出（非权威）
-    #    - source_payload_json 为结构化原文及元数据
-    #    - content_version/archived_at/content_type 为业务治理字段
-    #    - created_at/updated_at：默认 CURRENT_TIMESTAMP；PG 下提供 updated_at 自动刷新触发器
     # ----------------------------------------------------------------------
     op.create_table(
         "th_content",
@@ -84,16 +80,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.PrimaryKeyConstraint("id"),
-        # 注意：不使用 deferrable/initially（SQLite 不支持）；默认即可
         sa.UniqueConstraint("project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"),
-        # 确保 32 字节长度（PG 可用 octet_length；SQLite 也支持 length(BLOB)）
         sa.CheckConstraint(
             "(octet_length(keys_sha256_bytes)=32) OR (length(keys_sha256_bytes)=32)",
             name="ck_content_keys_sha256_len",
         ),
     )
 
-    # 常用查询索引（项目 + 命名空间）
     op.create_index(
         "ix_content_project_namespace",
         "th_content",
@@ -107,7 +100,6 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # PostgreSQL：UIDA 三元不可变（防止误更新）
     if dialect == "postgresql":
         op.execute(
             """
@@ -132,8 +124,6 @@ def upgrade() -> None:
             EXECUTE FUNCTION th_content_forbid_uida_update();
             """
         )
-
-        # 可选：统一的 updated_at 自动刷新触发器（便于审计）
         op.execute(
             """
             CREATE OR REPLACE FUNCTION set_updated_at()
@@ -156,10 +146,6 @@ def upgrade() -> None:
 
     # ----------------------------------------------------------------------
     # 2) th_translations：译文权威
-    #    - 每条译文绑定一个 content_id、目标语言，以及语言内变体 variant_key（无变体用 '-'）
-    #    - 同(content_id, target_lang, variant_key) 仅允许一条已发布（部分唯一索引保证）
-    #    - revision 为同维度修订号（编辑译文 +1；状态切换不影响）
-    #    - project_id 冗余以便加速与 RLS（PG 下由触发器自动从 content 派生；其它方言由应用层保证）
     # ----------------------------------------------------------------------
     op.create_table(
         "th_translations",
@@ -196,7 +182,6 @@ def upgrade() -> None:
         ),
     )
 
-    # 常用检索索引
     op.create_index(
         "ix_trans_content_lang",
         "th_translations",
@@ -216,7 +201,6 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # “唯一发布”部分唯一索引：同 (content_id, target_lang, variant_key) 仅允许一条 status='published'
     if dialect == "postgresql":
         op.create_index(
             "uq_translations_published",
@@ -226,16 +210,13 @@ def upgrade() -> None:
             postgresql_where=sa.text("status = 'published'"),
         )
     else:
-        # SQLite 也支持部分唯一索引的 WHERE 子句（3.8+）
         op.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_translations_published "
             "ON th_translations(content_id, target_lang, variant_key) "
             "WHERE status = 'published';"
         )
 
-    # PostgreSQL：project_id 由 content 派生；updated_at 自动刷新
     if dialect == "postgresql":
-        # 触发器：在 INSERT/UPDATE(content_id) 时，从 th_content 复制 project_id
         op.execute(
             """
             CREATE OR REPLACE FUNCTION th_trans_derive_project()
@@ -281,8 +262,6 @@ def upgrade() -> None:
 
     # ----------------------------------------------------------------------
     # 3) th_tm：翻译记忆仓
-    #    - 唯一复用键：(project_id, namespace, reuse_sha256_bytes, source_lang, target_lang, variant_key, policy_version, hash_algo_version)
-    #    - visibility_scope 限制在 {project, tenant, global}
     # ----------------------------------------------------------------------
     op.create_table(
         "th_tm",
@@ -351,7 +330,6 @@ def upgrade() -> None:
 
     # ----------------------------------------------------------------------
     # 4) th_tm_links：复用追溯（译文 ↔ TM）
-    #    - 唯一：(translation_id, tm_id)
     # ----------------------------------------------------------------------
     op.create_table(
         "th_tm_links",
@@ -377,8 +355,6 @@ def upgrade() -> None:
 
     # ----------------------------------------------------------------------
     # 5) th_locales_fallbacks：语言回退策略（项目级）
-    #    - 主键：(project_id, locale)
-    #    - fallback_order JSON（有序列表）
     # ----------------------------------------------------------------------
     op.create_table(
         "th_locales_fallbacks",
@@ -394,30 +370,20 @@ def downgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
 
-    # th_locales_fallbacks
     op.drop_table("th_locales_fallbacks")
-
-    # th_tm_links
     op.drop_table("th_tm_links")
-
-    # th_tm
     op.drop_index("ix_tm_last_used", table_name="th_tm")
     op.drop_table("th_tm")
 
-    # th_translations（先删索引/触发器/枚举依赖）
     if dialect == "postgresql":
-        # 删除“唯一发布”部分唯一索引（PG）
         try:
             op.drop_index("uq_translations_published", table_name="th_translations")
         except Exception:
             pass
-        # 删除派生 project_id 的触发器
         op.execute("DROP TRIGGER IF EXISTS trg_trans_derive_project_ins ON th_translations;")
         op.execute("DROP TRIGGER IF EXISTS trg_trans_derive_project_upd ON th_translations;")
-        # 删除 updated_at 触发器
         op.execute("DROP TRIGGER IF EXISTS trg_trans_touch_updated_at ON th_translations;")
     else:
-        # SQLite：删除局部唯一索引
         op.execute("DROP INDEX IF EXISTS uq_translations_published;")
 
     op.drop_index("ix_trans_project_lang_status", table_name="th_translations")
@@ -425,11 +391,9 @@ def downgrade() -> None:
     op.drop_index("ix_trans_content_lang", table_name="th_translations")
     op.drop_table("th_translations")
 
-    # th_content（先删触发器）
     if dialect == "postgresql":
         op.execute("DROP TRIGGER IF EXISTS trg_content_forbid_uida_update ON th_content;")
         op.execute("DROP TRIGGER IF EXISTS trg_content_touch_updated_at ON th_content;")
-        # 公用函数可能被多表共享；安全起见最后统一删除
         op.execute("DROP FUNCTION IF EXISTS th_content_forbid_uida_update();")
         op.execute("DROP FUNCTION IF EXISTS set_updated_at();")
 
@@ -437,12 +401,10 @@ def downgrade() -> None:
     op.drop_index("ix_content_project_namespace", table_name="th_content")
     op.drop_table("th_content")
 
-    # 删除枚举类型（若存在）
     translation_status = sa.Enum(
         "draft", "reviewed", "published", "rejected", name="translation_status"
     )
     try:
         translation_status.drop(bind, checkfirst=True)
     except Exception:
-        # 非 PG 方言上可能只是 CHECK 约束，无需显式删除
         pass

@@ -6,36 +6,16 @@ import base64
 import hashlib
 from typing import Any
 
-# 优先使用 C 语言实现的 rfc8785，性能更优
-try:
-    import rfc8785 as _rfc8785
-except ImportError:
-    _rfc8785 = None
-
-# 如果 rfc8785 不可用，回退到纯 Python 实现的 jcs
-if _rfc8785 is None:
-    try:
-        import jcs as _jcs
-    except ImportError:
-        _jcs = None
-
-
 class CanonicalizationError(RuntimeError):
-    """当输入不满足 I-JSON 或找不到 RFC8785/JCS 实现时抛出。"""
+    """当输入不满足 I-JSON 或找不到 RFC8785 实现时抛出。"""
 
 
 def _assert_i_json_compat(value: Any, path: str = "$") -> None:
-    """
-    I-JSON 守卫：
-    - 仅允许 dict/list/str/int/bool/None
-    - 禁止 float / NaN / Infinity / 非字符串键
-    """
+    """I-JSON 守卫"""
     if isinstance(value, dict):
         for k, v in value.items():
             if not isinstance(k, str):
-                raise CanonicalizationError(
-                    f"{path}: object key must be str, got {type(k)}"
-                )
+                raise CanonicalizationError(f"{path}: object key must be str, got {type(k)}")
             _assert_i_json_compat(v, f"{path}.{k}")
         return
     if isinstance(value, list):
@@ -50,27 +30,24 @@ def _assert_i_json_compat(value: Any, path: str = "$") -> None:
 
 
 def _canonical_bytes(payload: Any) -> bytes:
-    """将对象按 RFC 8785 / JCS 规范化为 UTF-8 字节串。"""
-    if _rfc8785 is not None:
-        return _rfc8785.canonicalize(payload)
-    if _jcs is not None:
-        return _jcs.canonicalize(payload)
-    raise CanonicalizationError(
-        "No RFC 8785 implementation found (install with 'uida' extra: pip install 'trans-hub[uida]')"
-    )
+    """将对象按 RFC 8785 (JCS) 规范化为 UTF-8 字节串。"""
+    try:
+        # [最终修正] 唯一、正确地使用 rfc8785 库
+        import rfc8785
+        return rfc8785.dumps(payload)
+    except ImportError:
+        raise CanonicalizationError(
+            "JCS implementation 'rfc8785' not found. Install with 'uida' extra: pip install 'trans-hub[uida]'"
+        )
+    except Exception as e:
+        # 捕获 rfc8785 库内部可能抛出的其他错误 (如类型错误)
+        raise CanonicalizationError(f"JCS canonicalization failed: {e}") from e
 
 
 def generate_uid_components(
     keys: dict[str, Any]
 ) -> tuple[str, bytes, bytes]:
-    """
-    规范化入口（唯一真理源）。
-
-    对输入的 keys 字典进行 I-JSON 兼容性检查和 RFC 8785 规范化。
-
-    Returns:
-        一个元组 (keys_b64, canonical_bytes, sha256_bytes)
-    """
+    """规范化入口（唯一真理源）。"""
     _assert_i_json_compat(keys, "$.keys")
     canonical_bytes = _canonical_bytes(keys)
     b64 = base64.urlsafe_b64encode(canonical_bytes).rstrip(b"=").decode("ascii")
