@@ -45,6 +45,9 @@ sqlalchemy = "^2.0.31"
 alembic = "^1.13.1"
 greenlet = "^3.0.3"
 aiosqlite = "^0.20.0"
+# [UIDA 新增] 规范化库，优先使用 C 实现的 rfc8785
+rfc8785 = {version = "^0.1.4", optional = true}
+jcs = {version = "^0.2.1", optional = true}
 
 # --- 可选功能与驱动 (Optional Features & Drivers) ---
 translators = { version = ">=6.0.1", optional = true }
@@ -61,6 +64,7 @@ questionary = { version = "^2.0.1", optional = true }
 
 # --- 可选依赖分组 (Extras) ---
 [tool.poetry.extras]
+uida = ["rfc8785", "jcs"]
 translators = ["translators"]
 openai = ["openai", "httpx"]
 metrics = ["prometheus-client"]
@@ -69,7 +73,7 @@ api = ["fastapi", "uvicorn"]
 postgres = ["asyncpg"]
 tools = ["typer", "rich", "markdown-it-py", "openai", "httpx", "questionary"]
 all = [
-    "translators", "openai", "httpx", "prometheus-client",
+    "uida", "translators", "openai", "httpx", "prometheus-client",
     "typer", "rich", "fastapi", "uvicorn", "markdown-it-py", "questionary",
     "asyncpg"
 ]

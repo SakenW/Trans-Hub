@@ -1,38 +1,21 @@
 # trans_hub/core/interfaces.py
 """
 本模块使用 typing.Protocol 定义了核心组件的接口协议。
-v3.0.0.dev: 重构以适应新的数据模型，并为可插拔的持久层设计。
+此版本已完全升级至 UIDA 架构。
 """
+from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from trans_hub.core.types import (
-    ContentItem,
-    TranslationResult,
-    TranslationStatus,
-)
-
-
-@dataclass
-class TranslationNotification:
-    """表示一个翻译任务通知。"""
-
-    translation_id: str
-    content_id: str
-    target_lang: str
-    source_payload: dict[str, Any]
-    business_id: str | None = None
-    context_id: str | None = None
-    context: dict[str, Any] | None = None
+if TYPE_CHECKING:
+    from trans_hub.core.types import ContentItem, TranslationResult, TranslationStatus
 
 
 class PersistenceHandler(Protocol):
-    """定义了持久化处理器的纯异步接口协议。"""
+    """定义了 UIDA 架构下持久化处理器的纯异步接口协议。"""
 
-    SUPPORTS_NOTIFICATIONS: bool = False
+    SUPPORTS_NOTIFICATIONS: bool
 
     async def connect(self) -> None:
         """建立与数据库的连接。"""
@@ -46,17 +29,81 @@ class PersistenceHandler(Protocol):
         """[可选] 监听数据库通知，返回通知的负载。"""
         ...
 
-    async def reset_stale_tasks(self) -> None:
-        """在启动时重置所有处于“TRANSLATING”状态的旧任务为“PENDING”。"""
+    async def upsert_content(
+        self,
+        project_id: str,
+        namespace: str,
+        keys: dict[str, Any],
+        source_payload: dict[str, Any],
+        content_version: int,
+    ) -> str:
+        """根据 UIDA 幂等地创建或更新 th_content 记录，返回 content_id。"""
         ...
 
-    async def revert_translations_status_to_pending(
-        self, translation_ids: list[str]
+    async def find_tm_entry(
+        self,
+        project_id: str,
+        namespace: str,
+        reuse_sha256_bytes: bytes,
+        source_lang: str,
+        target_lang: str,
+        variant_key: str,
+        policy_version: int,
+        hash_algo_version: int,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """在 TM 中查找可复用的翻译，返回 (tm_id, translated_json) 或 None。"""
+        ...
+
+    async def upsert_tm_entry(
+        self,
+        project_id: str,
+        namespace: str,
+        reuse_sha256_bytes: bytes,
+        source_lang: str,
+        target_lang: str,
+        variant_key: str,
+        policy_version: int,
+        hash_algo_version: int,
+        source_text_json: dict[str, Any],
+        translated_json: dict[str, Any],
+        quality_score: float,
+    ) -> str:
+        """幂等地创建或更新 TM 条目，返回 tm_id。"""
+        ...
+
+    async def create_draft_translation(
+        self,
+        project_id: str,
+        content_id: str,
+        target_lang: str,
+        variant_key: str,
+        source_lang: str | None,
+    ) -> str:
+        """在 th_translations 中创建一条新的翻译草稿记录，返回 translation_id。"""
+        ...
+
+    async def update_translation_from_tm(
+        self,
+        translation_id: str,
+        tm_id: str,
+        translated_payload: dict[str, Any],
+        status: TranslationStatus = TranslationStatus.DRAFT,
     ) -> None:
-        """
-        [新增] 将一组处于 'TRANSLATING' 状态的任务回滚至 'PENDING'。
-        这在任务处理被取消时至关重要，以防止状态悬挂。
-        """
+        """使用 TM 命中的结果更新翻译记录。"""
+        ...
+
+    async def save_translation_results(self, results: list[TranslationResult]) -> None:
+        """[Worker专用] 批量保存来自 Worker 处理后的翻译结果。"""
+        ...
+
+    async def link_translation_to_tm(self, translation_id: str, tm_id: str) -> None:
+        """在 th_tm_links 中创建一条追溯链接。"""
+        ...
+
+    async def get_published_translation(
+        self, content_id: str, target_lang: str, variant_key: str
+    ) -> dict[str, Any] | None:
+        """获取指定维度的已发布译文，返回 translated_payload_json 或 None。"""
         ...
 
     def stream_translatable_items(
@@ -65,49 +112,22 @@ class PersistenceHandler(Protocol):
         statuses: list[TranslationStatus],
         batch_size: int,
         limit: int | None = None,
-    ) -> AsyncGenerator[list[ContentItem], None]: ...
+    ) -> AsyncGenerator[list[ContentItem], None]:
+        """流式获取待处理的翻译任务。"""
+        ...
 
-    async def ensure_content_and_context(
-        self,
-        business_id: str,
-        source_payload: dict[str, Any],
-        context: dict[str, Any] | None,
-    ) -> tuple[str, str | None]: ...
+    async def reset_stale_tasks(self) -> None:
+        """[Worker专用] 在启动时重置所有处于“TRANSLATING”状态的旧任务为草稿。"""
+        ...
 
-    async def create_pending_translations(
+    async def run_garbage_collection(
         self,
-        content_id: str,
-        context_id: str | None,
-        target_langs: list[str],
-        source_lang: str | None,
-        engine_version: str,
-        force_retranslate: bool = False,
-    ) -> None: ...
-
-    async def save_translation_results(
-        self,
-        results: list[TranslationResult],
-    ) -> None: ...
-
-    async def find_translation(
-        self,
-        business_id: str,
-        target_lang: str,
-        context: dict[str, Any] | None = None,
-    ) -> TranslationResult | None: ...
-
-    async def garbage_collect(
-        self,
-        retention_days: int,
+        archived_content_retention_days: int,
+        unused_tm_retention_days: int,
         dry_run: bool = False,
-        _now: datetime | None = None,
-    ) -> dict[str, int]: ...
-
-    async def move_to_dlq(
-        self,
-        item: ContentItem,
-        target_lang: str,
-        error_message: str,
-        engine_name: str,
-        engine_version: str,
-    ) -> None: ...
+    ) -> dict[str, int]:
+        """
+        [新] 运行垃圾回收，清理已归档的内容和长期未使用的 TM 条目。
+        返回一个包含被删除项目计数的报告。
+        """
+        ...

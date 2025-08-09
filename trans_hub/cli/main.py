@@ -19,7 +19,7 @@ from trans_hub.logging_config import setup_logging
 # 创建主 Typer 应用
 app = typer.Typer(
     name="trans-hub",
-    help="🤖 Trans-Hub: 一个可嵌入的、带持久化存储的智能本地化后端引擎。",
+    help="🤖 Trans-Hub: 一个基于 UIDA 的企业级本地化后端引擎。", # <-- 更新帮助文本
     add_completion=False,
     no_args_is_help=True,
 )

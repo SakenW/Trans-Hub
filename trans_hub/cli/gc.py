@@ -1,6 +1,5 @@
 # trans_hub/cli/gc.py
-"""处理垃圾回收 (GC) 的 CLI 命令。"""
-
+"""处理垃圾回收 (GC) 的 CLI 命令 (UIDA 架构版)。"""
 import asyncio
 from typing import Annotated
 
@@ -14,29 +13,30 @@ from trans_hub.cli.utils import create_coordinator
 from trans_hub.coordinator import Coordinator
 
 console = Console()
-gc_app = typer.Typer(help="垃圾回收与数据清理")
+gc_app = typer.Typer(help="垃圾回收与数据清理 (UIDA 模式)")
 
 
 async def _async_gc_run(
-    coordinator: Coordinator, retention_days: int, yes: bool
+    coordinator: Coordinator,
+    content_days: int,
+    tm_days: int,
+    yes: bool,
 ) -> None:
     """异步执行垃圾回收的核心逻辑。"""
     try:
         await coordinator.initialize()
-        console.print(f"正在为超过 {retention_days} 天的非活跃数据生成GC报告...")
-        report = await coordinator.run_garbage_collection(retention_days, dry_run=True)
+        console.print("正在生成垃圾回收预演报告...")
+        report = await coordinator.run_garbage_collection(
+            archived_content_retention_days=content_days,
+            unused_tm_retention_days=tm_days,
+            dry_run=True,
+        )
 
-        table = Table(
-            title="垃圾回收预演报告", show_header=True, header_style="bold cyan"
-        )
-        table.add_column("数据类型", style="cyan", width=20)
+        table = Table(title="垃圾回收预演报告", show_header=True, header_style="bold cyan")
+        table.add_column("数据类型", style="cyan", width=35)
         table.add_column("将被删除的数量", style="magenta", justify="right")
-        table.add_row("业务任务 (Jobs)", str(report.get("deleted_jobs", 0)))
-        table.add_row("原文 (Content)", str(report.get("deleted_content", 0)))
-        table.add_row("上下文 (Contexts)", str(report.get("deleted_contexts", 0)))
-        table.add_row(
-            "翻译记录 (Translations)", str(report.get("deleted_translations", 0))
-        )
+        table.add_row(f"已归档超过 {content_days} 天的内容", str(report.get("deleted_archived_content", 0)))
+        table.add_row(f"超过 {tm_days} 天未使用的翻译记忆", str(report.get("deleted_unused_tm_entries", 0)))
         console.print(table)
 
         total_to_delete = sum(report.values())
@@ -54,14 +54,12 @@ async def _async_gc_run(
 
         console.print("[yellow]正在执行删除操作...[/yellow]")
         final_report = await coordinator.run_garbage_collection(
-            retention_days, dry_run=False
+            archived_content_retention_days=content_days,
+            unused_tm_retention_days=tm_days,
+            dry_run=False,
         )
         deleted_count = sum(final_report.values())
-        success_message = (
-            f"[bold green]✅ 垃圾回收执行完毕！"
-            f"共删除 {deleted_count} 条记录。[/bold green]"
-        )
-        console.print(success_message)
+        console.print(f"[bold green]✅ 垃圾回收执行完毕！共删除 {deleted_count} 条记录。[/bold green]")
     finally:
         await coordinator.close()
 
@@ -69,26 +67,24 @@ async def _async_gc_run(
 @gc_app.command("run")
 def gc_run(
     ctx: typer.Context,
-    retention_days: Annotated[
-        int, typer.Option("--days", "-d", help="数据保留的最短天数。")
+    content_days: Annotated[
+        int, typer.Option("--content-days", help="删除已归档超过此天数的内容。")
     ] = 90,
+    tm_days: Annotated[
+        int, typer.Option("--tm-days", help="删除超过此天数未使用的翻译记忆。")
+    ] = 365,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="跳过确认提示，直接执行删除。")
     ] = False,
 ) -> None:
-    """执行垃圾回收，清理过期的、无关联的旧数据。"""
+    """执行垃圾回收，清理已归档的内容和长期未使用的翻译记忆。"""
     state: State = ctx.obj
     coordinator = create_coordinator(state.config)
     try:
-        # v3.1 最终决定：不再支持旧版 Python，直接使用 asyncio.run
-        asyncio.run(_async_gc_run(coordinator, retention_days, yes))
-    except Exception as e:
-        if "Not a tty" in str(e) or isinstance(e, RuntimeError):
-            error_msg = (
-                "[bold red]❌ 错误：此命令需要交互式终端。"
-                "请使用 --yes 标志在非交互式环境中运行。[/bold red]"
-            )
-            console.print(error_msg)
+        asyncio.run(_async_gc_run(coordinator, content_days, tm_days, yes))
+    except (RuntimeError, Exception) as e:
+        if "Not a tty" in str(e):
+            console.print("[bold red]❌ 错误：此命令需要交互式终端。请使用 --yes 标志运行。[/bold red]")
         else:
             console.print(f"[bold red]❌ 执行失败: {e}[/bold red]")
         raise typer.Exit(code=1) from e
