@@ -1,5 +1,6 @@
 # trans_hub/db/schema.py
-# 遵循白皮书 Final v1.2 的数据模型
+# [v2.4 Refactor] 根据白皮书 v2.4 全面重构数据模型，与 3f8b9e6a0c2c 迁移脚本完全对齐。
+# 引入 ThProjects, ThTransRev, ThTransHead, SearchContent, ThResolveCache 等新表。
 from __future__ import annotations
 
 import uuid
@@ -8,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -20,27 +22,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
-
-
-def _json_type(dialect_name: str) -> sa.types.TypeEngine:
-    if dialect_name == "postgresql":
-        return postgresql.JSONB(astext_type=sa.Text())
-    return sa.JSON()
-
-
-class Base(DeclarativeBase):
-    @property
-    def _dialect_name(self) -> str:
-        # A simple way to access dialect name from the model instance
-        return self.metadata.bind.dialect.name if self.metadata.bind else "default"
-
-    @property
-    def JSONType(self) -> sa.types.TypeEngine:
-        return _json_type(self._dialect_name)
-
+from sqlalchemy.types import TypeEngine
 
 # 定义 ENUM 类型以供 ORM 使用
 translation_status_enum = Enum(
@@ -48,53 +33,80 @@ translation_status_enum = Enum(
 )
 
 
-class ThContent(Base):
-    """源内容权威表"""
-    __tablename__ = "th_content"
+def _json_type(dialect_name: str) -> TypeEngine:
+    """根据方言选择 JSON 或 JSONB。"""
+    if dialect_name == "postgresql":
+        return JSONB(astext_type=Text())
+    return JSON
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String, nullable=False)
-    namespace: Mapped[str] = mapped_column(String, nullable=False)
-    keys_sha256_bytes: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
-    keys_b64: Mapped[str] = mapped_column(Text, nullable=False)
-    keys_json_debug: Mapped[str | None] = mapped_column(Text)
-    source_payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    content_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    content_type: Mapped[str | None] = mapped_column(String)
+
+class Base(DeclarativeBase):
+    """自定义的声明式基类，提供方言相关的便利属性。"""
+
+    @property
+    def _dialect_name(self) -> str:
+        return self.metadata.bind.dialect.name if self.metadata.bind else "default"
+
+    @property
+    def JSONType(self) -> TypeEngine:
+        return _json_type(self._dialect_name)
+
+
+class ThProjects(Base):
+    """项目集中注册表"""
+
+    __tablename__ = "th_projects"
+    project_id: Mapped[str] = mapped_column(String(32), primary_key=True, comment="项目主键（短而稳）")
+    display_name: Mapped[str] = mapped_column(String, nullable=False, comment="自然名（便于人读）")
+    category: Mapped[str | None] = mapped_column(String, comment="元数据：mod/pack/app/web/site 等")
+    platform: Mapped[str | None] = mapped_column(String, comment="元数据：minecraft/ios/android/web 等")
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (
+        CheckConstraint("char_length(project_id) BETWEEN 3 AND 32", name="ck_proj_len"),
     )
 
+
+class ThContent(Base):
+    """源内容权威表"""
+
+    __tablename__ = "th_content"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
+    namespace: Mapped[str] = mapped_column(String, nullable=False)
+    keys_sha256_bytes: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    keys_b64: Mapped[str] = mapped_column(Text, nullable=False, comment="JCS(keys_json) 的 Base64URL 文本")
+    keys_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, comment="权威 keys（I-JSON；参与 UIDA）")
+    source_payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
     __table_args__ = (
         UniqueConstraint("project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"),
-        CheckConstraint(
-            "(octet_length(keys_sha256_bytes)=32) OR (length(keys_sha256_bytes)=32)",
-            name="ck_content_keys_sha256_len",
-        ),
-        Index("ix_content_project_namespace", "project_id", "namespace"),
-        Index("ix_content_project_namespace_version", "project_id", "namespace", "content_version"),
     )
 
 
-class ThTranslations(Base):
-    """按语言/变体的权威译文"""
-    __tablename__ = "th_translations"
+class ThTransRev(Base):
+    """翻译修订历史表 (Append-only)"""
 
+    __tablename__ = "th_trans_rev"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String, nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
     content_id: Mapped[str] = mapped_column(ForeignKey("th_content.id", ondelete="CASCADE"), nullable=False)
-    source_lang: Mapped[str | None] = mapped_column(String)
     target_lang: Mapped[str] = mapped_column(String, nullable=False)
-    variant_key: Mapped[str] = mapped_column(String, nullable=False, default="-")
+    variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
     status: Mapped[str] = mapped_column(translation_status_enum, nullable=False)
-    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
     translated_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     origin_lang: Mapped[str | None] = mapped_column(String)
     quality_score: Mapped[float | None] = mapped_column(Float)
@@ -103,85 +115,110 @@ class ThTranslations(Base):
     engine_version: Mapped[str | None] = mapped_column(String)
     prompt_hash: Mapped[str | None] = mapped_column(String)
     params_hash: Mapped[str | None] = mapped_column(String)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    published_revision: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("content_id", "target_lang", "variant_key", "revision", name="uq_translations_revision"),
-        Index("ix_trans_content_lang", "content_id", "target_lang"),
-        Index("ix_trans_lang_status", "target_lang", "status"),
-        Index("ix_trans_project_lang_status", "project_id", "target_lang", "status"),
-        # 部分唯一索引需要通过 Alembic hook 或方言特定语法实现
-        Index(
-            "uq_translations_published",
-            "content_id", "target_lang", "variant_key",
-            unique=True,
-            postgresql_where=(status == 'published')
-        ),
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class ThTransHead(Base):
+    """翻译头表 (维度唯一行，指向当前/已发布修订)"""
+
+    __tablename__ = "th_trans_head"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
+    content_id: Mapped[str] = mapped_column(ForeignKey("th_content.id", ondelete="CASCADE"), nullable=False)
+    target_lang: Mapped[str] = mapped_column(String, nullable=False)
+    variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
+    current_rev_id: Mapped[str] = mapped_column(ForeignKey("th_trans_rev.id"), nullable=False)
+    current_status: Mapped[str] = mapped_column(translation_status_enum, nullable=False)
+    current_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    published_rev_id: Mapped[str | None] = mapped_column(ForeignKey("th_trans_rev.id"))
+    published_no: Mapped[int | None] = mapped_column(Integer)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (
+        UniqueConstraint("project_id", "content_id", "target_lang", "variant_key", name="uq_head_dim"),
+    )
+
+
+class SearchContent(Base):
+    """影子索引表"""
+
+    __tablename__ = "search_content"
+    content_id: Mapped[str] = mapped_column(
+        ForeignKey("th_content.id", ondelete="CASCADE"), primary_key=True
+    )
+    # 按需追加扁平化字段...
 
 
 class ThTm(Base):
     """翻译记忆库"""
-    __tablename__ = "th_tm"
 
+    __tablename__ = "th_tm"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     namespace: Mapped[str] = mapped_column(String, nullable=False)
     reuse_sha256_bytes: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     source_text_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     translated_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    variant_key: Mapped[str] = mapped_column(String, nullable=False, default="-")
+    variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
     source_lang: Mapped[str] = mapped_column(String, nullable=False)
     target_lang: Mapped[str] = mapped_column(String, nullable=False)
-    visibility_scope: Mapped[str] = mapped_column(String, nullable=False, default="project")
-    policy_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    hash_algo_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    reuse_policy_fingerprint: Mapped[str | None] = mapped_column(String)
+    policy_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    hash_algo_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     quality_score: Mapped[float | None] = mapped_column(Float)
-    pii_flags: Mapped[list[str] | None] = mapped_column(JSON)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
     __table_args__ = (
         UniqueConstraint(
-            "project_id", "namespace", "reuse_sha256_bytes",
-            "source_lang", "target_lang", "variant_key",
-            "policy_version", "hash_algo_version",
+            "project_id", "namespace", "reuse_sha256_bytes", "source_lang",
+            "target_lang", "variant_key", "policy_version", "hash_algo_version",
             name="uq_tm_reuse_key",
         ),
-        CheckConstraint(
-            "visibility_scope in ('project','tenant','global')",
-            name="ck_tm_visibility_scope",
-        ),
-        CheckConstraint(
-            "(octet_length(reuse_sha256_bytes)=32) OR (length(reuse_sha256_bytes)=32)",
-            name="ck_tm_reuse_sha256_len",
-        ),
-        Index("ix_tm_last_used", "last_used_at"),
     )
 
 
 class ThTmLinks(Base):
     """复用追溯"""
+
     __tablename__ = "th_tm_links"
-
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    translation_id: Mapped[str] = mapped_column(ForeignKey("th_translations.id", ondelete="CASCADE"), nullable=False)
+    translation_rev_id: Mapped[str] = mapped_column(
+        ForeignKey("th_trans_rev.id", ondelete="CASCADE"), nullable=False
+    )
     tm_id: Mapped[str] = mapped_column(ForeignKey("th_tm.id", ondelete="CASCADE"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("translation_id", "tm_id", name="uq_tm_links_pair"),)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (UniqueConstraint("translation_rev_id", "tm_id", name="uq_tm_links_pair"),)
 
 
 class ThLocalesFallbacks(Base):
     """语言回退策略"""
-    __tablename__ = "th_locales_fallbacks"
 
-    project_id: Mapped[str] = mapped_column(String, primary_key=True)
+    __tablename__ = "th_locales_fallbacks"
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), primary_key=True)
     locale: Mapped[str] = mapped_column(String, primary_key=True)
     fallback_order: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ThResolveCache(Base):
+    """运行时解析缓存"""
+
+    __tablename__ = "th_resolve_cache"
+    content_id: Mapped[str] = mapped_column(String, primary_key=True)
+    target_lang: Mapped[str] = mapped_column(String, primary_key=True)
+    variant_key: Mapped[str] = mapped_column(String, primary_key=True)
+    resolved_rev: Mapped[str] = mapped_column(String, nullable=False)
+    origin_lang: Mapped[str | None] = mapped_column(String)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
