@@ -1,5 +1,5 @@
 # tests/conftest.py
-# (此文件无需修改，保持原样)
+# (此文件保持不变，因为它处理的是与 rich 库相关的全局配置)
 """项目全局共享的测试 Fixtures。"""
 
 from collections.abc import Generator

@@ -1,6 +1,8 @@
 # tests/integration/test_persistence_uida.py
+# [v2.4] 持久化层集成测试
 """
-对白皮书 v1.2 持久化层的集成测试。
+对白皮书 v2.4 持久化层的集成测试。
+直接与数据库交互，验证核心数据操作的正确性。
 """
 from __future__ import annotations
 
@@ -9,110 +11,62 @@ import pytest
 from tests.helpers.factories import TEST_NAMESPACE, TEST_PROJECT_ID
 from trans_hub._uida.reuse_key import build_reuse_sha256
 from trans_hub.core.interfaces import PersistenceHandler
+from trans_hub.core.types import TranslationStatus
+from trans_hub.db.schema import ThTransHead, ThTransRev
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_upsert_content_is_idempotent(handler: PersistenceHandler):
     """测试 `upsert_content` 的幂等性。"""
-    project_id = TEST_PROJECT_ID
-    namespace = TEST_NAMESPACE
     keys = {"view": "home", "id": "title"}
-    source_payload = {"text": "Welcome Home"}
     
     content_id_1 = await handler.upsert_content(
-        project_id, namespace, keys, source_payload, content_version=1
+        TEST_PROJECT_ID, TEST_NAMESPACE, keys, {"text": "Welcome"}, 1
     )
     content_id_2 = await handler.upsert_content(
-        project_id, namespace, keys, source_payload, content_version=1
+        TEST_PROJECT_ID, TEST_NAMESPACE, keys, {"text": "Welcome v2"}, 2 # 内容更新
     )
     
-    assert content_id_1 == content_id_2
+    assert content_id_1 == content_id_2, "对于相同的 UIDA，content_id 必须相同"
 
 
-async def test_find_and_upsert_tm_entry(handler: PersistenceHandler):
-    """测试 TM 条目的完整生命周期：查找（未命中）、创建、再次查找（命中）。"""
-    project_id = TEST_PROJECT_ID
-    namespace = "tm.test.v1"
-    source_lang = "en"
-    target_lang = "de"
-    variant_key = "-"
-    policy_version = 1
-    hash_algo_version = 1
-    source_text_json = {"text": "Login"}
-    translated_payload = {"text": "Anmelden"}
-    
-    reuse_sha = build_reuse_sha256(
-        namespace=namespace,
-        reduced_keys={},
-        source_fields=source_text_json,
-    )
-
-    # 1. 初始查找，应未命中
-    entry = await handler.find_tm_entry(
-        project_id, namespace, reuse_sha, source_lang, target_lang,
-        variant_key, policy_version, hash_algo_version
-    )
-    assert entry is None
-
-    # 2. 创建 TM 条目
-    tm_id = await handler.upsert_tm_entry(
-        project_id, namespace, reuse_sha, source_lang, target_lang,
-        variant_key, policy_version, hash_algo_version,
-        source_text_json=source_text_json,
-        translated_json=translated_payload,
-        quality_score=0.95
-    )
-    assert isinstance(tm_id, str)
-
-    # 3. 再次查找，应命中
-    entry_hit = await handler.find_tm_entry(
-        project_id, namespace, reuse_sha, source_lang, target_lang,
-        variant_key, policy_version, hash_algo_version
-    )
-    assert entry_hit is not None
-    hit_id, hit_payload = entry_hit
-    assert hit_id == tm_id
-    assert hit_payload == translated_payload
-
-
-async def test_stream_draft_translations(handler: PersistenceHandler):
-    """测试 `stream_draft_translations` 能否正确获取草稿任务。"""
-    # 1. 创建内容和草稿
+async def test_rev_head_creation_and_update(handler: PersistenceHandler):
+    """测试翻译的 rev/head 记录能否被正确创建和更新。"""
     content_id = await handler.upsert_content(
-        TEST_PROJECT_ID, TEST_NAMESPACE, {"k": "v"}, {"text": "t"}, 1
-    )
-    await handler.create_draft_translation(
-        TEST_PROJECT_ID, content_id, "de", "-", "en"
-    )
-    await handler.create_draft_translation(
-        TEST_PROJECT_ID, content_id, "fr", "-", "en"
+        TEST_PROJECT_ID, TEST_NAMESPACE, {"id": "rev-head-test"}, {"text": "Test"}, 1
     )
 
-    # 2. 流式获取
-    all_items = []
-    async for batch in handler.stream_draft_translations(batch_size=10):
-        all_items.extend(batch)
+    # 1. 首次为该维度请求，应创建 head 和 rev 0
+    head_id, rev_no = await handler.get_or_create_translation_head(
+        TEST_PROJECT_ID, content_id, "de", "-"
+    )
+    assert head_id is not None
+    assert rev_no == 0
+
+    # 2. 创建一个新的 'reviewed' 修订
+    rev_id_1 = await handler.create_new_translation_revision(
+        head_id=head_id, project_id=TEST_PROJECT_ID, content_id=content_id,
+        target_lang="de", variant_key="-", status=TranslationStatus.REVIEWED,
+        revision_no=rev_no + 1, translated_payload={"text": "Testen"}
+    )
     
-    assert len(all_items) == 2
-    langs = {item.target_lang for item in all_items}
-    assert langs == {"de", "fr"}
+    # 3. 验证 head 已更新
+    async with handler._sessionmaker() as session:
+        head = (await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))).scalar_one()
+        assert head.current_rev_id == rev_id_1
+        assert head.current_no == 1
+        assert head.current_status == TranslationStatus.REVIEWED.value
+        assert head.published_rev_id is None # 尚未发布
 
+    # 4. 发布该修订
+    success = await handler.publish_revision(rev_id_1)
+    assert success is True
 
-async def test_link_translation_to_tm(handler: PersistenceHandler):
-    """测试 `link_translation_to_tm` 能否正确创建追溯链接。"""
-    content_id = await handler.upsert_content(
-        TEST_PROJECT_ID, "links.test", {"k": "v"}, {"text": "t"}, 1
-    )
-    translation_id = await handler.create_draft_translation(
-        TEST_PROJECT_ID, content_id, "fr", "-", "en"
-    )
-    reuse_sha = build_reuse_sha256(namespace="links.test", reduced_keys={}, source_fields={"text": "t"})
-    tm_id = await handler.upsert_tm_entry(
-        TEST_PROJECT_ID, "links.test", reuse_sha, "en", "fr", "-", 1, 1, {"text": "t"}, {"text": "t_fr"}, 1.0
-    )
-
-    # 创建链接并验证
-    await handler.link_translation_to_tm(translation_id, tm_id)
-    # 再次创建，由于唯一约束，不应报错
-    await handler.link_translation_to_tm(translation_id, tm_id)
+    # 5. 验证 head 的发布指针已更新
+    async with handler._sessionmaker() as session:
+        head = (await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))).scalar_one()
+        rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == rev_id_1))).scalar_one()
+        assert head.published_rev_id == rev_id_1
+        assert head.published_no == 1
+        assert rev.status == TranslationStatus.PUBLISHED.value

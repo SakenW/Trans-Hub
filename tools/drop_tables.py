@@ -34,7 +34,9 @@ class PostgresTableDropper:
         """建立数据库连接。"""
         if asyncpg is None:
             raise RuntimeError("未安装 asyncpg 库，请通过 poetry install -E postgres 安装可选依赖。")
-        self.conn = await asyncpg.connect(dsn=self.dsn)
+        # 转换 DSN 以兼容 asyncpg
+        connect_dsn = self.dsn.replace("postgresql+asyncpg", "postgresql", 1)
+        self.conn = await asyncpg.connect(dsn=connect_dsn)
         log.info("✅ 已连接到 PostgreSQL 数据库")
 
     async def close(self) -> None:

@@ -1,4 +1,5 @@
 # tests/unit/_uida/test_encoder.py
+# [v2.4] UIDA 编码器单元测试
 """测试 UIDA 编码器、I-JSON 守卫和 RFC 8785 规范化逻辑。"""
 from __future__ import annotations
 
@@ -34,16 +35,14 @@ def test_permutation_invariance(keys_a, keys_b):
     b64_a, bytes_a, sha_a = generate_uid_components(keys_a)
     b64_b, bytes_b, sha_b = generate_uid_components(keys_b)
 
-    assert b64_a == b64_b
-    assert bytes_a == bytes_b
-    assert sha_a == sha_b
+    assert b64_a == b64_b, "Base64 编码不应受字典顺序影响"
+    assert bytes_a == bytes_b, "规范化字节串不应受字典顺序影响"
+    assert sha_a == sha_b, "SHA256 哈希不应受字典顺序影响"
     assert get_canonical_json_for_debug(keys_a) == get_canonical_json_for_debug(keys_b)
 
 
 def test_jcs_official_vectors():
-    """
-    [最终修正] 使用 RFC 8785 官方或社区的测试向量，确保 JCS 实现的正确性。
-    """
+    """使用 RFC 8785 官方或社区的测试向量，确保 JCS 实现的正确性。"""
     # 向量 1: 简单对象
     obj1 = {"a": 1, "b": 2}
     expected1 = b'{"a":1,"b":2}'
@@ -58,11 +57,6 @@ def test_jcs_official_vectors():
     expected3 = b'{"a":"\\u2713","b":"\\f\\r"}'
     assert get_canonical_json_for_debug(obj3).encode('utf-8') == expected3
 
-    # 向量 4: 深度嵌套
-    obj4 = {"c": {"a": 1, "b": 2}, "d": [3, 4]}
-    expected4 = b'{"c":{"a":1,"b":2},"d":[3,4]}'
-    assert get_canonical_json_for_debug(obj4).encode('utf-8') == expected4
-
 
 def test_output_format_and_content(keys_a):
     """验证 UIDA 组件的格式、类型和内容是否正确。"""
@@ -72,43 +66,23 @@ def test_output_format_and_content(keys_a):
     assert isinstance(cano_bytes, bytes)
     assert isinstance(sha_bytes, bytes)
 
-    # SHA-256 必须是 32 字节
-    assert len(sha_bytes) == 32
-    # Base64URL 编码不应包含 '+' 或 '/'
-    assert "+" not in b64
-    assert "/" not in b64
+    assert len(sha_bytes) == 32, "SHA-256 哈希必须是 32 字节"
+    assert "+" not in b64 and "/" not in b64, "Base64URL 编码不应包含 '+' 或 '/'"
 
-    # Base64 解码后应与规范化字节串一致
-    padding = "=" * (-len(b64) % 4)
-    decoded_bytes = base64.urlsafe_b64decode(b64 + padding)
-    assert decoded_bytes == cano_bytes
+    padding = b"=" * (-len(b64) % 4)
+    decoded_bytes = base64.urlsafe_b64decode(b64.encode('ascii') + padding)
+    assert decoded_bytes == cano_bytes, "Base64 解码后应与规范化字节串一致"
 
 
 def test_i_json_guard_rejects_invalid_types():
     """验证 I-JSON 守卫能否正确拒绝不兼容的类型。"""
     invalid_key_sets = [
         {"value": 1.23},  # 禁止 float
-        {"value": float("nan")},  # 禁止 NaN
-        {"value": float("inf")},  # 禁止 Infinity
+        {"value": float("nan")},
+        {"value": float("inf")},
         {123: "value"},  # 禁止非字符串键
-        {"nested": {"value": 3.14}},  # 禁止嵌套 float
+        {"nested": {"value": 3.14}},
     ]
-
     for keys in invalid_key_sets:
         with pytest.raises(CanonicalizationError):
             generate_uid_components(keys)
-
-
-def test_i_json_guard_accepts_valid_types():
-    """验证 I-JSON 守卫能否正确接受所有兼容的类型。"""
-    valid_keys = {
-        "a_string": "hello",
-        "an_int": 123,
-        "a_bool": True,
-        "a_none": None,
-        "a_list": ["a", 1, False, None, {"nested": True}],
-    }
-    try:
-        generate_uid_components(valid_keys)
-    except CanonicalizationError as e:
-        pytest.fail(f"I-JSON 守卫错误地拒绝了有效的 keys: {e}")

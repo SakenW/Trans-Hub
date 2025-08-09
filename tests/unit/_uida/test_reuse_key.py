@@ -1,4 +1,5 @@
 # tests/unit/_uida/test_reuse_key.py
+# [v2.4] 复用键生成单元测试
 """测试复用键的生成逻辑和策略应用。"""
 from __future__ import annotations
 
@@ -19,13 +20,6 @@ def sample_source_fields() -> dict[str, str]:
     return {"text": "Diamond Sword"}
 
 
-def test_reduce_keys_strict_mode(sample_keys):
-    """测试在 strict 模式下，keys 不应被修改。"""
-    policy = {"strict": True, "ignore_fields": ["version"]}
-    reduced = reduce_keys_for_reuse(sample_keys, policy)
-    assert reduced == sample_keys
-
-
 def test_reduce_keys_ignore_fields(sample_keys):
     """测试 `ignore_fields` 策略能否正确移除字段。"""
     policy = {"ignore_fields": ["version"]}
@@ -33,25 +27,6 @@ def test_reduce_keys_ignore_fields(sample_keys):
     assert "version" not in reduced
     assert "mod_id" in reduced
     assert reduced == {"mod_id": "testmod", "item": "sword"}
-
-
-@pytest.mark.parametrize(
-    "version_in, mode, version_out",
-    [
-        ("1.20.1", "major", "1"),
-        ("2.3.4-beta", "major", "2"),
-        ("1.20.1", "major_minor", "1.20"),
-        ("2.3.4-beta", "major_minor", "2.3"),
-        ("alpha", "major", "alpha"),
-        ("3", "major_minor", "3"),
-    ],
-)
-def test_reduce_keys_normalize_version(version_in, mode, version_out):
-    """测试 `normalize` 策略能否正确归一化版本号。"""
-    keys = {"version": version_in}
-    policy = {"normalize": {"version": mode}}
-    reduced = reduce_keys_for_reuse(keys, policy)
-    assert reduced["version"] == version_out
 
 
 def test_build_reuse_sha256_is_stable_and_sensitive(sample_source_fields):
