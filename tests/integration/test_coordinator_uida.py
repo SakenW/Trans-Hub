@@ -40,7 +40,7 @@ async def test_e2e_tm_miss_workflow(lifecycle: AppLifecycleManager) -> None:
     assert head.current_status == TranslationStatus.REVIEWED.value
 
     # 类型转换：PersistenceHandler -> BasePersistenceHandler
-    from trans_hub.persistence.base import BasePersistenceHandler
+
     base_handler = lifecycle.handler
     async with base_handler._sessionmaker() as session:
         rev = (
@@ -125,7 +125,7 @@ async def test_get_translation_with_fallback(
     await coordinator.publish_translation(heads_de["de"].current_rev_id)
 
     # 类型转换：PersistenceHandler -> BasePersistenceHandler
-    from trans_hub.persistence.base import BasePersistenceHandler
+
     base_handler = lifecycle.handler
     async with base_handler._sessionmaker() as session:
         fallback_rule = ThLocalesFallbacks(

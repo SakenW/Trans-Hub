@@ -1,73 +1,33 @@
 # examples/04_error_handling_and_dlq.py
 """
-Trans-Hub v3.0 错误处理与死信队列(DLQ)示例
-
-本示例展示了系统如何处理持续失败的任务：
-1. 配置一个必定会失败的 Debug 引擎和快速重试策略。
-2. 提交一个会触发失败条件的任务。
-3. 启动 Worker，观察任务的重试与最终失败。
-4. 自动验证失败的任务是否已被正确地移入死信队列。
-
-运行方式:
-在项目根目录执行: `poetry run python examples/04_error_handling_and_dlq.py`
+Trans-Hub v3.0 错误处理与死信队列(DLQ)示例 (重构版)
 """
-
 import asyncio
-import sys
-from pathlib import Path
-
 import aiosqlite
-import structlog
+from examples._shared import example_runner, log, process_translations, current_dir
+from trans_hub import EngineName
+from trans_hub.config import RetryPolicyConfig
 
-# --- 路径设置 ---
-current_dir = Path(__file__).parent
-project_root = current_dir.parent
-sys.path.insert(0, str(project_root))
-# ---
-
-from trans_hub import Coordinator, EngineName, TransHubConfig  # noqa: E402
-from trans_hub.config import RetryPolicyConfig  # noqa: E402
-from trans_hub.core import TranslationResult  # noqa: E402
-from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
-
-# 修复：将此 import 移至文件顶部
-from trans_hub.logging_config import setup_logging  # noqa: E402
-from trans_hub.persistence import create_persistence_handler  # noqa: E402
-
-# --- 日志配置 ---
-# 修复：移除在示例中配置日志的逻辑，它应在 main 中被调用
-log = structlog.get_logger("trans_hub")
-
-# --- 准备测试环境 ---
-DB_FILE = Path(__file__).parent / "th_example_04.db"
 FAILING_TEXT = "This will always fail"
 
 
 async def main() -> None:
     """执行错误处理与DLQ示例。"""
-    if DB_FILE.exists():
-        DB_FILE.unlink()
-
-    config = TransHubConfig(
-        database_url=f"sqlite:///{DB_FILE.resolve()}",
-        source_lang="en",
-        active_engine=EngineName.DEBUG,
-        retry_policy=RetryPolicyConfig(max_attempts=1, initial_backoff=0.1),
-        engine_configs={
+    db_file_path = current_dir / "th_example_04.db"
+    
+    # 定义此示例特有的配置
+    config_overrides = {
+        "active_engine": EngineName.DEBUG,
+        "retry_policy": RetryPolicyConfig(max_attempts=1, initial_backoff=0.1),
+        "engine_configs": {
             "debug": {
                 "fail_on_text": FAILING_TEXT,
                 "fail_is_retryable": True,
             }
         },
-    )
-    apply_migrations(config.db_path)
-    handler = create_persistence_handler(config)
-    coordinator = Coordinator(config=config, persistence_handler=handler)
+    }
 
-    try:
-        await coordinator.initialize()
-        log.info("✅ 协调器初始化成功", db_path=str(DB_FILE))
-
+    async with example_runner("th_example_04.db", **config_overrides) as coordinator:
         business_id = "task.that.fails"
         source_payload = {"text": FAILING_TEXT}
         target_lang = "de"
@@ -83,41 +43,12 @@ async def main() -> None:
         await process_translations(coordinator, [target_lang])
 
         log.info("🔍 步骤 3: 自动验证任务是否已进入死信队列...")
-        await verify_dlq_entry()
+        async with aiosqlite.connect(db_file_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM th_dead_letter_queue")
+            row = await cursor.fetchone()
+            assert row and row[0] == 1
         log.info("🎉 验证通过！任务已成功进入死信队列。")
-
-    finally:
-        await coordinator.close()
-        log.info("🚪 协调器已关闭")
-        if DB_FILE.exists():
-            DB_FILE.unlink()
-
-
-async def process_translations(coordinator: Coordinator, langs: list[str]) -> None:
-    """模拟 Worker 处理所有待办任务。"""
-    tasks = [asyncio.create_task(consume_all(coordinator, lang)) for lang in langs]
-    await asyncio.gather(*tasks)
-
-
-async def consume_all(coordinator: Coordinator, lang: str) -> None:
-    """消费指定语言的所有待办任务。"""
-    results: list[TranslationResult] = [
-        res async for res in coordinator.process_pending_translations(lang)
-    ]
-    log.info(f"Worker 为语言 '{lang}' 处理了 {len(results)} 个任务。")
-
-
-async def verify_dlq_entry() -> None:
-    """连接数据库并验证死信队列中是否存在记录。"""
-    async with aiosqlite.connect(DB_FILE) as db:
-        cursor = await db.execute("SELECT COUNT(*) FROM th_dead_letter_queue")
-        row = await cursor.fetchone()
-        assert row is not None
-        assert row[0] == 1
 
 
 if __name__ == "__main__":
-    # 修复：调用日志配置的正确位置是在执行入口处，而不是在导入时。
-    # 这种方式完全符合“无副作用导入”原则。
-    setup_logging(log_level="INFO")
     asyncio.run(main())

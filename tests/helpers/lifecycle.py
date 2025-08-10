@@ -21,7 +21,6 @@ from trans_hub.db.schema import ThTransHead
 if TYPE_CHECKING:
     from trans_hub.coordinator import Coordinator
     from trans_hub.persistence.base import BasePersistenceHandler
-    from trans_hub.core.interfaces import PersistenceHandler
 
 logger = structlog.get_logger(__name__)
 
@@ -73,7 +72,6 @@ class AppLifecycleManager:
     async def run_worker_once(self) -> int:
         """模拟 Worker 运行一次，处理所有可用的 'draft' 任务。"""
         from trans_hub.cli.worker import consume_and_process
-        from trans_hub.core.interfaces import PersistenceHandler
 
         return await consume_and_process(self.coordinator, reason="test_lifecycle_run")
 
@@ -84,7 +82,7 @@ class AppLifecycleManager:
 
         async def _get_draft_count() -> int:
             # 类型转换：PersistenceHandler -> BasePersistenceHandler
-            from trans_hub.persistence.base import BasePersistenceHandler
+
             base_handler = self.handler
             async with base_handler._sessionmaker() as session:
                 stmt = (
