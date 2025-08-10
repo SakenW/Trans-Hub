@@ -10,33 +10,36 @@ from tests.helpers.factories import create_request_data
 pytestmark = pytest.mark.asyncio
 
 async def test_full_request_publish_get_flow(coordinator: Coordinator):
-    """测试从请求 -> 发布 -> 获取的完整快乐路径。"""
-    # 1. 提交请求
+    """测试从请求 -> (模拟处理) -> 发布 -> 获取的完整快乐路径。"""
     req_data = create_request_data(target_langs=["de"])
-    content_id = await coordinator.request_translation(**req_data)
-    assert content_id is not None
     
-    # 2. 假设 Worker 已处理，我们手动找到 'reviewed' 的修订ID
-    #    (在真实的测试中，我们可能需要一个 TestWorker 或直接操作数据库)
-    head = await coordinator.handler.get_translation_head_by_uida(**req_data, target_lang="de", variant_key="-")
-    assert head is not None
-    # In a real test, we would need to manually update the status to 'reviewed'
-    # For now, let's assume it is and try to publish.
+    # 1. 提交请求，TM 未命中，应创建 DRAFT
+    await coordinator.request_translation(**req_data)
+    head = await coordinator.handler.get_translation_head_by_uida(**req_data)
+    assert head is not None and head.current_status == "draft"
+
+    # 2. 模拟 Worker 处理：直接创建一个新的 'reviewed' 修订
+    rev_id = await coordinator.handler.create_new_translation_revision(
+        head_id=head.id, project_id=head.project_id, content_id=head.content_id,
+        target_lang=head.target_lang, variant_key=head.variant_key,
+        status="reviewed", revision_no=head.current_no + 1,
+        translated_payload_json={"text": "Hallo Welt"}
+    )
     
     # 3. 发布
-    # success = await coordinator.publish_translation(head.current_rev_id)
-    # assert success is True
+    success = await coordinator.publish_translation(rev_id)
+    assert success is True
 
     # 4. 获取
-    # result = await coordinator.get_translation(...)
-    # assert result is not None
-    # assert result["text"] == "..."
+    result = await coordinator.get_translation(**req_data, target_lang="de")
+    assert result is not None
+    assert result["text"] == "Hallo Welt"
 
 async def test_commenting_flow(coordinator: Coordinator):
-    """测试添加和获取评论的流程。"""
+    """测试添加和获取评论的端到端流程。"""
     req_data = create_request_data()
     await coordinator.request_translation(**req_data)
-    head = await coordinator.handler.get_translation_head_by_uida(**req_data, target_lang="de", variant_key="-")
+    head = await coordinator.handler.get_translation_head_by_uida(**req_data)
     assert head is not None
 
     # 添加评论

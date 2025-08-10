@@ -2,6 +2,7 @@
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
 这些类型是系统各层之间数据交换的契约。
+(Pydantic V2 语法修正版)
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from .interfaces import PersistenceHandler
@@ -57,6 +58,8 @@ class ContentItem(BaseModel):
 
 class TranslationHead(BaseModel):
     """翻译头记录的数据传输对象 (DTO)。"""
+    model_config = ConfigDict(from_attributes=True) # [修复] 使用 Pydantic V2 的 ConfigDict
+
     id: str
     project_id: str
     content_id: str
@@ -66,26 +69,21 @@ class TranslationHead(BaseModel):
     current_status: TranslationStatus
     current_no: int
     published_rev_id: str | None = None
-    
-    class Config:
-        orm_mode = True # Pydantic v1, for v2 use from_attributes=True
-        from_attributes = True
-
 
 class TranslationRevision(BaseModel):
     """翻译修订记录的DTO。"""
+    model_config = ConfigDict(from_attributes=True) # [修复]
+
     id: str
     project_id: str
     content_id: str
     status: TranslationStatus
     revision_no: int
-    
-    class Config:
-        from_attributes = True
-
 
 class Comment(BaseModel):
     """评论记录的DTO。"""
+    model_config = ConfigDict(from_attributes=True) # [修复]
+
     id: str | None = None
     head_id: str
     project_id: str
@@ -93,12 +91,10 @@ class Comment(BaseModel):
     body: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
-
-
 class Event(BaseModel):
     """事件记录的DTO。"""
+    model_config = ConfigDict(from_attributes=True) # [修复]
+
     id: str | None = None
     head_id: str
     project_id: str
@@ -106,9 +102,6 @@ class Event(BaseModel):
     event_type: str
     payload: dict[str, Any] | None = None
     created_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
 
 
 @dataclass(frozen=True)
