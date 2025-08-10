@@ -43,14 +43,21 @@ class DatabaseDoctor:
         self.alembic_cfg_path = alembic_cfg_path
         try:
             original_url = make_url(config.database_url)
-            # 使用 psycopg2 进行同步操作
-            sync_url = original_url.set(drivername="postgresql+psycopg2")
-            maintenance_sync_url = sync_url.set(database="postgres")
             self.app_db_name = original_url.database
+
+            # 使用 .copy() 来创建URL变体，确保所有字段都被保留
+            # 1. 创建用于同步操作的应用数据库 URL
+            app_sync_url = original_url.copy()
+            app_sync_url.drivername = "postgresql+psycopg2"
+            self.app_db_url = str(app_sync_url)
+
+            # 2. 创建用于连接 'postgres' 数据库的维护 URL
+            maintenance_sync_url = app_sync_url.copy()
+            maintenance_sync_url.database = "postgres"
             self.maintenance_db_url = str(maintenance_sync_url)
-            self.app_db_url = str(sync_url)
+
         except Exception as e:
-            logger.error("无法解析数据库URL", url=config.database_url, error=e, exc_info=True)
+            logger.error("无法解析或构建数据库URL", url=config.database_url, error=e, exc_info=True)
             sys.exit(1)
 
     def get_alembic_versions(self) -> tuple[str, str]:
