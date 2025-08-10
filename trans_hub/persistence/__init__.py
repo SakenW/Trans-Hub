@@ -1,5 +1,5 @@
 # trans_hub/persistence/__init__.py
-# [v1.1 - 修正 PG 驱动加载]
+# [v2.4.1 Final] 恢复 SQLite 支持，使项目功能完整。
 """本模块作为持久化层的公共入口，导出核心组件。"""
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -17,8 +17,17 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
     db_url = config.database_url
 
     if "sqlite" in db_url:
-        # [PG-Focus] 暂时忽略 SQLite 逻辑
-        raise ConfigurationError("SQLite is temporarily disabled.")
+        try:
+            from .sqlite import SQLitePersistenceHandler
+        except ImportError as e:
+            raise ConfigurationError(
+                "要使用 SQLite, 请安装 'aiosqlite' 驱动: "
+                '"pip install aiosqlite"'
+            ) from e
+        
+        engine = create_async_engine(db_url)
+        sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        return SQLitePersistenceHandler(sessionmaker, db_path=config.db_path)
 
     elif db_url.startswith("postgresql"):
         try:
@@ -29,8 +38,6 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
                 '"pip install "trans-hub[postgres]"'
             ) from e
         
-        # [v1.1 核心修正] 必须使用包含 "+asyncpg" 的原始 db_url 来创建异步引擎。
-        # 移除错误的 .replace() 调用。
         engine = create_async_engine(db_url, pool_size=20, max_overflow=10)
         sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         return PostgresPersistenceHandler(sessionmaker, dsn=db_url)

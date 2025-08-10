@@ -1,6 +1,5 @@
 # trans_hub/persistence/base.py
-# [v2.4 Refactor] 持久化基类重构，实现 rev/head 模型的核心业务逻辑。
-# 本基类作为 PostgreSQL 和 SQLite 实现的共享蓝图。
+# [v2.4.9 Final Logic Fix] 采用原子性的 INSERT ... ON CONFLICT ... RETURNING 解决 upsert 问题。
 from __future__ import annotations
 
 import asyncio
@@ -95,8 +94,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 ).on_conflict_do_nothing(constraint="th_projects_pkey")
                 await session.execute(project_stmt)
 
-                # 步骤 2: Upsert 内容
-                values = dict(
+                # 步骤 2: [核心修正] 构建一个原子性的 Upsert 语句
+                insert_stmt = pg_insert(ThContent).values(
                     project_id=project_id,
                     namespace=namespace,
                     keys_sha256_bytes=keys_sha,
@@ -105,22 +104,34 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     source_payload_json=source_payload,
                     content_version=content_version,
                 )
-                stmt = pg_insert(ThContent).values(values)
-                stmt = stmt.on_conflict_do_update(
+
+                # 定义冲突时的更新行为
+                do_update_stmt = insert_stmt.on_conflict_do_update(
                     constraint="uq_content_uida",
                     set_=dict(
-                        source_payload_json=stmt.excluded.source_payload_json,
-                        content_version=stmt.excluded.content_version,
-                        updated_at=func.now()
+                        source_payload_json=insert_stmt.excluded.source_payload_json,
+                        content_version=insert_stmt.excluded.content_version,
+                        updated_at=func.now(),
                     ),
                 )
-                await session.execute(stmt)
 
-                # 步骤 3: 获取 content_id
-                content_id = await self.get_content_id_by_uida(project_id, namespace, keys_sha)
+                # 添加 RETURNING 子句来获取 ID
+                final_stmt = do_update_stmt.returning(ThContent.id)
+                
+                # 执行并获取结果
+                result = await session.execute(final_stmt)
+                content_id = result.scalar_one_or_none()
+
+                if not content_id:
+                    # 如果 RETURNING 没有返回任何东西（理论上不应该发生），则作为最后的保障再次查询
+                    logger.warning("Upsert RETURNING 未返回 ID，执行回退查询。")
+                    content_id = await self.get_content_id_by_uida(project_id, namespace, keys_sha)
+
                 if not content_id:
                     raise DatabaseError("Upsert content 后未能获取 content_id")
+                
                 return content_id
+
         except SQLAlchemyError as e:
             raise DatabaseError(f"Upsert content 失败: {e}") from e
     
@@ -254,26 +265,25 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 }
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_tm_reuse_key", set_=update_values
-                )
-                await session.execute(stmt)
+                ).returning(ThTm.id)
                 
-                select_stmt = select(ThTm.id).where(
-                    ThTm.project_id == kwargs["project_id"],
-                    ThTm.namespace == kwargs["namespace"],
-                    ThTm.reuse_sha256_bytes == kwargs["reuse_sha256_bytes"],
-                    ThTm.source_lang == kwargs["source_lang"],
-                    ThTm.target_lang == kwargs["target_lang"],
-                    ThTm.variant_key == kwargs["variant_key"],
-                )
-                return (await session.execute(select_stmt)).scalar_one()
+                result = await session.execute(stmt)
+                tm_id = result.scalar_one()
+                return tm_id
         except SQLAlchemyError as e:
             raise DatabaseError(f"Upsert TM entry 失败: {e}") from e
 
     async def link_translation_to_tm(self, translation_rev_id: str, tm_id: str) -> None:
         try:
             async with self._sessionmaker.begin() as session:
-                stmt = pg_insert(ThTmLinks).values(translation_rev_id=translation_rev_id, tm_id=tm_id)
-                stmt = stmt.on_conflict_do_nothing(constraint="uq_tm_links_pair")
+                # [修正] th_tm_links 也需要 project_id
+                rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == translation_rev_id))).scalar_one()
+                stmt = pg_insert(ThTmLinks).values(
+                    project_id=rev.project_id, 
+                    translation_rev_id=translation_rev_id, 
+                    tm_id=tm_id
+                )
+                stmt = stmt.on_conflict_do_nothing(constraint="uq_tm_links_triplet")
                 await session.execute(stmt)
         except SQLAlchemyError as e:
             raise DatabaseError(f"链接 TM 失败: {e}") from e
@@ -392,7 +402,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                         project_id=content_obj.project_id,
                         namespace=content_obj.namespace,
                         source_payload=content_obj.source_payload_json,
-                        source_lang=None, # 源语言在 rev 表中，Worker 流程中若需要可单独查询
+                        source_lang=None,
                         target_lang=head.target_lang,
                         variant_key=head.variant_key,
                     )

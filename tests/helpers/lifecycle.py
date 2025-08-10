@@ -1,10 +1,10 @@
 # tests/helpers/lifecycle.py
-# [v2.4 Refactor] UIDA 架构的端到端生命周期管理器。
+# [v2.4.1 Refactor] 修正 __future__ 导入拼写错误。
 """
 封装完整的端到端业务流程，使集成测试更简洁、更具可读性。
 遵循白皮书 v2.4 的 rev/head 模型。
 """
-from __future_ import annotations
+from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any

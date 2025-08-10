@@ -1,96 +1,121 @@
 # tests/integration/conftest.py
-# [v2.4 Refactor] 集成测试核心 Fixture 配置
+# [v2.4.12 Final Architecture] 根除所有死锁和连接问题。
+# 采用最稳健的模式：每个测试函数都创建、迁移并销毁一个完全独立的数据库。
 import asyncio
 import os
 import shutil
+import uuid
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy import create_engine as create_sync_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from trans_hub.config import EngineName, TransHubConfig
 from trans_hub.coordinator import Coordinator
 from trans_hub.core.interfaces import PersistenceHandler
-from trans_hub.db.schema import Base
 from trans_hub.logging_config import setup_logging
-from trans_hub.persistence import create_persistence_handler
 
 # ---- 全局初始化 ----
 load_dotenv()
 setup_logging(log_level=os.getenv("TEST_LOG_LEVEL", "WARNING"), log_format="console")
 
 TEST_DIR = Path(__file__).parent.parent / "test_output"
-# 从环境变量获取数据库 URL，这是 CI 的标准做法
 PG_DATABASE_URL = os.getenv("TH_DATABASE_URL", "")
-if not PG_DATABASE_URL or not PG_DATABASE_URL.startswith("postgresql"):
-    pytest.fail(
-        "PostgreSQL 集成测试需要设置 TH_DATABASE_URL 环境变量，并以 'postgresql://' 或 'postgresql+asyncpg://' 开头。"
-    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def check_db_url_is_set():
+    if not PG_DATABASE_URL or not PG_DATABASE_URL.startswith("postgresql"):
+        pytest.fail(
+            "PostgreSQL 集成测试需要 TH_DATABASE_URL 环境变量，指向维护库（如 '.../postgres'）。"
+        )
+
+
+# --- URL 配置 ---
+parsed_main_url = urlparse(PG_DATABASE_URL)
+MAINTENANCE_DB_URL_SYNC = parsed_main_url._replace(
+    path="/postgres", scheme="postgresql"
+).geturl()
+ASYNC_URL_TEMPLATE = parsed_main_url._replace(
+    path="/{db_name}", scheme="postgresql+asyncpg"
+).geturl()
+SYNC_URL_TEMPLATE = parsed_main_url._replace(
+    path="/{db_name}", scheme="postgresql"
+).geturl()
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment() -> Generator[None, None, None]:
-    """配置全局测试环境，对整个测试会话生效一次。"""
+    """配置全局测试环境。"""
     TEST_DIR.mkdir(exist_ok=True, parents=True)
     yield
-    # 在非 CI 环境下，测试结束后清理输出目录
     if os.getenv("CI") is None and TEST_DIR.exists():
         shutil.rmtree(TEST_DIR)
 
 
-def run_migrations(connection_url: str):
-    """一个同步的辅助函数，用于运行 Alembic 迁移。"""
+def _manage_database_sync(db_name: str, action: str):
+    """纯同步地创建或删除数据库。这是一个阻塞函数。"""
+    engine = create_sync_engine(MAINTENANCE_DB_URL_SYNC, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        if action == "create":
+            conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        elif action == "drop":
+            conn.execute(text(f"""
+                SELECT pg_terminate_backend(pg_stat_activity.pid)
+                FROM pg_stat_activity WHERE pg_stat_activity.datname = '{db_name}';
+            """))
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
+    engine.dispose()
+
+
+def _run_migrations_sync(db_url: str):
+    """纯同步地运行 Alembic 迁移。这是一个阻塞函数。"""
     alembic_cfg_path = Path(__file__).parent.parent.parent / "alembic.ini"
     alembic_cfg = AlembicConfig(str(alembic_cfg_path))
-    # Alembic 需要一个同步的数据库 URL
-    sync_db_url = connection_url.replace("+asyncpg", "")
-    alembic_cfg.set_main_option("sqlalchemy.url", sync_db_url)
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
     command.upgrade(alembic_cfg, "head")
 
 
-@pytest.fixture(scope="session")
-def migrated_db_url() -> str:
-    """[Session Scoped] 确保数据库存在并已应用所有迁移，返回其 URL。"""
-    # 确保 URL 包含 asyncpg 驱动
-    db_url = PG_DATABASE_URL
-    if "postgresql://" in db_url:
-        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
-
-    run_migrations(db_url)
-    return db_url
-
-
 @pytest_asyncio.fixture
-async def db_engine(migrated_db_url: str) -> AsyncGenerator[AsyncEngine, None]:
-    """[Function Scoped] 为每个测试创建一个独立的、全新的 Engine。"""
-    engine = create_async_engine(migrated_db_url)
-    # 在测试开始前，清空所有表的数据，确保隔离性
-    async with engine.begin() as conn:
-        for table in reversed(Base.metadata.sorted_tables):
-            await conn.execute(table.delete())
-    yield engine
-    # 测试结束后，安全关闭并销毁引擎
-    await engine.dispose()
+async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
+    """
+    [Function Scoped, Async] 为每个测试创建一个独立的、全新的、已迁移的数据库和引擎。
+    """
+    test_db_name = f"test_db_{uuid.uuid4().hex}"
+    
+    # [核心修正] 将所有阻塞的同步操作委托给独立的线程
+    await asyncio.to_thread(_manage_database_sync, test_db_name, "create")
+    
+    test_db_url_sync = SYNC_URL_TEMPLATE.format(db_name=test_db_name)
+    await asyncio.to_thread(_run_migrations_sync, test_db_url_sync)
+    
+    test_db_url_async = ASYNC_URL_TEMPLATE.format(db_name=test_db_name)
+    engine = create_async_engine(test_db_url_async)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+        await asyncio.to_thread(_manage_database_sync, test_db_name, "drop")
 
 
 @pytest_asyncio.fixture
 async def handler(db_engine: AsyncEngine) -> AsyncGenerator[PersistenceHandler, None]:
-    """[Function Scoped] 提供一个已连接的、使用独立引擎的持久化处理器。"""
-    # 使用与引擎相同的 URL 来构造配置
-    config = TransHubConfig(database_url=str(db_engine.url))
-    
-    # 覆盖 sessionmaker 的绑定，确保它使用我们为本测试创建的独立引擎
+    """提供一个已连接的、使用独立数据库引擎的持久化处理器。"""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
-    
-    # 因为 create_persistence_handler 内部会创建自己的引擎，我们在此处手动构造
     from trans_hub.persistence.postgres import PostgresPersistenceHandler
     handler_instance = PostgresPersistenceHandler(session_factory, dsn=str(db_engine.url))
-    
     await handler_instance.connect()
     yield handler_instance
     await handler_instance.close()
@@ -98,11 +123,10 @@ async def handler(db_engine: AsyncEngine) -> AsyncGenerator[PersistenceHandler, 
 
 @pytest_asyncio.fixture
 async def coordinator(handler: PersistenceHandler) -> AsyncGenerator[Coordinator, None]:
-    """[Function Scoped] 提供一个已初始化的、连接到真实DB的 Coordinator。"""
-    # 确保 Coordinator 使用与 handler 相同的配置
+    """提供一个已初始化的、连接到独立测试数据库的 Coordinator。"""
     config = TransHubConfig(
         database_url=str(handler._sessionmaker.kw["bind"].url),
-        active_engine=EngineName.DEBUG, # 默认使用 Debug 引擎以提高测试速度和确定性
+        active_engine=EngineName.DEBUG,
         source_lang="en",
     )
     coord = Coordinator(config, handler)

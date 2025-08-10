@@ -1,6 +1,5 @@
 # trans_hub/db/schema.py
-# [v2.4 Refactor] 根据白皮书 v2.4 全面重构数据模型，与 3f8b9e6a0c2c 迁移脚本完全对齐。
-# 引入 ThProjects, ThTransRev, ThTransHead, SearchContent, ThResolveCache 等新表。
+# [v2.4.3 Final Sync] ORM 模型与 3f8b9e6a0c2c Alembic 迁移脚本完全对齐。
 from __future__ import annotations
 
 import uuid
@@ -15,6 +14,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -56,19 +56,16 @@ class ThProjects(Base):
     """项目集中注册表"""
 
     __tablename__ = "th_projects"
-    project_id: Mapped[str] = mapped_column(String(32), primary_key=True, comment="项目主键（短而稳）")
-    display_name: Mapped[str] = mapped_column(String, nullable=False, comment="自然名（便于人读）")
-    category: Mapped[str | None] = mapped_column(String, comment="元数据：mod/pack/app/web/site 等")
-    platform: Mapped[str | None] = mapped_column(String, comment="元数据：minecraft/ios/android/web 等")
+    project_id: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str | None] = mapped_column(String)
+    platform: Mapped[str | None] = mapped_column(String)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
-    )
-    __table_args__ = (
-        CheckConstraint("char_length(project_id) BETWEEN 3 AND 32", name="ck_proj_len"),
     )
 
 
@@ -80,11 +77,12 @@ class ThContent(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
     namespace: Mapped[str] = mapped_column(String, nullable=False)
     keys_sha256_bytes: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
-    keys_b64: Mapped[str] = mapped_column(Text, nullable=False, comment="JCS(keys_json) 的 Base64URL 文本")
-    keys_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, comment="权威 keys（I-JSON；参与 UIDA）")
+    keys_b64: Mapped[str] = mapped_column(Text, nullable=False)
+    keys_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     source_payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     content_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_type: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -100,8 +98,8 @@ class ThTransRev(Base):
     """翻译修订历史表 (Append-only)"""
 
     __tablename__ = "th_trans_rev"
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), primary_key=True)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
     content_id: Mapped[str] = mapped_column(ForeignKey("th_content.id", ondelete="CASCADE"), nullable=False)
     target_lang: Mapped[str] = mapped_column(String, nullable=False)
     variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
@@ -124,15 +122,15 @@ class ThTransHead(Base):
     """翻译头表 (维度唯一行，指向当前/已发布修订)"""
 
     __tablename__ = "th_trans_head"
+    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), primary_key=True)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(ForeignKey("th_projects.project_id"), nullable=False)
     content_id: Mapped[str] = mapped_column(ForeignKey("th_content.id", ondelete="CASCADE"), nullable=False)
     target_lang: Mapped[str] = mapped_column(String, nullable=False)
     variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
-    current_rev_id: Mapped[str] = mapped_column(ForeignKey("th_trans_rev.id"), nullable=False)
+    current_rev_id: Mapped[str] = mapped_column(String, nullable=False)
     current_status: Mapped[str] = mapped_column(translation_status_enum, nullable=False)
     current_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    published_rev_id: Mapped[str | None] = mapped_column(ForeignKey("th_trans_rev.id"))
+    published_rev_id: Mapped[str | None] = mapped_column(String)
     published_no: Mapped[int | None] = mapped_column(Integer)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
@@ -140,6 +138,16 @@ class ThTransHead(Base):
     )
     __table_args__ = (
         UniqueConstraint("project_id", "content_id", "target_lang", "variant_key", name="uq_head_dim"),
+        UniqueConstraint("project_id", "published_rev_id", name="uq_head_published_rev"),
+        ForeignKeyConstraint(
+            ["project_id", "current_rev_id"],
+            ["th_trans_rev.project_id", "th_trans_rev.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "published_rev_id"],
+            ["th_trans_rev.project_id", "th_trans_rev.id"],
+        ),
     )
 
 
@@ -150,7 +158,6 @@ class SearchContent(Base):
     content_id: Mapped[str] = mapped_column(
         ForeignKey("th_content.id", ondelete="CASCADE"), primary_key=True
     )
-    # 按需追加扁平化字段...
 
 
 class ThTm(Base):
@@ -166,9 +173,12 @@ class ThTm(Base):
     variant_key: Mapped[str] = mapped_column(String, nullable=False, server_default="-")
     source_lang: Mapped[str] = mapped_column(String, nullable=False)
     target_lang: Mapped[str] = mapped_column(String, nullable=False)
+    visibility_scope: Mapped[str] = mapped_column(String, nullable=False, server_default="project")
     policy_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     hash_algo_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    reuse_policy_fingerprint: Mapped[str | None] = mapped_column(String)
     quality_score: Mapped[float | None] = mapped_column(Float)
+    pii_flags: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -190,14 +200,21 @@ class ThTmLinks(Base):
 
     __tablename__ = "th_tm_links"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    translation_rev_id: Mapped[str] = mapped_column(
-        ForeignKey("th_trans_rev.id", ondelete="CASCADE"), nullable=False
-    )
+    project_id: Mapped[str] = mapped_column(String, nullable=False)
+    translation_rev_id: Mapped[str] = mapped_column(String, nullable=False)
     tm_id: Mapped[str] = mapped_column(ForeignKey("th_tm.id", ondelete="CASCADE"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    __table_args__ = (UniqueConstraint("translation_rev_id", "tm_id", name="uq_tm_links_pair"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "translation_rev_id", "tm_id", name="uq_tm_links_triplet"),
+        ForeignKeyConstraint(
+            ["project_id", "translation_rev_id"],
+            ["th_trans_rev.project_id", "th_trans_rev.id"],
+            name="fk_tm_links_rev",
+            ondelete="CASCADE",
+        ),
+    )
 
 
 class ThLocalesFallbacks(Base):
@@ -216,6 +233,7 @@ class ThResolveCache(Base):
     """运行时解析缓存"""
 
     __tablename__ = "th_resolve_cache"
+    project_id: Mapped[str] = mapped_column(String, nullable=False)
     content_id: Mapped[str] = mapped_column(String, primary_key=True)
     target_lang: Mapped[str] = mapped_column(String, primary_key=True)
     variant_key: Mapped[str] = mapped_column(String, primary_key=True)
