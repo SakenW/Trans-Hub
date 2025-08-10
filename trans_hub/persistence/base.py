@@ -22,7 +22,6 @@ from trans_hub.db.schema import (
     ThContent,
     ThLocalesFallbacks,
     ThProjects,
-    ThResolveCache,
     ThTm,
     ThTmLinks,
     ThTransHead,
@@ -41,7 +40,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], is_sqlite: bool):
         self._sessionmaker = sessionmaker
         self._is_sqlite = is_sqlite
-        self._notification_task: asyncio.Task | None = None
+        self._notification_task: asyncio.Task[AsyncGenerator[str, None]] | None = None
 
     @abstractmethod
     async def connect(self) -> None:
@@ -52,7 +51,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         """[通用实现] 安全地关闭 SQLAlchemy 引擎及其底层连接池。"""
         if self._notification_task and not self._notification_task.done():
             self._notification_task.cancel()
-        
+
         engine = self._sessionmaker.kw.get("bind")
         if engine:
             await engine.dispose()
@@ -89,9 +88,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker.begin() as session:
                 # 步骤 1: 确保项目存在
-                project_stmt = pg_insert(ThProjects).values(
-                    project_id=project_id, display_name=project_id
-                ).on_conflict_do_nothing(constraint="th_projects_pkey")
+                project_stmt = (
+                    pg_insert(ThProjects)
+                    .values(project_id=project_id, display_name=project_id)
+                    .on_conflict_do_nothing(constraint="th_projects_pkey")
+                )
                 await session.execute(project_stmt)
 
                 # 步骤 2: [核心修正] 构建一个原子性的 Upsert 语句
@@ -108,16 +109,16 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 # 定义冲突时的更新行为
                 do_update_stmt = insert_stmt.on_conflict_do_update(
                     constraint="uq_content_uida",
-                    set_=dict(
-                        source_payload_json=insert_stmt.excluded.source_payload_json,
-                        content_version=insert_stmt.excluded.content_version,
-                        updated_at=func.now(),
-                    ),
+                    set_={
+                        "source_payload_json": insert_stmt.excluded.source_payload_json,
+                        "content_version": insert_stmt.excluded.content_version,
+                        "updated_at": func.now(),
+                    },
                 )
 
                 # 添加 RETURNING 子句来获取 ID
                 final_stmt = do_update_stmt.returning(ThContent.id)
-                
+
                 # 执行并获取结果
                 result = await session.execute(final_stmt)
                 content_id = result.scalar_one_or_none()
@@ -125,16 +126,18 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 if not content_id:
                     # 如果 RETURNING 没有返回任何东西（理论上不应该发生），则作为最后的保障再次查询
                     logger.warning("Upsert RETURNING 未返回 ID，执行回退查询。")
-                    content_id = await self.get_content_id_by_uida(project_id, namespace, keys_sha)
+                    content_id = await self.get_content_id_by_uida(
+                        project_id, namespace, keys_sha
+                    )
 
                 if not content_id:
                     raise DatabaseError("Upsert content 后未能获取 content_id")
-                
+
                 return content_id
 
         except SQLAlchemyError as e:
             raise DatabaseError(f"Upsert content 失败: {e}") from e
-    
+
     async def get_or_create_translation_head(
         self,
         project_id: str,
@@ -222,7 +225,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 return new_rev.id
         except SQLAlchemyError as e:
             raise DatabaseError(f"创建新翻译修订失败: {e}") from e
-            
+
     async def find_tm_entry(
         self,
         project_id: str,
@@ -251,12 +254,37 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         except SQLAlchemyError as e:
             raise DatabaseError(f"查找 TM 条目失败: {e}") from e
 
-    async def upsert_tm_entry(self, **kwargs: Any) -> str:
+    async def upsert_tm_entry(
+        self,
+        project_id: str,
+        namespace: str,
+        reuse_sha256_bytes: bytes,
+        source_lang: str,
+        target_lang: str,
+        variant_key: str,
+        policy_version: int,
+        hash_algo_version: int,
+        source_text_json: Any,
+        translated_json: Any,
+        quality_score: float,
+    ) -> str:
         try:
             async with self._sessionmaker.begin() as session:
-                values = kwargs.copy()
-                values["last_used_at"] = datetime.now(timezone.utc)
-                stmt = pg_insert(ThTm).values(**values)
+                values = {
+                    "project_id": project_id,
+                    "namespace": namespace,
+                    "reuse_sha256_bytes": reuse_sha256_bytes,
+                    "source_lang": source_lang,
+                    "target_lang": target_lang,
+                    "variant_key": variant_key,
+                    "policy_version": policy_version,
+                    "hash_algo_version": hash_algo_version,
+                    "source_text_json": source_text_json,
+                    "translated_json": translated_json,
+                    "quality_score": quality_score,
+                    "last_used_at": datetime.now(timezone.utc),
+                }
+                stmt = pg_insert(ThTm).values(**values)  # type: ignore
                 update_values = {
                     "translated_json": stmt.excluded.translated_json,
                     "quality_score": stmt.excluded.quality_score,
@@ -266,7 +294,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_tm_reuse_key", set_=update_values
                 ).returning(ThTm.id)
-                
+
                 result = await session.execute(stmt)
                 tm_id = result.scalar_one()
                 return tm_id
@@ -277,11 +305,15 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker.begin() as session:
                 # [修正] th_tm_links 也需要 project_id
-                rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == translation_rev_id))).scalar_one()
+                rev = (
+                    await session.execute(
+                        select(ThTransRev).where(ThTransRev.id == translation_rev_id)
+                    )
+                ).scalar_one()
                 stmt = pg_insert(ThTmLinks).values(
-                    project_id=rev.project_id, 
-                    translation_rev_id=translation_rev_id, 
-                    tm_id=tm_id
+                    project_id=rev.project_id,
+                    translation_rev_id=translation_rev_id,
+                    tm_id=tm_id,
                 )
                 stmt = stmt.on_conflict_do_nothing(constraint="uq_tm_links_triplet")
                 await session.execute(stmt)
@@ -294,7 +326,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 rev_stmt = select(ThTransRev).where(ThTransRev.id == revision_id)
                 rev = (await session.execute(rev_stmt)).scalar_one_or_none()
                 if not rev or rev.status != TranslationStatus.REVIEWED.value:
-                    logger.warning("发布失败: 修订不存在或状态不是 'reviewed'", revision_id=revision_id, status=getattr(rev, 'status', None))
+                    logger.warning(
+                        "发布失败: 修订不存在或状态不是 'reviewed'",
+                        revision_id=revision_id,
+                        status=getattr(rev, "status", None),
+                    )
                     return False
 
                 await session.execute(
@@ -316,13 +352,17 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                         published_at=datetime.now(timezone.utc),
                         current_rev_id=rev.id,
                         current_status=TranslationStatus.PUBLISHED.value,
-                        current_no=rev.revision_no
+                        current_no=rev.revision_no,
                     )
                 )
                 result = await session.execute(update_head_stmt)
                 return result.rowcount > 0
         except IntegrityError:
-            logger.warning("发布失败: 可能由于唯一约束（已有已发布版本）", revision_id=revision_id, exc_info=True)
+            logger.warning(
+                "发布失败: 可能由于唯一约束（已有已发布版本）",
+                revision_id=revision_id,
+                exc_info=True,
+            )
             return False
         except SQLAlchemyError as e:
             raise DatabaseError(f"发布修订失败: {e}") from e
@@ -330,18 +370,28 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     async def reject_revision(self, revision_id: str) -> bool:
         try:
             async with self._sessionmaker.begin() as session:
-                stmt = update(ThTransRev).where(ThTransRev.id == revision_id).values(status=TranslationStatus.REJECTED.value)
+                stmt = (
+                    update(ThTransRev)
+                    .where(ThTransRev.id == revision_id)
+                    .values(status=TranslationStatus.REJECTED.value)
+                )
                 result = await session.execute(stmt)
-                
+
                 if result.rowcount > 0:
-                    rev_res = await session.execute(select(ThTransRev).where(ThTransRev.id == revision_id))
+                    rev_res = await session.execute(
+                        select(ThTransRev).where(ThTransRev.id == revision_id)
+                    )
                     rev = rev_res.scalar_one()
-                    await session.execute(update(ThTransHead).where(
-                        ThTransHead.content_id == rev.content_id,
-                        ThTransHead.target_lang == rev.target_lang,
-                        ThTransHead.variant_key == rev.variant_key,
-                        ThTransHead.current_rev_id == revision_id
-                    ).values(current_status=TranslationStatus.REJECTED.value))
+                    await session.execute(
+                        update(ThTransHead)
+                        .where(
+                            ThTransHead.content_id == rev.content_id,
+                            ThTransHead.target_lang == rev.target_lang,
+                            ThTransHead.variant_key == rev.variant_key,
+                            ThTransHead.current_rev_id == revision_id,
+                        )
+                        .values(current_status=TranslationStatus.REJECTED.value)
+                    )
                 return result.rowcount > 0
         except SQLAlchemyError as e:
             raise DatabaseError(f"拒绝修订失败: {e}") from e
@@ -352,7 +402,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker() as session:
                 stmt = (
-                    select(ThTransHead.published_rev_id, ThTransRev.translated_payload_json)
+                    select(
+                        ThTransHead.published_rev_id, ThTransRev.translated_payload_json
+                    )
                     .join(ThTransRev, ThTransHead.published_rev_id == ThTransRev.id)
                     .where(
                         ThTransHead.content_id == content_id,
@@ -362,7 +414,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     )
                 )
                 result = (await session.execute(stmt)).first()
-                return (result.published_rev_id, result.translated_payload_json) if result else None
+                return (
+                    (result.published_rev_id, result.translated_payload_json)
+                    if result
+                    else None
+                )
         except SQLAlchemyError as e:
             raise DatabaseError(f"获取已发布翻译失败: {e}") from e
 
@@ -415,20 +471,36 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         unused_tm_retention_days: int,
         dry_run: bool = False,
     ) -> dict[str, int]:
-        stats = {"deleted_archived_content": 0, "deleted_unused_tm_entries": 0}
+        stats: dict[str, int] = {
+            "deleted_archived_content": 0,
+            "deleted_unused_tm_entries": 0,
+        }
         now = datetime.now(timezone.utc)
 
         try:
             async with self._sessionmaker.begin() as session:
                 if archived_content_retention_days >= 0:
-                    cutoff_content = now - timedelta(days=archived_content_retention_days)
+                    cutoff_content = now - timedelta(
+                        days=archived_content_retention_days
+                    )
                     content_stmt = delete(ThContent).where(
                         ThContent.archived_at.is_not(None),
                         ThContent.archived_at < cutoff_content,
                     )
                     if dry_run:
-                        count_stmt = select(func.count()).select_from(content_stmt.alias())
-                        stats["deleted_archived_content"] = (await session.execute(count_stmt)).scalar_one() or 0
+                        # 使用子查询来计算符合条件的行数，避免使用alias()
+                        subquery = (
+                            select(ThContent.id)
+                            .where(
+                                ThContent.archived_at.is_not(None),
+                                ThContent.archived_at < cutoff_content,
+                            )
+                            .subquery()
+                        )
+                        count_stmt = select(func.count()).select_from(subquery)
+                        stats["deleted_archived_content"] = (
+                            await session.execute(count_stmt)
+                        ).scalar_one() or 0
                     else:
                         result = await session.execute(content_stmt)
                         stats["deleted_archived_content"] = result.rowcount
@@ -440,8 +512,19 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                         ThTm.last_used_at < cutoff_tm,
                     )
                     if dry_run:
-                        count_stmt = select(func.count()).select_from(tm_stmt.alias())
-                        stats["deleted_unused_tm_entries"] = (await session.execute(count_stmt)).scalar_one() or 0
+                        # 使用子查询来计算符合条件的行数，避免使用alias()
+                        subquery = (
+                            select(ThTm.id)
+                            .where(
+                                ThTm.last_used_at.is_not(None),
+                                ThTm.last_used_at < cutoff_tm,
+                            )
+                            .subquery()
+                        )
+                        count_stmt = select(func.count()).select_from(subquery)
+                        stats["deleted_unused_tm_entries"] = (
+                            await session.execute(count_stmt)
+                        ).scalar_one() or 0
                     else:
                         result = await session.execute(tm_stmt)
                         stats["deleted_unused_tm_entries"] = result.rowcount

@@ -12,6 +12,7 @@ from trans_hub.cli.db import db_app
 from trans_hub.cli.gc import gc_app
 from trans_hub.cli.request import request_app
 from trans_hub.cli.state import State
+
 # [新增] 导入新的 status 应用
 from trans_hub.cli.status import status_app
 from trans_hub.cli.worker import worker_app
@@ -59,9 +60,7 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """
-    主回调函数，在任何子命令执行前运行。
-    """
+    """主回调函数，在任何子命令执行前运行。"""
     try:
         config = TransHubConfig()
         setup_logging(log_level=config.logging.level, log_format=config.logging.format)

@@ -7,9 +7,9 @@
 运行方式 (在项目根目录):
   poetry run python tools/rebuild_tests.py
 """
+
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 # 定义项目根目录
@@ -32,7 +32,7 @@ def log_success(message: str) -> None:
     print(f"\033[92m[SUCCESS]\033[0m {message}")
 
 
-def clean_old_test_files():
+def clean_old_test_files() -> None:
     """
     安全地删除所有旧的、基于 `business_id` 的测试文件。
     保留 `__init__.py` 和 `conftest.py`。
@@ -63,38 +63,36 @@ def clean_old_test_files():
     log_success(f"--- 清理完成，共删除了 {deleted_count} 个旧测试文件 ---")
 
 
-def create_new_test_structure():
-    """
-    创建 UIDA 架构所需的全新测试目录和占位符文件。
-    """
+def create_new_test_structure() -> None:
+    """创建 UIDA 架构所需的全新测试目录和占位符文件。"""
     log_info("\n--- 开始创建新的 UIDA 测试结构 ---")
 
     # 定义新的目录和文件结构
     structure = {
         "helpers": {
-            "__init__.py": "# tests/helpers/__init__.py\n\"\"\"测试助手模块，提供数据工厂和生命周期管理器。\"\"\"\n",
-            "factories.py": "# tests/helpers/factories.py\n\"\"\"负责创建可预测的测试数据。\"\"\"\n\n# TODO: 在此实现 create_uida_request_data 等工厂函数\n",
-            "lifecycle.py": "# tests/helpers/lifecycle.py\n\"\"\"负责执行端到端的业务流程。\"\"\"\n\n# TODO: 在此实现 TestLifecycleManager 类\n",
+            "__init__.py": '# tests/helpers/__init__.py\n"""测试助手模块，提供数据工厂和生命周期管理器。"""\n',
+            "factories.py": '# tests/helpers/factories.py\n"""负责创建可预测的测试数据。"""\n\n# TODO: 在此实现 create_uida_request_data 等工厂函数\n',
+            "lifecycle.py": '# tests/helpers/lifecycle.py\n"""负责执行端到端的业务流程。"""\n\n# TODO: 在此实现 TestLifecycleManager 类\n',
         },
         "unit": {
             "_uida": {
                 "__init__.py": "",
-                "test_encoder.py": "# tests/unit/_uida/test_encoder.py\n\"\"\"测试 UIDA 编码器和规范化逻辑。\"\"\"\n\n# TODO: 添加对 JCS/I-JSON 和哈希的单元测试\n",
-                "test_reuse_key.py": "# tests/unit/_uida/test_reuse_key.py\n\"\"\"测试复用键的生成和策略应用。\"\"\"\n\n# TODO: 添加对复用键生成的单元测试\n",
+                "test_encoder.py": '# tests/unit/_uida/test_encoder.py\n"""测试 UIDA 编码器和规范化逻辑。"""\n\n# TODO: 添加对 JCS/I-JSON 和哈希的单元测试\n',
+                "test_reuse_key.py": '# tests/unit/_uida/test_reuse_key.py\n"""测试复用键的生成和策略应用。"""\n\n# TODO: 添加对复用键生成的单元测试\n',
             },
             "_tm": {
                 "__init__.py": "",
-                "test_normalizers.py": "# tests/unit/_tm/test_normalizers.py\n\"\"\"测试文本归一化逻辑。\"\"\"\n\n# TODO: 添加对 normalize_plain_text_for_reuse 的单元测试\n",
+                "test_normalizers.py": '# tests/unit/_tm/test_normalizers.py\n"""测试文本归一化逻辑。"""\n\n# TODO: 添加对 normalize_plain_text_for_reuse 的单元测试\n',
             },
         },
         "integration": {
-            "test_persistence_uida.py": "# tests/integration/test_persistence_uida.py\n\"\"\"对 UIDA 持久化层的集成测试。\"\"\"\n\n# TODO: 添加对 upsert_content, find_tm_entry 等的集成测试\n",
-            "test_coordinator_uida.py": "# tests/integration/test_coordinator_uida.py\n\"\"\"对 UIDA Coordinator 端到端流程的集成测试。\"\"\"\n\n# TODO: 使用 helpers/factories.py 和 helpers/lifecycle.py 编写高级集成测试\n",
+            "test_persistence_uida.py": '# tests/integration/test_persistence_uida.py\n"""对 UIDA 持久化层的集成测试。"""\n\n# TODO: 添加对 upsert_content, find_tm_entry 等的集成测试\n',
+            "test_coordinator_uida.py": '# tests/integration/test_coordinator_uida.py\n"""对 UIDA Coordinator 端到端流程的集成测试。"""\n\n# TODO: 使用 helpers/factories.py 和 helpers/lifecycle.py 编写高级集成测试\n',
         },
     }
 
     # 递归地创建目录和文件
-    def create_recursively(base_path: Path, struct: dict):
+    def create_recursively(base_path: Path, struct: dict[str, dict | str]) -> None:
         for name, content in struct.items():
             path = base_path / name
             if isinstance(content, dict):
@@ -110,7 +108,7 @@ def create_new_test_structure():
     log_success("--- 新的 UIDA 测试结构创建完成 ---")
 
 
-def main():
+def main() -> None:
     """执行清理和重建的主函数。"""
     print("==============================================")
     print("  Trans-Hub 测试目录 UIDA 架构重建工具  ")

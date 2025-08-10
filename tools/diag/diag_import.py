@@ -17,6 +17,7 @@ print("\n--- 诊断脚本开始 ---")
 try:
     print("正在尝试导入 'rfc8785'...")
     import rfc8785
+
     print("✅ 成功导入 rfc8785")
     print(f"   - 路径: {rfc8785.__file__}")
     print(f"   - 函数: {rfc8785.dumps}")

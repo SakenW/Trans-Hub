@@ -47,7 +47,10 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
     async def close(self) -> None:
         if self._notification_task and not self._notification_task.done():
             self._notification_task.cancel()
-        if self._notification_listener_conn and not self._notification_listener_conn.is_closed():
+        if (
+            self._notification_listener_conn
+            and not self._notification_listener_conn.is_closed()
+        ):
             await self._notification_listener_conn.close()
         await super().close()
         logger.info("PostgreSQL 持久层资源已完全关闭")
@@ -59,10 +62,14 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
     ) -> AsyncGenerator[list[ContentItem], None]:
         processed_count = 0
         while limit is None or processed_count < limit:
-            current_batch_size = min(batch_size, limit - processed_count) if limit is not None else batch_size
+            current_batch_size = (
+                min(batch_size, limit - processed_count)
+                if limit is not None
+                else batch_size
+            )
             if current_batch_size <= 0:
                 break
-            
+
             async with self._sessionmaker.begin() as session:
                 stmt = (
                     select(ThTransHead)
@@ -74,12 +81,12 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
                 head_results = (await session.execute(stmt)).scalars().all()
                 if not head_results:
                     break
-                
+
                 items = await self._build_content_items_from_orm(session, head_results)
-            
+
             if not items:
                 break
-            
+
             yield items
             processed_count += len(items)
 
@@ -96,23 +103,30 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
             self._notification_listener_conn = await asyncpg.connect(dsn=connect_dsn)
             await self._notification_listener_conn.add_listener(
                 self.NOTIFICATION_CHANNEL,
-                lambda c, p, ch, pl: asyncio.create_task(self._notification_callback(pl))
+                lambda c, p, ch, pl: asyncio.create_task(
+                    self._notification_callback(pl)
+                ),
             )
-            logger.info("PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL)
+            logger.info(
+                "PostgreSQL 通知监听器已启动", channel=self.NOTIFICATION_CHANNEL
+            )
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             logger.info("PostgreSQL 通知监听器正在关闭。")
         finally:
-            if self._notification_listener_conn and not self._notification_listener_conn.is_closed():
+            if (
+                self._notification_listener_conn
+                and not self._notification_listener_conn.is_closed()
+            ):
                 await self._notification_listener_conn.close()
             self._notification_listener_conn = None
 
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         async def _internal_generator() -> AsyncGenerator[str, None]:
             if not self._notification_task:
-                 self._notification_queue = asyncio.Queue()
-                 self._notification_task = asyncio.create_task(self._listen_loop())
-            
+                self._notification_queue = asyncio.Queue()
+                self._notification_task = asyncio.create_task(self._listen_loop())
+
             if self._notification_queue is None:
                 return
 
@@ -122,4 +136,5 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
                     yield payload
                 except asyncio.CancelledError:
                     break
+
         return _internal_generator()

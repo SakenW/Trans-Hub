@@ -43,12 +43,12 @@ class TransHubConfig(BaseSettings):
     active_engine: EngineName = EngineName.TRANSLATORS
     batch_size: int = Field(default=50, gt=0)
     source_lang: str | None = Field(default=None)
-    
+
     # worker_poll_interval 对 SQLite 仍然有效
     worker_poll_interval: int = Field(
         default=10, description="Worker在轮询模式下的等待间隔（秒）", gt=0
     )
-    
+
     engine_configs: dict[str, Any] = Field(default_factory=dict)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

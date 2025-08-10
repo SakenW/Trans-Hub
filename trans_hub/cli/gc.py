@@ -1,5 +1,6 @@
 # trans_hub/cli/gc.py
 """处理垃圾回收 (GC) 的 CLI 命令 (UIDA 架构版)。"""
+
 import asyncio
 from typing import Annotated
 
@@ -32,11 +33,19 @@ async def _async_gc_run(
             dry_run=True,
         )
 
-        table = Table(title="垃圾回收预演报告", show_header=True, header_style="bold cyan")
+        table = Table(
+            title="垃圾回收预演报告", show_header=True, header_style="bold cyan"
+        )
         table.add_column("数据类型", style="cyan", width=35)
         table.add_column("将被删除的数量", style="magenta", justify="right")
-        table.add_row(f"已归档超过 {content_days} 天的内容", str(report.get("deleted_archived_content", 0)))
-        table.add_row(f"超过 {tm_days} 天未使用的翻译记忆", str(report.get("deleted_unused_tm_entries", 0)))
+        table.add_row(
+            f"已归档超过 {content_days} 天的内容",
+            str(report.get("deleted_archived_content", 0)),
+        )
+        table.add_row(
+            f"超过 {tm_days} 天未使用的翻译记忆",
+            str(report.get("deleted_unused_tm_entries", 0)),
+        )
         console.print(table)
 
         total_to_delete = sum(report.values())
@@ -59,7 +68,9 @@ async def _async_gc_run(
             dry_run=False,
         )
         deleted_count = sum(final_report.values())
-        console.print(f"[bold green]✅ 垃圾回收执行完毕！共删除 {deleted_count} 条记录。[/bold green]")
+        console.print(
+            f"[bold green]✅ 垃圾回收执行完毕！共删除 {deleted_count} 条记录。[/bold green]"
+        )
     finally:
         await coordinator.close()
 
@@ -84,7 +95,9 @@ def gc_run(
         asyncio.run(_async_gc_run(coordinator, content_days, tm_days, yes))
     except (RuntimeError, Exception) as e:
         if "Not a tty" in str(e):
-            console.print("[bold red]❌ 错误：此命令需要交互式终端。请使用 --yes 标志运行。[/bold red]")
+            console.print(
+                "[bold red]❌ 错误：此命令需要交互式终端。请使用 --yes 标志运行。[/bold red]"
+            )
         else:
             console.print(f"[bold red]❌ 执行失败: {e}[/bold red]")
         raise typer.Exit(code=1) from e

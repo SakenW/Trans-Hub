@@ -20,7 +20,6 @@ except (ImportError, IndexError):
 
 import aiosqlite  # noqa: E402
 import structlog  # noqa: E402
-
 from rich.console import Console, Group, RenderableType  # noqa: E402
 from rich.panel import Panel  # noqa: E402
 from rich.syntax import Syntax  # noqa: E402
@@ -59,7 +58,10 @@ class DatabaseInspector:
         """查询并打印数据库的统计概览信息。"""
         assert self.conn is not None
         self.console.print(
-            Panel("[bold cyan]Trans-Hub 数据库统计概览 (UIDA v1.2 Schema)[/bold cyan]", expand=False)
+            Panel(
+                "[bold cyan]Trans-Hub 数据库统计概览 (UIDA v1.2 Schema)[/bold cyan]",
+                expand=False,
+            )
         )
         queries = {
             "源内容 (th_content)": "SELECT COUNT(*) FROM th_content;",
@@ -143,7 +145,7 @@ class DatabaseInspector:
         if row["translated_payload_json"]:
             translated_payload = json.loads(row["translated_payload_json"])
             translated_text = translated_payload.get("text", str(translated_payload))
-        
+
         content_table = Table(box=None, show_header=False, padding=(0, 1))
         content_table.add_column(style="dim", width=12)
         content_table.add_column()
@@ -155,10 +157,12 @@ class DatabaseInspector:
         try:
             parsed_keys = json.loads(row["keys_json_debug"])
             pretty_json = json.dumps(parsed_keys, indent=2, ensure_ascii=False)
-            keys_renderable = Syntax(pretty_json, "json", theme="monokai", word_wrap=True)
+            keys_renderable = Syntax(
+                pretty_json, "json", theme="monokai", word_wrap=True
+            )
         except (json.JSONDecodeError, TypeError):
             keys_renderable = Text(row["keys_json_debug"] or "[dim]N/A[/dim]")
-        
+
         keys_panel = Panel(
             keys_renderable,
             title="[dim]UIDA Keys[/dim]",
@@ -182,7 +186,9 @@ class DatabaseInspector:
             f"记录 #{index} | 状态: [{status_color}]{row['status'].upper()}[/{status_color}] | "
             f"目标: [magenta]{row['target_lang']}[/magenta]"
         )
-        subtitle = Text.from_markup(f"[dim]Translation ID: {row['translation_id']}[/dim]")
+        subtitle = Text.from_markup(
+            f"[dim]Translation ID: {row['translation_id']}[/dim]"
+        )
 
         return Panel(
             renderables,

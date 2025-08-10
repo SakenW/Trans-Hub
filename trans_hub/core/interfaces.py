@@ -15,7 +15,7 @@ class PersistenceHandler(Protocol):
     """定义了白皮书 v2.4 下持久化处理器的纯异步接口协议。"""
 
     SUPPORTS_NOTIFICATIONS: bool
-    _is_sqlite: bool # [新增] 用于策略层判断并发写入能力
+    _is_sqlite: bool  # [新增] 用于策略层判断并发写入能力
 
     async def connect(self) -> None:
         """建立与数据库的连接。"""
@@ -45,7 +45,7 @@ class PersistenceHandler(Protocol):
     ) -> str:
         """根据 UIDA 幂等地创建或更新 th_content 记录，返回 content_id。"""
         ...
-    
+
     async def get_or_create_translation_head(
         self,
         project_id: str,
@@ -103,7 +103,7 @@ class PersistenceHandler(Protocol):
     ) -> str:
         """幂等地创建或更新 TM 条目，返回 tm_id。"""
         ...
-    
+
     async def link_translation_to_tm(self, translation_rev_id: str, tm_id: str) -> None:
         """在 th_tm_links 中创建一条追溯链接。"""
         ...
@@ -113,17 +113,17 @@ class PersistenceHandler(Protocol):
     ) -> list[str] | None:
         """获取指定项目和语言的回退顺序。"""
         ...
-    
+
     async def get_published_translation(
         self, content_id: str, target_lang: str, variant_key: str
     ) -> tuple[str, dict[str, Any]] | None:
         """获取已发布的译文，返回 (rev_id, translated_payload_json) 或 None。"""
         ...
-    
+
     async def publish_revision(self, revision_id: str) -> bool:
         """将一个 'reviewed' 状态的修订发布，返回是否成功。"""
         ...
-        
+
     async def reject_revision(self, revision_id: str) -> bool:
         """将一个修订的状态标记为 'rejected'，返回是否成功。"""
         ...

@@ -18,9 +18,12 @@ TRANS-HUB 数据库初始化（v2.4.1 · UIDA + Rev/Head + 影子索引最小占
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # --- Alembic 元数据 ---
 revision = "3f8b9e6a0c2c"
@@ -29,7 +32,7 @@ branch_labels = None
 depends_on = None
 
 
-def _json_type(dialect_name: str) -> sa.types.TypeEngine:
+def _json_type(dialect_name: str) -> sa.types.TypeEngine[dict[str, Any]]:
     """
     按方言选择 JSON 类型：
     - PostgreSQL 使用 JSONB（结合 ->、->>、@> 等操作更高效）
@@ -43,7 +46,7 @@ def _json_type(dialect_name: str) -> sa.types.TypeEngine:
 def upgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
-    JSONType = _json_type(dialect)
+    json_type = _json_type(dialect)
 
     # ----------------------------------------------------------------------
     # 0) 定义枚举：译文状态（仅 4 态）
@@ -60,22 +63,55 @@ def upgrade() -> None:
             END $$;
             """
         )
-    translation_status = sa.Enum("draft", "reviewed", "published", "rejected", name="translation_status")
+    translation_status = sa.Enum(
+        "draft", "reviewed", "published", "rejected", name="translation_status"
+    )
 
     # ----------------------------------------------------------------------
     # 1) th_projects：项目集中注册（强校验 + 不可改名）
     # ----------------------------------------------------------------------
     op.create_table(
         "th_projects",
-        sa.Column("project_id", sa.String(), nullable=False, comment="项目主键（短而稳；命名规则详见白皮书）"),
-        sa.Column("display_name", sa.String(), nullable=False, comment="项目自然名，便于人读"),
-        sa.Column("category", sa.String(), nullable=True, comment="元数据：mod/pack/app/web/site 等"),
-        sa.Column("platform", sa.String(), nullable=True, comment="元数据：minecraft/ios/android/web 等"),
-        sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "project_id",
+            sa.String(),
+            nullable=False,
+            comment="项目主键（短而稳；命名规则详见白皮书）",
+        ),
+        sa.Column(
+            "display_name", sa.String(), nullable=False, comment="项目自然名，便于人读"
+        ),
+        sa.Column(
+            "category",
+            sa.String(),
+            nullable=True,
+            comment="元数据：mod/pack/app/web/site 等",
+        ),
+        sa.Column(
+            "platform",
+            sa.String(),
+            nullable=True,
+            comment="元数据：minecraft/ios/android/web 等",
+        ),
+        sa.Column(
+            "is_archived", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("project_id"),
-        sa.CheckConstraint("char_length(project_id) BETWEEN 3 AND 32", name="ck_proj_len"),
+        sa.CheckConstraint(
+            "char_length(project_id) BETWEEN 3 AND 32", name="ck_proj_len"
+        ),
         sa.CheckConstraint("project_id NOT LIKE '-%'", name="ck_proj_no_prefix_dash"),
         sa.CheckConstraint("project_id NOT LIKE '%-'", name="ck_proj_no_suffix_dash"),
         sa.CheckConstraint("project_id NOT LIKE '%--%'", name="ck_proj_no_double_dash"),
@@ -122,27 +158,97 @@ def upgrade() -> None:
     # ----------------------------------------------------------------------
     op.create_table(
         "th_content",
-        sa.Column("id", sa.String(), nullable=False, comment="PK（无业务含义，字符串 UUID/雪花 ID）"),
-        sa.Column("project_id", sa.String(), nullable=False, comment="FK → th_projects.project_id"),
-        sa.Column("namespace", sa.String(), nullable=False, comment="内容域 + 语义主版本（如 game.ui.menu.entry.v1）"),
-        sa.Column("keys_sha256_bytes", sa.LargeBinary(length=32), nullable=False, comment="JCS(keys_json)→SHA-256 32B 摘要"),
-        sa.Column("keys_b64", sa.Text(), nullable=False, comment="JCS(keys_json) 的 Base64URL 文本（排错/导出用）"),
-        sa.Column("keys_json", JSONType, nullable=False, comment="权威 keys（I-JSON；参与 UIDA 计算）"),
-        sa.Column("source_payload_json", JSONType, nullable=False, comment="结构化原文与元数据（不含译文）"),
-        sa.Column("content_version", sa.Integer(), nullable=False, server_default=sa.text("1"), comment="业务侧内容版本"),
-        sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True, comment="归档时间（可选）"),
-        sa.Column("content_type", sa.String(), nullable=True, comment="内容类型（可选）"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "id",
+            sa.String(),
+            nullable=False,
+            comment="PK（无业务含义，字符串 UUID/雪花 ID）",
+        ),
+        sa.Column(
+            "project_id",
+            sa.String(),
+            nullable=False,
+            comment="FK → th_projects.project_id",
+        ),
+        sa.Column(
+            "namespace",
+            sa.String(),
+            nullable=False,
+            comment="内容域 + 语义主版本（如 game.ui.menu.entry.v1）",
+        ),
+        sa.Column(
+            "keys_sha256_bytes",
+            sa.LargeBinary(length=32),
+            nullable=False,
+            comment="JCS(keys_json)→SHA-256 32B 摘要",
+        ),
+        sa.Column(
+            "keys_b64",
+            sa.Text(),
+            nullable=False,
+            comment="JCS(keys_json) 的 Base64URL 文本（排错/导出用）",
+        ),
+        sa.Column(
+            "keys_json",
+            _json_type(dialect),
+            nullable=False,
+            comment="权威 keys（I-JSON；参与 UIDA 计算）",
+        ),
+        sa.Column(
+            "source_payload_json",
+            _json_type(dialect),
+            nullable=False,
+            comment="结构化原文与元数据（不含译文）",
+        ),
+        sa.Column(
+            "content_version",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("1"),
+            comment="业务侧内容版本",
+        ),
+        sa.Column(
+            "archived_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+            comment="归档时间（可选）",
+        ),
+        sa.Column(
+            "content_type", sa.String(), nullable=True, comment="内容类型（可选）"
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.ForeignKeyConstraint(["project_id"], ["th_projects.project_id"], name="fk_content_project"),
-        sa.UniqueConstraint("project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"),
+        sa.ForeignKeyConstraint(
+            ["project_id"], ["th_projects.project_id"], name="fk_content_project"
+        ),
+        sa.UniqueConstraint(
+            "project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"
+        ),
         sa.CheckConstraint(
-            "(octet_length(keys_sha256_bytes)=32) OR (length(keys_sha256_bytes)=32)", name="ck_content_keys_sha256_len"
+            "(octet_length(keys_sha256_bytes)=32) OR (length(keys_sha256_bytes)=32)",
+            name="ck_content_keys_sha256_len",
         ),
     )
-    op.create_index("ix_content_proj_ns", "th_content", ["project_id", "namespace"], unique=False)
-    op.create_index("ix_content_proj_ns_ver", "th_content", ["project_id", "namespace", "content_version"], unique=False)
+    op.create_index(
+        "ix_content_proj_ns", "th_content", ["project_id", "namespace"], unique=False
+    )
+    op.create_index(
+        "ix_content_proj_ns_ver",
+        "th_content",
+        ["project_id", "namespace", "content_version"],
+        unique=False,
+    )
 
     if dialect == "postgresql":
         # UIDA 三元不可更新
@@ -244,22 +350,42 @@ def upgrade() -> None:
             sa.Column("id", sa.String(), nullable=False),
             sa.Column("content_id", sa.String(), nullable=False),
             sa.Column("target_lang", sa.String(), nullable=False),
-            sa.Column("variant_key", sa.String(), nullable=False, server_default=sa.text("'-'")),
+            sa.Column(
+                "variant_key",
+                sa.String(),
+                nullable=False,
+                server_default=sa.text("'-'"),
+            ),
             sa.Column("status", translation_status, nullable=False),
             sa.Column("revision_no", sa.Integer(), nullable=False),
-            sa.Column("translated_payload_json", JSONType, nullable=True),
+            sa.Column("translated_payload_json", json_type, nullable=True),
             sa.Column("origin_lang", sa.String(), nullable=True),
             sa.Column("quality_score", sa.Float(), nullable=True),
-            sa.Column("lint_report_json", JSONType, nullable=True),
+            sa.Column("lint_report_json", _json_type(dialect), nullable=True),
             sa.Column("engine_name", sa.String(), nullable=True),
             sa.Column("engine_version", sa.String(), nullable=True),
             sa.Column("prompt_hash", sa.String(), nullable=True),
             sa.Column("params_hash", sa.String(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.PrimaryKeyConstraint("project_id", "id"),
-            sa.ForeignKeyConstraint(["content_id"], ["th_content.id"], name="fk_rev_content", ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(
+                ["content_id"],
+                ["th_content.id"],
+                name="fk_rev_content",
+                ondelete="CASCADE",
+            ),
         )
-        op.create_index("ix_rev_content_lang", "th_trans_rev", ["content_id", "target_lang"], unique=False)
+        op.create_index(
+            "ix_rev_content_lang",
+            "th_trans_rev",
+            ["content_id", "target_lang"],
+            unique=False,
+        )
 
     # ----------------------------------------------------------------------
     # 4) th_trans_head（头表 · 分区：HASH(project_id)） —— 主键改为 (project_id, id)
@@ -345,29 +471,64 @@ def upgrade() -> None:
             sa.Column("id", sa.String(), nullable=False),
             sa.Column("content_id", sa.String(), nullable=False),
             sa.Column("target_lang", sa.String(), nullable=False),
-            sa.Column("variant_key", sa.String(), nullable=False, server_default=sa.text("'-'")),
+            sa.Column(
+                "variant_key",
+                sa.String(),
+                nullable=False,
+                server_default=sa.text("'-'"),
+            ),
             sa.Column("current_rev_id", sa.String(), nullable=False),
             sa.Column("current_status", translation_status, nullable=False),
             sa.Column("current_no", sa.Integer(), nullable=False),
             sa.Column("published_rev_id", sa.String(), nullable=True),
             sa.Column("published_no", sa.Integer(), nullable=True),
             sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.PrimaryKeyConstraint("project_id", "id"),
-            sa.ForeignKeyConstraint(["content_id"], ["th_content.id"], name="fk_head_content", ondelete="CASCADE"),
-            sa.UniqueConstraint("project_id", "content_id", "target_lang", "variant_key", name="uq_head_dim"),
-            sa.UniqueConstraint("project_id", "published_rev_id", name="uq_head_published_rev"),
+            sa.ForeignKeyConstraint(
+                ["content_id"],
+                ["th_content.id"],
+                name="fk_head_content",
+                ondelete="CASCADE",
+            ),
+            sa.UniqueConstraint(
+                "project_id",
+                "content_id",
+                "target_lang",
+                "variant_key",
+                name="uq_head_dim",
+            ),
+            sa.UniqueConstraint(
+                "project_id", "published_rev_id", name="uq_head_published_rev"
+            ),
         )
-        op.create_index("ix_head_proj_lang_status_id", "th_trans_head", ["project_id", "target_lang", "current_status", "id"], unique=False)
+        op.create_index(
+            "ix_head_proj_lang_status_id",
+            "th_trans_head",
+            ["project_id", "target_lang", "current_status", "id"],
+            unique=False,
+        )
 
     # ----------------------------------------------------------------------
     # 5) search_content：影子索引表（**最小占位**，仅 content_id；不预填充）
     # ----------------------------------------------------------------------
     op.create_table(
         "search_content",
-        sa.Column("content_id", sa.String(), nullable=False, comment="PK + FK → th_content.id（仅占位）"),
+        sa.Column(
+            "content_id",
+            sa.String(),
+            nullable=False,
+            comment="PK + FK → th_content.id（仅占位）",
+        ),
         sa.PrimaryKeyConstraint("content_id"),
-        sa.ForeignKeyConstraint(["content_id"], ["th_content.id"], name="fk_sc_content", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["content_id"], ["th_content.id"], name="fk_sc_content", ondelete="CASCADE"
+        ),
     )
 
     if dialect == "postgresql":
@@ -390,9 +551,15 @@ def upgrade() -> None:
             END; $$ LANGUAGE plpgsql;
             """
         )
-        op.execute("CREATE TRIGGER trg_sc_ins AFTER INSERT ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();")
-        op.execute("CREATE TRIGGER trg_sc_upd AFTER UPDATE OF keys_json, namespace, project_id ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();")
-        op.execute("CREATE TRIGGER trg_sc_del AFTER DELETE ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();")
+        op.execute(
+            "CREATE TRIGGER trg_sc_ins AFTER INSERT ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();"
+        )
+        op.execute(
+            "CREATE TRIGGER trg_sc_upd AFTER UPDATE OF keys_json, namespace, project_id ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();"
+        )
+        op.execute(
+            "CREATE TRIGGER trg_sc_del AFTER DELETE ON th_content FOR EACH ROW EXECUTE FUNCTION trg_sc_minimal_touch();"
+        )
 
     # ----------------------------------------------------------------------
     # 6) th_tm（翻译记忆） 与 th_tm_links（追溯）
@@ -402,29 +569,83 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), nullable=False, comment="PK（无业务含义）"),
         sa.Column("project_id", sa.String(), nullable=False, comment="项目/租户"),
         sa.Column("namespace", sa.String(), nullable=False, comment="内容域"),
-        sa.Column("reuse_sha256_bytes", sa.LargeBinary(length=32), nullable=False, comment="复用键摘要（32B）"),
-        sa.Column("source_text_json", JSONType, nullable=False, comment="归一化后的源文本骨架/占位符"),
-        sa.Column("translated_json", JSONType, nullable=False, comment="结构化可复用译文"),
-        sa.Column("variant_key", sa.String(), nullable=False, server_default=sa.text("'-'"), comment="语言内变体"),
+        sa.Column(
+            "reuse_sha256_bytes",
+            sa.LargeBinary(length=32),
+            nullable=False,
+            comment="复用键摘要（32B）",
+        ),
+        sa.Column(
+            "source_text_json",
+            json_type,
+            nullable=False,
+            comment="归一化后的源文本骨架/占位符",
+        ),
+        sa.Column(
+            "translated_json",
+            _json_type(dialect),
+            nullable=False,
+            comment="结构化可复用译文",
+        ),
+        sa.Column(
+            "variant_key",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'-'"),
+            comment="语言内变体",
+        ),
         sa.Column("source_lang", sa.String(), nullable=False),
         sa.Column("target_lang", sa.String(), nullable=False),
-        sa.Column("visibility_scope", sa.String(), nullable=False, server_default=sa.text("'project'"), comment="project|tenant|global"),
-        sa.Column("policy_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
-        sa.Column("hash_algo_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column(
+            "visibility_scope",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'project'"),
+            comment="project|tenant|global",
+        ),
+        sa.Column(
+            "policy_version", sa.Integer(), nullable=False, server_default=sa.text("1")
+        ),
+        sa.Column(
+            "hash_algo_version",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("1"),
+        ),
         sa.Column("reuse_policy_fingerprint", sa.String(), nullable=True),
         sa.Column("quality_score", sa.Float(), nullable=True),
-        sa.Column("pii_flags", JSONType, nullable=True),
+        sa.Column("pii_flags", _json_type(dialect), nullable=True),
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.CheckConstraint("visibility_scope in ('project','tenant','global')", name="ck_tm_visibility_scope"),
         sa.CheckConstraint(
-            "(octet_length(reuse_sha256_bytes)=32) OR (length(reuse_sha256_bytes)=32)", name="ck_tm_reuse_sha256_len"
+            "visibility_scope in ('project','tenant','global')",
+            name="ck_tm_visibility_scope",
+        ),
+        sa.CheckConstraint(
+            "(octet_length(reuse_sha256_bytes)=32) OR (length(reuse_sha256_bytes)=32)",
+            name="ck_tm_reuse_sha256_len",
         ),
         sa.UniqueConstraint(
-            "project_id", "namespace", "reuse_sha256_bytes", "source_lang",
-            "target_lang", "variant_key", "policy_version", "hash_algo_version",
+            "project_id",
+            "namespace",
+            "reuse_sha256_bytes",
+            "source_lang",
+            "target_lang",
+            "variant_key",
+            "policy_version",
+            "hash_algo_version",
             name="uq_tm_reuse_key",
         ),
     )
@@ -434,15 +655,39 @@ def upgrade() -> None:
     op.create_table(
         "th_tm_links",
         sa.Column("id", sa.String(), nullable=False, comment="PK（无业务含义）"),
-        sa.Column("project_id", sa.String(), nullable=False, comment="镜像项目（与 rev 一致，用于复合外键）"),
-        sa.Column("translation_rev_id", sa.String(), nullable=False, comment="指向 th_trans_rev.id（配合 project_id）"),
+        sa.Column(
+            "project_id",
+            sa.String(),
+            nullable=False,
+            comment="镜像项目（与 rev 一致，用于复合外键）",
+        ),
+        sa.Column(
+            "translation_rev_id",
+            sa.String(),
+            nullable=False,
+            comment="指向 th_trans_rev.id（配合 project_id）",
+        ),
         sa.Column("tm_id", sa.String(), nullable=False, comment="指向 th_tm.id"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.ForeignKeyConstraint(["tm_id"], ["th_tm.id"], name="fk_tm_links_tm", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["tm_id"], ["th_tm.id"], name="fk_tm_links_tm", ondelete="CASCADE"
+        ),
         # 复合外键：确保链接到同一 project 的 rev 行
-        sa.ForeignKeyConstraint(["project_id", "translation_rev_id"], ["th_trans_rev.project_id", "th_trans_rev.id"], name="fk_tm_links_rev", ondelete="CASCADE"),
-        sa.UniqueConstraint("project_id", "translation_rev_id", "tm_id", name="uq_tm_links_triplet"),
+        sa.ForeignKeyConstraint(
+            ["project_id", "translation_rev_id"],
+            ["th_trans_rev.project_id", "th_trans_rev.id"],
+            name="fk_tm_links_rev",
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "project_id", "translation_rev_id", "tm_id", name="uq_tm_links_triplet"
+        ),
     )
 
     if dialect == "postgresql":
@@ -457,10 +702,22 @@ def upgrade() -> None:
         "th_locales_fallbacks",
         sa.Column("project_id", sa.String(), nullable=False),
         sa.Column("locale", sa.String(), nullable=False),
-        sa.Column("fallback_order", JSONType, nullable=False, comment="回退顺序数组，如 ['zh-Hans','zh']"),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "fallback_order",
+            json_type,
+            nullable=False,
+            comment="回退顺序数组，如 ['zh-Hans','zh']",
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.PrimaryKeyConstraint("project_id", "locale"),
-        sa.ForeignKeyConstraint(["project_id"], ["th_projects.project_id"], name="fk_fallbacks_project"),
+        sa.ForeignKeyConstraint(
+            ["project_id"], ["th_projects.project_id"], name="fk_fallbacks_project"
+        ),
     )
 
     op.create_table(
@@ -469,12 +726,19 @@ def upgrade() -> None:
         sa.Column("content_id", sa.String(), nullable=False),
         sa.Column("target_lang", sa.String(), nullable=False),
         sa.Column("variant_key", sa.String(), nullable=False),
-        sa.Column("resolved_rev", sa.String(), nullable=False, comment="命中的修订 id（与 project_id 配对使用）"),
+        sa.Column(
+            "resolved_rev",
+            sa.String(),
+            nullable=False,
+            comment="命中的修订 id（与 project_id 配对使用）",
+        ),
         sa.Column("origin_lang", sa.String(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("content_id", "target_lang", "variant_key"),
     )
-    op.create_index("ix_resolve_project", "th_resolve_cache", ["project_id"], unique=False)
+    op.create_index(
+        "ix_resolve_project", "th_resolve_cache", ["project_id"], unique=False
+    )
 
 
 def downgrade() -> None:
@@ -510,7 +774,9 @@ def downgrade() -> None:
     # ----------------------------------------------------------------------
     if dialect == "postgresql":
         op.execute("DROP TRIGGER IF EXISTS trg_head_touch_updated_at ON th_trans_head;")
-        op.execute("DROP TRIGGER IF EXISTS trg_head_derive_project_ins ON th_trans_head;")
+        op.execute(
+            "DROP TRIGGER IF EXISTS trg_head_derive_project_ins ON th_trans_head;"
+        )
         op.execute("DROP TABLE IF EXISTS th_trans_head CASCADE;")
     else:
         op.drop_index("ix_head_proj_lang_status_id", table_name="th_trans_head")
@@ -532,12 +798,16 @@ def downgrade() -> None:
     # 2) 内容表
     # ----------------------------------------------------------------------
     if dialect == "postgresql":
-        op.execute("DROP TRIGGER IF EXISTS trg_content_forbid_uida_update ON th_content;")
+        op.execute(
+            "DROP TRIGGER IF EXISTS trg_content_forbid_uida_update ON th_content;"
+        )
         op.execute("DROP TRIGGER IF EXISTS trg_content_touch_updated_at ON th_content;")
         op.execute("DROP FUNCTION IF EXISTS th_content_forbid_uida_update();")
         op.execute("DROP FUNCTION IF EXISTS set_updated_at();")
         op.execute("DROP TRIGGER IF EXISTS trg_projects_forbid_rename ON th_projects;")
-        op.execute("DROP TRIGGER IF EXISTS trg_projects_touch_updated_at ON th_projects;")
+        op.execute(
+            "DROP TRIGGER IF EXISTS trg_projects_touch_updated_at ON th_projects;"
+        )
         op.execute("DROP FUNCTION IF EXISTS th_projects_forbid_rename();")
 
     op.drop_index("ix_content_proj_ns_ver", table_name="th_content")

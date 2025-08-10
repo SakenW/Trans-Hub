@@ -1,10 +1,10 @@
 # tests/unit/_uida/test_encoder.py
 # [v2.4] UIDA 编码器单元测试
 """测试 UIDA 编码器、I-JSON 守卫和 RFC 8785 规范化逻辑。"""
+
 from __future__ import annotations
 
 import base64
-import hashlib
 
 import pytest
 
@@ -46,16 +46,17 @@ def test_jcs_official_vectors():
     # 向量 1: 简单对象
     obj1 = {"a": 1, "b": 2}
     expected1 = b'{"a":1,"b":2}'
-    assert get_canonical_json_for_debug(obj1).encode('utf-8') == expected1
+    assert get_canonical_json_for_debug(obj1).encode("utf-8") == expected1
 
     # 向量 2: 键排序
     obj2 = {"b": 2, "a": 1}
-    assert get_canonical_json_for_debug(obj2).encode('utf-8') == expected1
+    assert get_canonical_json_for_debug(obj2).encode("utf-8") == expected1
 
     # 向量 3: Unicode 和特殊字符转义
     obj3 = {"a": "✓", "b": "\u000c\r"}
-    expected3 = b'{"a":"\\u2713","b":"\\f\\r"}'
-    assert get_canonical_json_for_debug(obj3).encode('utf-8') == expected3
+    # [核心修正] rfc8785 默认输出 UTF-8 字节，而不是 \uXXXX 转义
+    expected3 = b'{"a":"\xe2\x9c\x93","b":"\\f\\r"}'
+    assert get_canonical_json_for_debug(obj3).encode("utf-8") == expected3
 
 
 def test_output_format_and_content(keys_a):
@@ -70,7 +71,7 @@ def test_output_format_and_content(keys_a):
     assert "+" not in b64 and "/" not in b64, "Base64URL 编码不应包含 '+' 或 '/'"
 
     padding = b"=" * (-len(b64) % 4)
-    decoded_bytes = base64.urlsafe_b64decode(b64.encode('ascii') + padding)
+    decoded_bytes = base64.urlsafe_b64decode(b64.encode("ascii") + padding)
     assert decoded_bytes == cano_bytes, "Base64 解码后应与规范化字节串一致"
 
 

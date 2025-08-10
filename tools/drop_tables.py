@@ -3,7 +3,6 @@
 
 import argparse
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -33,7 +32,9 @@ class PostgresTableDropper:
     async def connect(self) -> None:
         """建立数据库连接。"""
         if asyncpg is None:
-            raise RuntimeError("未安装 asyncpg 库，请通过 poetry install -E postgres 安装可选依赖。")
+            raise RuntimeError(
+                "未安装 asyncpg 库，请通过 poetry install -E postgres 安装可选依赖。"
+            )
         # 转换 DSN 以兼容 asyncpg
         connect_dsn = self.dsn.replace("postgresql+asyncpg", "postgresql", 1)
         self.conn = await asyncpg.connect(dsn=connect_dsn)
@@ -63,7 +64,7 @@ class PostgresTableDropper:
                 "th_locales_fallbacks",
                 "th_resolve_cache",
             ]
-            
+
             # 反向删除表以避免外键约束问题
             for table in reversed(tables):
                 try:
@@ -71,9 +72,9 @@ class PostgresTableDropper:
                     log.info(f"✅ 已删除表 {table}")
                 except Exception as e:
                     log.warning(f"⚠️  表 {table} 无法删除: {e}")
-            
+
             log.info("✅ PostgreSQL 数据库表删除完成")
-        except Exception as e:
+        except Exception:
             log.error("❌ 删除数据库表时发生错误", exc_info=True)
             raise
         finally:
@@ -91,28 +92,28 @@ async def main() -> None:
         "--env-file",
         type=str,
         default=".env",
-        help="指定 .env 配置文件路径 (默认: .env)"
+        help="指定 .env 配置文件路径 (默认: .env)",
     )
     args = parser.parse_args()
 
     # 加载配置
     config = TransHubConfig(_env_file=args.env_file)
-    
+
     # 检查数据库类型
     if not config.database_url.startswith("postgresql"):
         log.error("❌ 仅支持 PostgreSQL 数据库，请检查配置文件中的 database_url。")
         sys.exit(1)
-    
+
     # 创建数据库表删除器
     dropper = PostgresTableDropper(config.database_url)
-    
+
     try:
         # 连接数据库
         await dropper.connect()
-        
+
         # 删除所有表
         await dropper.drop_all_tables()
-        
+
         log.info("🎉 所有表已成功删除！")
     except Exception as e:
         log.error("❌ 删除表失败", error=str(e))

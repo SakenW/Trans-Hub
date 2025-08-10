@@ -12,9 +12,8 @@ from typing import Any
 
 import asyncpg
 from dotenv import load_dotenv
-from pydantic import PostgresDsn, SecretStr
+from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 print("--- 数据库连接测试开始 ---")
 
@@ -31,21 +30,22 @@ class TestDatabaseConfig(BaseSettings):
     """用于测试 .env 文件中的数据库配置加载是否正常。"""
 
     model_config = SettingsConfigDict(env_prefix="TH_", env_file=".env", extra="ignore")
-    database_url: PostgresDsn
+    database_url: PostgresDsn = "postgresql+asyncpg://postgres:postgres@localhost:5432/trans_hub_test"  # 默认测试数据库URL
 
 
 async def test_connection(config: TestDatabaseConfig) -> dict[str, Any]:
     """测试数据库连接。"""
     print(f"\n尝试连接到数据库: {config.database_url}")
-    
+
     # 转换 URL 格式以适配 asyncpg
     db_url = str(config.database_url).replace("postgresql+asyncpg://", "postgresql://")
     print(f"\n转换后的数据库 URL: {db_url}")
 
     # 提取并打印连接参数以供调试
     from urllib.parse import urlparse
+
     parsed_url = urlparse(db_url)
-    print(f"\n连接参数调试信息:")
+    print("\n连接参数调试信息:")
     print(f"  主机: {parsed_url.hostname}")
     print(f"  端口: {parsed_url.port}")
     print(f"  数据库名: {parsed_url.path[1:] if parsed_url.path else ''}")
@@ -88,7 +88,7 @@ async def main() -> None:
 
         print("\n--- 开始测试数据库连接 ---")
         result = await test_connection(config)
-        
+
         print("\n--- 测试结果 ---")
         if result["success"]:
             print("✅ 数据库连接测试成功！")

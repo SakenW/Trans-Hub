@@ -29,6 +29,11 @@ classifiers = [
 [tool.poetry.scripts]
 trans-hub = "trans_hub.cli.main:app"
 
+[tool.pytest.ini_options]
+# [核心修正] 告诉 pytest 不要去 'tools' 目录下查找测试
+norecursedirs = ["tools"]
+asyncio_mode = "auto"
+
 # ==============================================================================
 #  依赖关系定义 (遵循《技术宪章》)
 # ==============================================================================

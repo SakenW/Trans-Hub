@@ -1,0 +1,496 @@
+tools/rebuild_tests.py:35: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def clean_old_test_files():
+    ^
+tools/rebuild_tests.py:35: note: Use "-> None" if function does not return a value
+tools/rebuild_tests.py:66: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def create_new_test_structure():
+    ^
+tools/rebuild_tests.py:66: note: Use "-> None" if function does not return a value
+tools/rebuild_tests.py:95: error: Function is missing a return type annotation 
+[no-untyped-def]
+        def create_recursively(base_path: Path, struct: dict):
+        ^
+tools/rebuild_tests.py:95: error: Missing type parameters for generic type
+"dict"  [type-arg]
+        def create_recursively(base_path: Path, struct: dict):
+                                                        ^
+tools/rebuild_tests.py:111: error: Function is missing a return type annotation
+ [no-untyped-def]
+    def main():
+    ^
+tools/rebuild_tests.py:111: note: Use "-> None" if function does not return a value
+tools/rebuild_tests.py:121: error: Call to untyped function
+"clean_old_test_files" in typed context  [no-untyped-call]
+        clean_old_test_files()
+        ^~~~~~~~~~~~~~~~~~~~~~
+tools/rebuild_tests.py:122: error: Call to untyped function
+"create_new_test_structure" in typed context  [no-untyped-call]
+        create_new_test_structure()
+        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+tools/rebuild_tests.py:128: error: Call to untyped function "main" in typed
+context  [no-untyped-call]
+        main()
+        ^~~~~~
+trans_hub/_tm/normalizers.py:29: error: Function is missing a type annotation 
+[no-untyped-def]
+        def _strip_tag_attributes(match):
+        ^
+trans_hub/db/schema.py:34: error: Missing type parameters for generic type
+"TypeEngine"  [type-arg]
+    def _json_type(dialect_name: str) -> TypeEngine:
+                                         ^
+trans_hub/db/schema.py:38: error: Incompatible return value type (got
+"type[JSON]", expected "TypeEngine[Any]")  [return-value]
+        return JSON
+               ^~~~
+trans_hub/db/schema.py:46: error: "MetaData" has no attribute "bind" 
+[attr-defined]
+            return self.metadata.bind.dialect.name if self.metadata.bind e...
+                   ^~~~~~~~~~~~~~~~~~
+trans_hub/db/schema.py:49: error: Missing type parameters for generic type
+"TypeEngine"  [type-arg]
+        def json_type(self) -> TypeEngine:
+                               ^
+alembic/versions/3f8b9e6a0c2c_initial_schema.py:33: error: Missing type
+parameters for generic type "TypeEngine"  [type-arg]
+    def _json_type(dialect_name: str) -> sa.types.TypeEngine:
+                                         ^
+tools/db_doctor.py:76: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def do_check_db_status():
+    ^
+tools/db_doctor.py:169: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def do_rebuild():
+    ^
+tools/db_doctor.py:169: note: Use "-> None" if function does not return a value
+tools/db_doctor.py:205: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def do_clear():
+    ^
+tools/db_doctor.py:205: note: Use "-> None" if function does not return a value
+tools/db_doctor.py:236: error: Function is missing a return type annotation 
+[no-untyped-def]
+    def main_loop():
+    ^
+tools/db_doctor.py:236: note: Use "-> None" if function does not return a value
+tools/db_doctor.py:260: error: Call to untyped function "do_check_db_status" in
+typed context  [no-untyped-call]
+                do_check_db_status()
+                ^~~~~~~~~~~~~~~~~~~~
+tools/db_doctor.py:262: error: Call to untyped function "do_rebuild" in typed
+context  [no-untyped-call]
+                do_rebuild()
+                ^~~~~~~~~~~~
+tools/db_doctor.py:264: error: Call to untyped function "do_clear" in typed
+context  [no-untyped-call]
+                do_clear()
+                ^~~~~~~~~~
+tools/db_doctor.py:274: error: Call to untyped function "main_loop" in typed
+context  [no-untyped-call]
+            main_loop()
+            ^~~~~~~~~~~
+tools/diag/test_db_connection.py:84: error: Missing named argument
+"database_url" for "TestDatabaseConfig"  [call-arg]
+            config = TestDatabaseConfig()
+                     ^~~~~~~~~~~~~~~~~~~~
+tools/diag/simple_config_test.py:35: error: Missing named argument
+"database_url" for "TestDatabaseConfig"  [call-arg]
+            config = TestDatabaseConfig()
+                     ^~~~~~~~~~~~~~~~~~~~
+tools/diag/simple_asyncpg_test.py:28: error: Missing named argument
+"database_url" for "TestDatabaseConfig"  [call-arg]
+        config = TestDatabaseConfig()
+                 ^~~~~~~~~~~~~~~~~~~~
+tools/drop_tables.py:100: error: Unexpected keyword argument "_env_file" for
+"TransHubConfig"  [call-arg]
+        config = TransHubConfig(_env_file=args.env_file)
+                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tools/clear_database.py:100: error: Unexpected keyword argument "_env_file" for
+"TransHubConfig"  [call-arg]
+        config = TransHubConfig(_env_file=args.env_file)
+                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+trans_hub/persistence/base.py:43: error: Missing type parameters for generic
+type "Task"  [type-arg]
+            self._notification_task: asyncio.Task | None = None
+                                     ^
+trans_hub/persistence/base.py:257: error: Signature of "upsert_tm_entry"
+incompatible with supertype "trans_hub.core.interfaces.PersistenceHandler" 
+[override]
+        async def upsert_tm_entry(self, **kwargs: Any) -> str:
+        ^
+trans_hub/persistence/base.py:257: note:      Superclass:
+trans_hub/persistence/base.py:257: note:          def upsert_tm_entry(self, project_id: str, namespace: str, reuse_sha256_bytes: bytes, source_lang: str, target_lang: str, variant_key: str, policy_version: int, hash_algo_version: int, source_text_json: dict[str, Any], translated_json: dict[str, Any], quality_score: float) -> Coroutine[Any, Any, str]
+trans_hub/persistence/base.py:257: note:      Subclass:
+trans_hub/persistence/base.py:257: note:          def upsert_tm_entry(self, **kwargs: Any) -> Coroutine[Any, Any, str]
+trans_hub/persistence/base.py:269: error: Incompatible types in assignment
+(expression has type "ReturningInsert[tuple[str]]", variable has type "Insert") 
+[assignment]
+                    stmt = stmt.on_conflict_do_update(
+                           ^
+trans_hub/persistence/base.py:275: error: Returning Any from function declared
+to return "str"  [no-any-return]
+                    return tm_id
+                    ^~~~~~~~~~~~
+trans_hub/persistence/base.py:464: error: "Delete" has no attribute "alias" 
+[attr-defined]
+                                content_stmt.alias()
+                                ^~~~~~~~~~~~~~~~~~
+trans_hub/persistence/base.py:480: error: "Delete" has no attribute "alias" 
+[attr-defined]
+    ...        count_stmt = select(func.count()).select_from(tm_stmt.alias())
+                                                             ^~~~~~~~~~~~~
+tests/unit/_uida/test_reuse_key.py:24: error: Function is missing a type
+annotation  [no-untyped-def]
+    def test_reduce_keys_ignore_fields(sample_keys):
+    ^
+tests/unit/_uida/test_reuse_key.py:33: error: Function is missing a type
+annotation  [no-untyped-def]
+    def test_build_reuse_sha256_is_stable_and_sensitive(sample_source_fiel...
+    ^
+tests/unit/_uida/test_encoder.py:30: error: Function is missing a type
+annotation  [no-untyped-def]
+    def test_permutation_invariance(keys_a, keys_b):
+    ^
+tests/unit/_uida/test_encoder.py:44: error: Function is missing a return type
+annotation  [no-untyped-def]
+    def test_jcs_official_vectors():
+    ^
+tests/unit/_uida/test_encoder.py:44: note: Use "-> None" if function does not return a value
+tests/unit/_uida/test_encoder.py:62: error: Function is missing a type
+annotation  [no-untyped-def]
+    def test_output_format_and_content(keys_a):
+    ^
+tests/unit/_uida/test_encoder.py:78: error: Function is missing a return type
+annotation  [no-untyped-def]
+    def test_i_json_guard_rejects_invalid_types():
+    ^
+tests/unit/_uida/test_encoder.py:78: note: Use "-> None" if function does not return a value
+tests/unit/_uida/test_encoder.py:89: error: Argument 1 to
+"generate_uid_components" has incompatible type "object"; expected
+"dict[str, Any]"  [arg-type]
+                generate_uid_components(keys)
+                                        ^~~~
+tests/unit/_tm/test_normalizers.py:37: error: Function is missing a type
+annotation  [no-untyped-def]
+    def test_normalization_scenarios(input_text, expected_output):
+    ^
+tests/integration/test_persistence_uida.py:23: error: Function is missing a
+return type annotation  [no-untyped-def]
+    async def test_upsert_content_is_idempotent(handler: PersistenceHandle...
+    ^
+tests/integration/test_persistence_uida.py:38: error: Function is missing a
+return type annotation  [no-untyped-def]
+    async def test_rev_head_creation_and_update(handler: PersistenceHandle...
+    ^
+tests/integration/test_persistence_uida.py:61: error: "PersistenceHandler" has
+no attribute "_sessionmaker"  [attr-defined]
+        async with handler._sessionmaker() as session:
+                   ^~~~~~~~~~~~~~~~~~~~~
+tests/integration/test_persistence_uida.py:71: error: "PersistenceHandler" has
+no attribute "_sessionmaker"  [attr-defined]
+        async with handler._sessionmaker() as session:
+                   ^~~~~~~~~~~~~~~~~~~~~
+trans_hub/persistence/sqlite.py:52: error: Missing type parameters for generic
+type "dict"  [type-arg]
+            keys: dict,
+                  ^
+trans_hub/persistence/sqlite.py:53: error: Missing type parameters for generic
+type "dict"  [type-arg]
+            source_payload: dict,
+                            ^
+trans_hub/persistence/sqlite.py:106: error: Signature of "upsert_tm_entry"
+incompatible with supertype "trans_hub.core.interfaces.PersistenceHandler" 
+[override]
+        async def upsert_tm_entry(self, **kwargs: Any) -> str:
+        ^
+trans_hub/persistence/sqlite.py:106: note:      Superclass:
+trans_hub/persistence/sqlite.py:106: note:          def upsert_tm_entry(self, project_id: str, namespace: str, reuse_sha256_bytes: bytes, source_lang: str, target_lang: str, variant_key: str, policy_version: int, hash_algo_version: int, source_text_json: dict[str, Any], translated_json: dict[str, Any], quality_score: float) -> Coroutine[Any, Any, str]
+trans_hub/persistence/sqlite.py:106: note:      Subclass:
+trans_hub/persistence/sqlite.py:106: note:          def upsert_tm_entry(self, **kwargs: Any) -> Coroutine[Any, Any, str]
+trans_hub/persistence/sqlite.py:191: error: Incompatible types in assignment
+(expression has type "Sequence[str]", variable has type "list[str]") 
+[assignment]
+                    all_draft_head_ids = (await session.execute(stmt)).sca...
+                                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+trans_hub/persistence/sqlite.py:200: error: Incompatible types in assignment
+(expression has type "Select[tuple[ThTransHead]]", variable has type
+"Select[tuple[str]]")  [assignment]
+                        stmt = select(ThTransHead).where(ThTransHead.id.in...
+                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+trans_hub/persistence/sqlite.py:203: error: Argument 2 to
+"_build_content_items_from_orm" of "BasePersistenceHandler" has incompatible
+type "Sequence[str]"; expected "list[ThTransHead]"  [arg-type]
+                            session, head_results
+                                     ^~~~~~~~~~~~
+trans_hub/persistence/postgres.py:85: error: Argument 2 to
+"_build_content_items_from_orm" of "BasePersistenceHandler" has incompatible
+type "Sequence[ThTransHead]"; expected "list[ThTransHead]"  [arg-type]
+    ...tems = await self._build_content_items_from_orm(session, head_results)
+                                                                ^~~~~~~~~~~~
+tests/integration/conftest.py:39: error: Function is missing a return type
+annotation  [no-untyped-def]
+    def check_db_url_is_set():
+    ^
+tests/integration/conftest.py:39: note: Use "-> None" if function does not return a value
+tests/integration/conftest.py:68: error: Function is missing a return type
+annotation  [no-untyped-def]
+    def _manage_database_sync(db_name: str, action: str):
+    ^
+tests/integration/conftest.py:85: error: Function is missing a return type
+annotation  [no-untyped-def]
+    def _run_migrations_sync(db_url: str):
+    ^
+tests/integration/conftest.py:131: error: "PersistenceHandler" has no attribute
+"_sessionmaker"  [attr-defined]
+            database_url=str(handler._sessionmaker.kw["bind"].url),
+                             ^~~~~~~~~~~~~~~~~~~~~
+examples/07_real_world_simulation.py:33: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/07_real_world_simulation.py:75: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+                await coordinator.request(
+                      ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/07_real_world_simulation.py:90: error: "Coordinator" has no attribute
+"process_pending_translations"  [attr-defined]
+            async for result in coordinator.process_pending_translations(l...
+                                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/07_real_world_simulation.py:116: error: Unexpected keyword argument
+"business_id" for "get_translation" of "Coordinator"  [call-arg]
+    ...        result: TranslationResult | None = await coordinator.get_trans...
+                                                        ^
+trans_hub/coordinator.py:144: note: "get_translation" of "Coordinator" defined here
+examples/07_real_world_simulation.py:116: error: Incompatible types in
+assignment (expression has type "dict[str, Any] | None", variable has type
+"TranslationResult | None")  [assignment]
+                result: TranslationResult | None = await coordinator.get_t...
+                                                   ^
+examples/06_integration_with_file_system.py:32: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/06_integration_with_file_system.py:81: error: Unexpected keyword
+argument "business_id" for "request" of "Coordinator"  [call-arg]
+                await coordinator.request(
+                      ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/06_integration_with_file_system.py:96: error: Unexpected keyword
+argument "business_id" for "get_translation" of "Coordinator"  [call-arg]
+                    result = await coordinator.get_translation(
+                                   ^
+trans_hub/coordinator.py:144: note: "get_translation" of "Coordinator" defined here
+examples/06_integration_with_file_system.py:99: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+                    if result and result.translated_payload:
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/06_integration_with_file_system.py:100: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+                        lang_results[business_id] = result.translated_payl...
+                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/06_integration_with_file_system.py:157: error: "Coordinator" has no
+attribute "process_pending_translations"  [attr-defined]
+            res async for res in coordinator.process_pending_translations(...
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/05_batch_processing_and_concurrency.py:29: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/05_batch_processing_and_concurrency.py:63: error: Unexpected keyword
+argument "business_id" for "request" of "Coordinator"  [call-arg]
+                task = coordinator.request(
+                       ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/05_batch_processing_and_concurrency.py:111: error: "Coordinator" has
+no attribute "process_pending_translations"  [attr-defined]
+        results = [res async for res in coordinator.process_pending_transl...
+                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+examples/04_error_handling_and_dlq.py:31: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/04_error_handling_and_dlq.py:76: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/04_error_handling_and_dlq.py:105: error: "Coordinator" has no
+attribute "process_pending_translations"  [attr-defined]
+            res async for res in coordinator.process_pending_translations(...
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/03_structured_payload.py:28: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/03_structured_payload.py:66: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/03_structured_payload.py:76: error: Too many positional arguments for
+"get_translation" of "Coordinator"  [misc]
+            result = await coordinator.get_translation(business_id, target...
+                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+examples/03_structured_payload.py:76: error: Missing named argument "keys" for
+"get_translation" of "Coordinator"  [call-arg]
+            result = await coordinator.get_translation(business_id, target...
+                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+examples/03_structured_payload.py:76: error: Missing named argument
+"target_lang" for "get_translation" of "Coordinator"  [call-arg]
+            result = await coordinator.get_translation(business_id, target...
+                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+examples/03_structured_payload.py:78: error: "dict[str, Any]" has no attribute
+"status"  [attr-defined]
+            if result and result.status == TranslationStatus.TRANSLATED:
+                          ^~~~~~~~~~~~~
+examples/03_structured_payload.py:78: error: "type[TranslationStatus]" has no
+attribute "TRANSLATED"  [attr-defined]
+            if result and result.status == TranslationStatus.TRANSLATED:
+                                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/03_structured_payload.py:79: error: "dict[str, Any]" has no attribute
+"original_payload"  [attr-defined]
+                original = result.original_payload
+                           ^~~~~~~~~~~~~~~~~~~~~~~
+examples/03_structured_payload.py:80: error: "dict[str, Any]" has no attribute
+"translated_payload"  [attr-defined]
+                translated = result.translated_payload or {}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/03_structured_payload.py:112: error: "Coordinator" has no attribute
+"process_pending_translations"  [attr-defined]
+            res async for res in coordinator.process_pending_translations(...
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:27: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/02_contextual_translation.py:62: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/02_contextual_translation.py:68: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+examples/02_contextual_translation.py:68: error: Unexpected keyword argument
+"context" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+examples/02_contextual_translation.py:75: error: "Coordinator" has no attribute
+"active_engine"  [attr-defined]
+            engine_config = coordinator.active_engine.config
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:82: error: Unexpected keyword argument
+"business_id" for "get_translation" of "Coordinator"  [call-arg]
+            generic_result = await coordinator.get_translation(
+                                   ^
+trans_hub/coordinator.py:144: note: "get_translation" of "Coordinator" defined here
+examples/02_contextual_translation.py:85: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+            if generic_result and generic_result.translated_payload:
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:86: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+                trans_text = generic_result.translated_payload.get("text")
+                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:90: error: Unexpected keyword argument
+"business_id" for "get_translation" of "Coordinator"  [call-arg]
+            contextual_result = await coordinator.get_translation(
+                                      ^
+examples/02_contextual_translation.py:90: error: Unexpected keyword argument
+"context" for "get_translation" of "Coordinator"  [call-arg]
+            contextual_result = await coordinator.get_translation(
+                                      ^
+examples/02_contextual_translation.py:95: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+            if contextual_result and contextual_result.translated_payload:
+                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:96: error: "dict[str, Any]" has no
+attribute "translated_payload"  [attr-defined]
+                trans_text = contextual_result.translated_payload.get("tex...
+                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/02_contextual_translation.py:122: error: "Coordinator" has no
+attribute "process_pending_translations"  [attr-defined]
+            res async for res in coordinator.process_pending_translations(...
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/01_core_workflow.py:28: error: Skipping analyzing
+"trans_hub.db.schema_manager": module is installed, but missing library stubs or
+py.typed marker  [import-untyped]
+    from trans_hub.db.schema_manager import apply_migrations  # noqa: E402
+    ^
+examples/01_core_workflow.py:28: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+examples/01_core_workflow.py:60: error: Unexpected keyword argument
+"business_id" for "request" of "Coordinator"  [call-arg]
+            await coordinator.request(
+                  ^
+trans_hub/coordinator.py:69: note: "request" of "Coordinator" defined here
+examples/01_core_workflow.py:69: error: Unexpected keyword argument
+"business_id" for "get_translation" of "Coordinator"  [call-arg]
+                result = await coordinator.get_translation(
+                               ^
+trans_hub/coordinator.py:144: note: "get_translation" of "Coordinator" defined here
+examples/01_core_workflow.py:74: error: "dict[str, Any]" has no attribute
+"status"  [attr-defined]
+                    and result.status == TranslationStatus.TRANSLATED
+                        ^~~~~~~~~~~~~
+examples/01_core_workflow.py:74: error: "type[TranslationStatus]" has no
+attribute "TRANSLATED"  [attr-defined]
+                    and result.status == TranslationStatus.TRANSLATED
+                                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+examples/01_core_workflow.py:75: error: "dict[str, Any]" has no attribute
+"translated_payload"  [attr-defined]
+                    and result.translated_payload
+                        ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/01_core_workflow.py:77: error: "dict[str, Any]" has no attribute
+"original_payload"  [attr-defined]
+                    original_text = result.original_payload.get("text", "[...
+                                    ^~~~~~~~~~~~~~~~~~~~~~~
+examples/01_core_workflow.py:78: error: "dict[str, Any]" has no attribute
+"translated_payload"  [attr-defined]
+                    translated_text = result.translated_payload.get("text"...
+                                      ^~~~~~~~~~~~~~~~~~~~~~~~~
+examples/01_core_workflow.py:103: error: "Coordinator" has no attribute
+"process_pending_translations"  [attr-defined]
+            res async for res in coordinator.process_pending_translations(...
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests/helpers/lifecycle.py:33: error: Incompatible types in assignment
+(expression has type "PersistenceHandler", variable has type
+"BasePersistenceHandler")  [assignment]
+            self.handler: BasePersistenceHandler = coordinator.handler
+                                                   ^~~~~~~~~~~~~~~~~~~
+tests/helpers/lifecycle.py:93: error: Function is missing a return type
+annotation  [no-untyped-def]
+            async def wait_for_completion():
+            ^
+tests/helpers/lifecycle.py:93: note: Use "-> None" if function does not return a value
+tests/helpers/lifecycle.py:122: error: Call to untyped function
+"wait_for_completion" in typed context  [no-untyped-call]
+                await asyncio.wait_for(wait_for_completion(), timeout=time...
+                                       ^~~~~~~~~~~~~~~~~~~~~
+tests/integration/test_coordinator_uida.py:49: error: Value of type
+"dict[str, Any] | None" is not indexable  [index]
+                rev.translated_payload_json["text"]
+                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests/integration/test_coordinator_uida.py:138: error: Argument 1 to
+"get_translation" of "Coordinator" has incompatible type
+"**dict[str, Collection[str]]"; expected "str"  [arg-type]
+        result = await coordinator.get_translation(**get_params)
+                                                     ^~~~~~~~~~
+tests/integration/test_coordinator_uida.py:138: error: Argument 1 to
+"get_translation" of "Coordinator" has incompatible type
+"**dict[str, Collection[str]]"; expected "dict[str, Any]"  [arg-type]
+        result = await coordinator.get_translation(**get_params)
+                                                     ^~~~~~~~~~
+tests/integration/test_coordinator_uida.py:138: note: "dict" is invariant -- see https://mypy.readthedocs.io/en/stable/common_issues.html#variance
+tests/integration/test_coordinator_uida.py:138: note: Consider using "Mapping" instead, which is covariant in the value type
+Found 111 errors in 27 files (checked 82 source files)

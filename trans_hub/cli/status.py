@@ -44,11 +44,19 @@ async def _get_status(coordinator: Coordinator, get_params: dict[str, Any]) -> N
 @status_app.command("get")
 def get_status(
     ctx: typer.Context,
-    project_id: Annotated[str, typer.Option("--project-id", help="项目/租户的唯一标识符。")],
+    project_id: Annotated[
+        str, typer.Option("--project-id", help="项目/租户的唯一标识符。")
+    ],
     namespace: Annotated[str, typer.Option("--namespace", help="内容的命名空间。")],
-    keys_json: Annotated[str, typer.Option("--keys-json", help="定位内容的上下文键集 (JSON 字符串)。")],
-    target_lang: Annotated[str, typer.Option("--target-lang", "-t", help="目标语言代码。")],
-    variant_key: Annotated[str, typer.Option("--variant", "-v", help="语言内变体。")] = '-',
+    keys_json: Annotated[
+        str, typer.Option("--keys-json", help="定位内容的上下文键集 (JSON 字符串)。")
+    ],
+    target_lang: Annotated[
+        str, typer.Option("--target-lang", "-t", help="目标语言代码。")
+    ],
+    variant_key: Annotated[
+        str, typer.Option("--variant", "-v", help="语言内变体。")
+    ] = "-",
 ) -> None:
     """根据 UIDA 查询一条已发布的翻译记录，会自动应用回退逻辑。"""
     try:
@@ -64,7 +72,7 @@ def get_status(
         "namespace": namespace,
         "keys": keys,
         "target_lang": target_lang,
-        "variant_key": variant_key
+        "variant_key": variant_key,
     }
     asyncio.run(_get_status(coordinator, get_params))
 
@@ -75,10 +83,12 @@ async def _publish(coordinator: Coordinator, revision_id: str) -> None:
         await coordinator.initialize()
         success = await coordinator.publish_translation(revision_id)
         if success:
-            console.print(f"[green]✅ 修订 ID [bold]{revision_id}[/bold] 已成功发布！[/green]")
+            console.print(
+                f"[green]✅ 修订 ID [bold]{revision_id}[/bold] 已成功发布！[/green]"
+            )
         else:
             console.print(
-                f"[red]❌ 发布失败。修订可能不存在，或状态不是 'reviewed'，或已有已发布版本。[/red]"
+                "[red]❌ 发布失败。修订可能不存在，或状态不是 'reviewed'，或已有已发布版本。[/red]"
             )
     finally:
         await coordinator.close()
@@ -87,7 +97,9 @@ async def _publish(coordinator: Coordinator, revision_id: str) -> None:
 @status_app.command("publish")
 def publish_translation(
     ctx: typer.Context,
-    revision_id: Annotated[str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")],
+    revision_id: Annotated[
+        str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")
+    ],
 ) -> None:
     """将一条 'reviewed' 状态的翻译修订发布。"""
     state: State = ctx.obj
@@ -101,9 +113,11 @@ async def _reject(coordinator: Coordinator, revision_id: str) -> None:
         await coordinator.initialize()
         success = await coordinator.reject_translation(revision_id)
         if success:
-            console.print(f"[yellow]✅ 修订 ID [bold]{revision_id}[/bold] 已被拒绝。[/yellow]")
+            console.print(
+                f"[yellow]✅ 修订 ID [bold]{revision_id}[/bold] 已被拒绝。[/yellow]"
+            )
         else:
-            console.print(f"[red]❌ 操作失败。记录可能不存在或非当前修订。[/red]")
+            console.print("[red]❌ 操作失败。记录可能不存在或非当前修订。[/red]")
     finally:
         await coordinator.close()
 

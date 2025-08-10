@@ -27,12 +27,12 @@ class ProcessingPolicy(Protocol):
         batch: list[ContentItem],
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
-    ) -> list[TranslationResult]:
-        ...
+    ) -> list[TranslationResult]: ...
 
 
 class DefaultProcessingPolicy(ProcessingPolicy):
     """默认的翻译处理策略（白皮书 v2.4）。"""
+
     PAYLOAD_TEXT_KEY = "text"
 
     async def process_batch(
@@ -41,7 +41,8 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         p_context: ProcessingContext,
         active_engine: BaseTranslationEngine[Any],
     ) -> list[TranslationResult]:
-        if not batch: return []
+        if not batch:
+            return []
 
         texts = [item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in batch]
         # 假设批次内 lang, source_lang 一致
@@ -53,22 +54,33 @@ class DefaultProcessingPolicy(ProcessingPolicy):
         )
 
         success_items = []
-        for item, output in zip(batch, engine_outputs):
+        for item, output in zip(batch, engine_outputs, strict=False):
             if isinstance(output, EngineSuccess):
                 success_items.append((item, output))
             elif isinstance(output, EngineError):
-                logger.error("引擎翻译失败，将等待重试", translation_id=item.translation_id, error=output.error_message)
+                logger.error(
+                    "引擎翻译失败，将等待重试",
+                    translation_id=item.translation_id,
+                    error=output.error_message,
+                )
 
-        if not success_items: return []
-        
+        if not success_items:
+            return []
+
         # [v2.4] 根据数据库方言选择并发或串行写入
         is_sqlite = p_context.handler._is_sqlite
         if is_sqlite:
-            final_results = [await self._handle_success(item, out, p_context, active_engine) for item, out in success_items]
+            final_results = [
+                await self._handle_success(item, out, p_context, active_engine)
+                for item, out in success_items
+            ]
         else:
-            tasks = [self._handle_success(item, out, p_context, active_engine) for item, out in success_items]
+            tasks = [
+                self._handle_success(item, out, p_context, active_engine)
+                for item, out in success_items
+            ]
             final_results = await asyncio.gather(*tasks)
-        
+
         return [res for res in final_results if res is not None]
 
     async def _handle_success(
@@ -82,7 +94,7 @@ class DefaultProcessingPolicy(ProcessingPolicy):
             # 1. 准备数据
             translated_payload = dict(item.source_payload)
             translated_payload[self.PAYLOAD_TEXT_KEY] = output.translated_text
-            
+
             # 2. 创建新修订并更新头表
             new_rev_id = await p_context.handler.create_new_translation_revision(
                 head_id=item.head_id,
@@ -96,21 +108,38 @@ class DefaultProcessingPolicy(ProcessingPolicy):
                 engine_name=active_engine.name,
                 engine_version=active_engine.VERSION,
             )
-            
+
             # 3. 更新/创建 TM 条目并链接
-            source_fields = {"text": normalize_plain_text_for_reuse(item.source_payload.get("text"))}
-            reuse_sha = build_reuse_sha256(namespace=item.namespace, reduced_keys={}, source_fields=source_fields)
+            source_fields = {
+                "text": normalize_plain_text_for_reuse(item.source_payload.get("text"))
+            }
+            reuse_sha = build_reuse_sha256(
+                namespace=item.namespace, reduced_keys={}, source_fields=source_fields
+            )
             tm_id = await p_context.handler.upsert_tm_entry(
-                project_id=item.project_id, namespace=item.namespace,
-                reuse_sha256_bytes=reuse_sha, source_lang=item.source_lang or "auto",
-                target_lang=item.target_lang, variant_key=item.variant_key,
-                policy_version=1, hash_algo_version=1,
-                source_text_json=source_fields, translated_json=translated_payload,
-                quality_score=0.9
+                project_id=item.project_id,
+                namespace=item.namespace,
+                reuse_sha256_bytes=reuse_sha,
+                source_lang=item.source_lang or "auto",
+                target_lang=item.target_lang,
+                variant_key=item.variant_key,
+                policy_version=1,
+                hash_algo_version=1,
+                source_text_json=source_fields,
+                translated_json=translated_payload,
+                quality_score=0.9,
             )
             await p_context.handler.link_translation_to_tm(new_rev_id, tm_id)
-            
-            return TranslationResult(translation_id=new_rev_id, content_id=item.content_id, status=TranslationStatus.REVIEWED)
+
+            return TranslationResult(
+                translation_id=new_rev_id,
+                content_id=item.content_id,
+                status=TranslationStatus.REVIEWED,
+            )
         except Exception:
-            logger.error("保存成功翻译结果到数据库失败", translation_id=item.translation_id, exc_info=True)
+            logger.error(
+                "保存成功翻译结果到数据库失败",
+                translation_id=item.translation_id,
+                exc_info=True,
+            )
             return None

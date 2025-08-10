@@ -41,10 +41,10 @@ class DatabaseClearer:
             self.conn = await aiosqlite.connect(self.db_path)
             self.conn.row_factory = aiosqlite.Row
             log.info("✅ 成功连接到数据库", path=self.db_path)
-            
+
             # 禁用外键约束以避免删除顺序问题
             await self.conn.execute("PRAGMA foreign_keys = OFF;")
-            
+
             # 删除所有表
             tables = [
                 "th_projects",
@@ -57,7 +57,7 @@ class DatabaseClearer:
                 "th_locales_fallbacks",
                 "th_resolve_cache",
             ]
-            
+
             # 反向删除表以避免外键约束问题
             for table in reversed(tables):
                 try:
@@ -65,10 +65,10 @@ class DatabaseClearer:
                     log.info(f"✅ 已删除表 {table}")
                 except aiosqlite.OperationalError as e:
                     log.warning(f"⚠️  表 {table} 无法删除: {e}")
-            
+
             # 重新启用外键约束
             await self.conn.execute("PRAGMA foreign_keys = ON;")
-            
+
             # 提交事务
             await self.conn.commit()
             log.info("✅ 数据库表删除完成")
@@ -81,7 +81,7 @@ class DatabaseClearer:
 def main() -> None:
     """命令行接口的主入口点。"""
     setup_logging(log_level="INFO")
-    
+
     # 解析命令行参数
     parser = argparse.ArgumentParser(
         description="一个用于删除 Trans-Hub 数据库所有表的工具脚本。",
@@ -93,12 +93,12 @@ def main() -> None:
         default=".env",
         help="环境配置文件路径，默认为项目根目录下的 .env 文件。",
     )
-    
+
     args = parser.parse_args()
-    
+
     # 加载配置
     config = TransHubConfig(_env_file=args.env_file)
-    
+
     # 创建并运行清空器
     try:
         clearer = DatabaseClearer(config.db_path)

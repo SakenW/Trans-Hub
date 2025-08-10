@@ -4,6 +4,7 @@
 提供用于创建一致、可预测的测试数据的工厂函数。
 这是所有集成测试的数据生成入口，确保了测试用例的简洁性和可维护性。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -25,7 +26,7 @@ def create_uida_request_data(
     source_lang: str = TEST_SOURCE_LANG,
     target_langs: list[str] | None = None,
     content_version: int = 1,
-    variant_key: str = '-',
+    variant_key: str = "-",
 ) -> dict[str, Any]:
     """
     创建一个标准的、可覆盖的 UIDA 请求字典。
@@ -36,6 +37,7 @@ def create_uida_request_data(
 
     Returns:
         一个完整的字典，可以直接用于 `coordinator.request` 方法。
+
     """
     # 提供一个合理的、默认唯一的 keys 字典
     unique_id = uuid.uuid4().hex[:8]
@@ -46,7 +48,7 @@ def create_uida_request_data(
     # 提供一个合理的、默认唯一的 source_payload 字典
     final_source_payload = {"text": f"Sample text {unique_id}"}
     if source_payload is not None:
-        final_source_payload = source_payload # 如果提供了 payload，则完全替换
+        final_source_payload = source_payload  # 如果提供了 payload，则完全替换
 
     return {
         "project_id": project_id,

@@ -21,10 +21,9 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
             from .sqlite import SQLitePersistenceHandler
         except ImportError as e:
             raise ConfigurationError(
-                "要使用 SQLite, 请安装 'aiosqlite' 驱动: "
-                '"pip install aiosqlite"'
+                "要使用 SQLite, 请安装 'aiosqlite' 驱动: \"pip install aiosqlite\""
             ) from e
-        
+
         engine = create_async_engine(db_url)
         sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         return SQLitePersistenceHandler(sessionmaker, db_path=config.db_path)
@@ -37,7 +36,7 @@ def create_persistence_handler(config: TransHubConfig) -> PersistenceHandler:
                 "要使用 PostgreSQL, 请安装 'asyncpg' 驱动: "
                 '"pip install "trans-hub[postgres]"'
             ) from e
-        
+
         engine = create_async_engine(db_url, pool_size=20, max_overflow=10)
         sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
         return PostgresPersistenceHandler(sessionmaker, dsn=db_url)

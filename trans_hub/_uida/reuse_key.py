@@ -1,5 +1,4 @@
 # trans_hub/_uida/reuse_key.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import hashlib
@@ -22,6 +21,7 @@ def _normalize_version(value: str, mode: str) -> str:
 
     Returns:
         归一化后的版本字符串。
+
     """
     if not isinstance(value, str):
         return value
@@ -47,6 +47,7 @@ def reduce_keys_for_reuse(
 
     Returns:
         降维后的 keys 字典。
+
     """
     if policy.get("strict", False):
         return keys
@@ -68,7 +69,7 @@ def reduce_keys_for_reuse(
 def build_reuse_sha256(
     *, namespace: str, reduced_keys: dict[str, Any], source_fields: dict[str, Any]
 ) -> bytes:
-    """
+    r"""
     构建用于在翻译记忆库 (TM) 中查找的复用键。
 
     复用键 = SHA256( namespace + '\n' + JSON(reduced_keys) + '\n' + JSON(source_fields) )
@@ -80,6 +81,7 @@ def build_reuse_sha256(
 
     Returns:
         32字节的 SHA-256 哈希摘要字节串。
+
     """
     # 使用稳定的 JSON 序列化，确保无论 dict 顺序如何，结果都一样
     # 使用 ensure_ascii=False 以正确处理多语言字符
@@ -95,6 +97,6 @@ def build_reuse_sha256(
         raise ValueError(f"无法序列化用于复用键的字典: {e}") from e
 
     # 将所有部分用换行符连接，形成一个唯一的、规范化的字符串
-    blob = f"{namespace}\n{reduced_keys_json}\n{source_fields_json}".encode("utf-8")
+    blob = f"{namespace}\n{reduced_keys_json}\n{source_fields_json}".encode()
 
     return hashlib.sha256(blob).digest()

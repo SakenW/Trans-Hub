@@ -1,6 +1,7 @@
 # tests/unit/_uida/test_reuse_key.py
 # [v2.4] 复用键生成单元测试
 """测试复用键的生成逻辑和策略应用。"""
+
 from __future__ import annotations
 
 import pytest

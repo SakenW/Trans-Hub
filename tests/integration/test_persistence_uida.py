@@ -4,6 +4,7 @@
 对白皮书 v2.4 持久化层的集成测试。
 直接与数据库交互，验证核心数据操作的正确性。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -22,14 +23,14 @@ from trans_hub.db.schema import ThTransHead, ThTransRev
 async def test_upsert_content_is_idempotent(handler: PersistenceHandler):
     """测试 `upsert_content` 的幂等性。"""
     keys = {"view": "home", "id": "title"}
-    
+
     content_id_1 = await handler.upsert_content(
         TEST_PROJECT_ID, TEST_NAMESPACE, keys, {"text": "Welcome"}, 1
     )
     content_id_2 = await handler.upsert_content(
         TEST_PROJECT_ID, TEST_NAMESPACE, keys, {"text": "Welcome v2"}, 2
     )
-    
+
     assert content_id_1 == content_id_2
 
 
@@ -47,13 +48,20 @@ async def test_rev_head_creation_and_update(handler: PersistenceHandler):
     assert rev_no == 0
 
     rev_id_1 = await handler.create_new_translation_revision(
-        head_id=head_id, project_id=TEST_PROJECT_ID, content_id=content_id,
-        target_lang="de", variant_key="-", status=TranslationStatus.REVIEWED,
-        revision_no=rev_no + 1, translated_payload={"text": "Testen"}
+        head_id=head_id,
+        project_id=TEST_PROJECT_ID,
+        content_id=content_id,
+        target_lang="de",
+        variant_key="-",
+        status=TranslationStatus.REVIEWED,
+        revision_no=rev_no + 1,
+        translated_payload={"text": "Testen"},
     )
-    
+
     async with handler._sessionmaker() as session:
-        head = (await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))).scalar_one()
+        head = (
+            await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))
+        ).scalar_one()
         assert head.current_rev_id == rev_id_1
         assert head.current_no == 1
 
@@ -61,7 +69,11 @@ async def test_rev_head_creation_and_update(handler: PersistenceHandler):
     assert success is True
 
     async with handler._sessionmaker() as session:
-        head = (await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))).scalar_one()
-        rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == rev_id_1))).scalar_one()
+        head = (
+            await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))
+        ).scalar_one()
+        rev = (
+            await session.execute(select(ThTransRev).where(ThTransRev.id == rev_id_1))
+        ).scalar_one()
         assert head.published_rev_id == rev_id_1
         assert rev.status == TranslationStatus.PUBLISHED.value

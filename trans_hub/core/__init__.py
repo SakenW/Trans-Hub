@@ -21,10 +21,10 @@ from .types import (
     EngineBatchItemResult,
     EngineError,
     EngineSuccess,
+    ProcessingContext,  # 确保 ProcessingContext 被导出
     # TranslationRequest,       <-- [核心修复] 移除此行
     TranslationResult,
     TranslationStatus,
-    ProcessingContext, # 确保 ProcessingContext 被导出
 )
 
 __all__ = [

@@ -72,10 +72,12 @@ def _manage_database_sync(db_name: str, action: str):
         if action == "create":
             conn.execute(text(f'CREATE DATABASE "{db_name}"'))
         elif action == "drop":
-            conn.execute(text(f"""
+            conn.execute(
+                text(f"""
                 SELECT pg_terminate_backend(pg_stat_activity.pid)
                 FROM pg_stat_activity WHERE pg_stat_activity.datname = '{db_name}';
-            """))
+            """)
+            )
             conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
     engine.dispose()
 
@@ -90,17 +92,15 @@ def _run_migrations_sync(db_url: str):
 
 @pytest_asyncio.fixture
 async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
-    """
-    [Function Scoped, Async] 为每个测试创建一个独立的、全新的、已迁移的数据库和引擎。
-    """
+    """[Function Scoped, Async] 为每个测试创建一个独立的、全新的、已迁移的数据库和引擎。"""
     test_db_name = f"test_db_{uuid.uuid4().hex}"
-    
+
     # [核心修正] 将所有阻塞的同步操作委托给独立的线程
     await asyncio.to_thread(_manage_database_sync, test_db_name, "create")
-    
+
     test_db_url_sync = SYNC_URL_TEMPLATE.format(db_name=test_db_name)
     await asyncio.to_thread(_run_migrations_sync, test_db_url_sync)
-    
+
     test_db_url_async = ASYNC_URL_TEMPLATE.format(db_name=test_db_name)
     engine = create_async_engine(test_db_url_async)
     try:
@@ -115,7 +115,10 @@ async def handler(db_engine: AsyncEngine) -> AsyncGenerator[PersistenceHandler, 
     """提供一个已连接的、使用独立数据库引擎的持久化处理器。"""
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
     from trans_hub.persistence.postgres import PostgresPersistenceHandler
-    handler_instance = PostgresPersistenceHandler(session_factory, dsn=str(db_engine.url))
+
+    handler_instance = PostgresPersistenceHandler(
+        session_factory, dsn=str(db_engine.url)
+    )
     await handler_instance.connect()
     yield handler_instance
     await handler_instance.close()

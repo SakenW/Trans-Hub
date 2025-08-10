@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+from typing import Any
 
 import structlog
 from sqlalchemy import func, insert, select, text, update
@@ -13,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from trans_hub._uida.encoder import generate_uid_components
 from trans_hub.core.exceptions import DatabaseError
 from trans_hub.core.types import ContentItem, TranslationStatus
-from trans_hub.db.schema import ThContent, ThProjects, ThTm, ThTmLinks, ThTransHead, ThTransRev
+from trans_hub.db.schema import (
+    ThContent,
+    ThProjects,
+    ThTm,
+    ThTmLinks,
+    ThTransHead,
+    ThTransRev,
+)
 from trans_hub.persistence.base import BasePersistenceHandler
 
 logger = structlog.get_logger(__name__)
@@ -41,8 +49,8 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
         self,
         project_id: str,
         namespace: str,
-        keys: dict,
-        source_payload: dict,
+        keys: dict[str, Any],
+        source_payload: dict[str, Any],
         content_version: int,
     ) -> str:
         """为 SQLite 覆盖 upsert_content，使用 'INSERT OR IGNORE' + 'UPDATE'。"""
@@ -51,23 +59,34 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
             async with self._sessionmaker.begin() as session:
                 # 确保项目存在
                 await session.execute(
-                    insert(ThProjects).values(project_id=project_id, display_name=project_id)
+                    insert(ThProjects)
+                    .values(project_id=project_id, display_name=project_id)
                     .prefix_with("OR IGNORE")
                 )
 
                 # 尝试插入
-                insert_stmt = insert(ThContent).values(
-                    project_id=project_id, namespace=namespace, keys_sha256_bytes=keys_sha,
-                    keys_b64=keys_b64, keys_json=keys, source_payload_json=source_payload,
-                    content_version=content_version
-                ).prefix_with("OR IGNORE")
+                insert_stmt = (
+                    insert(ThContent)
+                    .values(
+                        project_id=project_id,
+                        namespace=namespace,
+                        keys_sha256_bytes=keys_sha,
+                        keys_b64=keys_b64,
+                        keys_json=keys,
+                        source_payload_json=source_payload,
+                        content_version=content_version,
+                    )
+                    .prefix_with("OR IGNORE")
+                )
                 await session.execute(insert_stmt)
-                
+
                 # 获取 ID
-                content_id = await self.get_content_id_by_uida(project_id, namespace, keys_sha)
+                content_id = await self.get_content_id_by_uida(
+                    project_id, namespace, keys_sha
+                )
                 if not content_id:
-                     raise DatabaseError("SQLite upsert content 失败")
-                
+                    raise DatabaseError("SQLite upsert content 失败")
+
                 # 如果是更新（即插入被忽略），则执行 update
                 update_stmt = (
                     update(ThContent)
@@ -75,11 +94,11 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
                     .values(
                         source_payload_json=source_payload,
                         content_version=content_version,
-                        updated_at=func.now()
+                        updated_at=func.now(),
                     )
                 )
                 await session.execute(update_stmt)
-                
+
                 return content_id
         except SQLAlchemyError as e:
             raise DatabaseError(f"SQLite upsert content 失败: {e}") from e
@@ -98,7 +117,7 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
                     "policy_version": kwargs["policy_version"],
                     "hash_algo_version": kwargs["hash_algo_version"],
                 }
-                
+
                 find_stmt = select(ThTm.id).filter_by(**unique_constraint_fields)
                 existing_id = (await session.execute(find_stmt)).scalar_one_or_none()
 
@@ -108,7 +127,11 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
                         "quality_score": kwargs["quality_score"],
                         "last_used_at": datetime.now(timezone.utc),
                     }
-                    update_stmt = update(ThTm).where(ThTm.id == existing_id).values(**update_values)
+                    update_stmt = (
+                        update(ThTm)
+                        .where(ThTm.id == existing_id)
+                        .values(**update_values)
+                    )
                     await session.execute(update_stmt)
                     return existing_id
                 else:
@@ -122,20 +145,31 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
         """为 SQLite 覆盖 link_translation_to_tm。"""
         try:
             async with self._sessionmaker.begin() as session:
-                rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == translation_rev_id))).scalar_one()
-                stmt = insert(ThTmLinks).values(
-                    project_id=rev.project_id, 
-                    translation_rev_id=translation_rev_id, 
-                    tm_id=tm_id
-                ).prefix_with("OR IGNORE")
+                rev = (
+                    await session.execute(
+                        select(ThTransRev).where(ThTransRev.id == translation_rev_id)
+                    )
+                ).scalar_one()
+                stmt = (
+                    insert(ThTmLinks)
+                    .values(
+                        project_id=rev.project_id,
+                        translation_rev_id=translation_rev_id,
+                        tm_id=tm_id,
+                    )
+                    .prefix_with("OR IGNORE")
+                )
                 await session.execute(stmt)
         except SQLAlchemyError as e:
             raise DatabaseError(f"SQLite 链接 TM 失败: {e}") from e
 
     def listen_for_notifications(self) -> AsyncGenerator[str, None]:
         """[实现] SQLite 不支持 LISTEN/NOTIFY。"""
+
         async def _empty_generator() -> AsyncGenerator[str, None]:
-            if False: yield ""
+            if False:
+                yield ""
+
         return _empty_generator()
 
     async def stream_draft_translations(
@@ -143,15 +177,15 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
         batch_size: int,
         limit: int | None = None,
     ) -> AsyncGenerator[list[ContentItem], None]:
-        """
-        为 SQLite 实现无死锁的流式获取。
-        """
+        """为 SQLite 实现无死锁的流式获取。"""
         all_draft_head_ids: list[str] = []
         try:
             async with self._sessionmaker() as session:
-                stmt = select(ThTransHead.id).where(
-                    ThTransHead.current_status == TranslationStatus.DRAFT.value
-                ).order_by(ThTransHead.updated_at)
+                stmt = (
+                    select(ThTransHead.id)
+                    .where(ThTransHead.current_status == TranslationStatus.DRAFT.value)
+                    .order_by(ThTransHead.updated_at)
+                )
                 if limit:
                     stmt = stmt.limit(limit)
                 all_draft_head_ids = (await session.execute(stmt)).scalars().all()
@@ -159,16 +193,20 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
             raise DatabaseError("为 SQLite 获取草稿 ID 失败。") from e
 
         for i in range(0, len(all_draft_head_ids), batch_size):
-            id_batch = all_draft_head_ids[i:i + batch_size]
+            id_batch = all_draft_head_ids[i : i + batch_size]
             items: list[ContentItem] = []
             try:
                 async with self._sessionmaker() as session:
                     stmt = select(ThTransHead).where(ThTransHead.id.in_(id_batch))
                     head_results = (await session.execute(stmt)).scalars().all()
-                    items = await self._build_content_items_from_orm(session, head_results)
+                    items = await self._build_content_items_from_orm(
+                        session, head_results
+                    )
             except Exception:
-                logger.error("为批次获取完整内容失败", batch_ids=id_batch, exc_info=True)
+                logger.error(
+                    "为批次获取完整内容失败", batch_ids=id_batch, exc_info=True
+                )
                 continue
-            
+
             if items:
                 yield items

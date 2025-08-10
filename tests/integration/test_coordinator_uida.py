@@ -4,10 +4,15 @@
 对白皮书 v2.4 Coordinator 进行端到端测试。
 使用 AppLifecycleManager 模拟完整的业务流程。
 """
+
 import pytest
 from sqlalchemy import select
 
-from tests.helpers.factories import TEST_NAMESPACE, TEST_PROJECT_ID, create_uida_request_data
+from tests.helpers.factories import (
+    TEST_NAMESPACE,
+    TEST_PROJECT_ID,
+    create_uida_request_data,
+)
 from tests.helpers.lifecycle import AppLifecycleManager
 from trans_hub.coordinator import Coordinator
 from trans_hub.core import TranslationStatus
@@ -24,36 +29,55 @@ def lifecycle(coordinator: Coordinator) -> AppLifecycleManager:
 
 
 @pytest.mark.asyncio
-async def test_e2e_tm_miss_workflow(lifecycle: AppLifecycleManager):
+async def test_e2e_tm_miss_workflow(lifecycle: AppLifecycleManager) -> None:
     """测试 TM 未命中时的完整流程：request -> draft -> reviewed。"""
     request_data = create_uida_request_data(target_langs=["de"])
-    
+
     final_heads = await lifecycle.request_and_process(request_data)
-    
+
     assert "de" in final_heads
     head = final_heads["de"]
     assert head.current_status == TranslationStatus.REVIEWED.value
-    
-    async with lifecycle.handler._sessionmaker() as session:
-        rev = (await session.execute(select(ThTransRev).where(ThTransRev.id == head.current_rev_id))).scalar_one()
-        assert rev.translated_payload_json["text"] == f"Translated({request_data['source_payload']['text']}) to de"
-        
-        link = (await session.execute(select(ThTmLinks).where(ThTmLinks.translation_rev_id == rev.id))).scalar_one_or_none()
+
+    # 类型转换：PersistenceHandler -> BasePersistenceHandler
+    from trans_hub.persistence.base import BasePersistenceHandler
+    base_handler = lifecycle.handler
+    async with base_handler._sessionmaker() as session:
+        rev = (
+            await session.execute(
+                select(ThTransRev).where(ThTransRev.id == head.current_rev_id)
+            )
+        ).scalar_one()
+        assert rev.translated_payload_json is not None
+        assert (
+            rev.translated_payload_json["text"]
+            == f"Translated({request_data['source_payload']['text']}) to de"
+        )
+
+        link = (
+            await session.execute(
+                select(ThTmLinks).where(ThTmLinks.translation_rev_id == rev.id)
+            )
+        ).scalar_one_or_none()
         assert link is not None
 
 
 @pytest.mark.asyncio
 async def test_e2e_tm_hit_workflow(
     coordinator: Coordinator, lifecycle: AppLifecycleManager
-):
+) -> None:
     """测试 TM 命中时的流程：request -> reviewed。"""
     shared_payload = {"text": "Login"}
-    request_data_1 = create_uida_request_data(source_payload=shared_payload, target_langs=["fr"])
+    request_data_1 = create_uida_request_data(
+        source_payload=shared_payload, target_langs=["fr"]
+    )
     await lifecycle.request_and_process(request_data_1)
 
-    request_data_2 = create_uida_request_data(source_payload=shared_payload, target_langs=["fr"])
+    request_data_2 = create_uida_request_data(
+        source_payload=shared_payload, target_langs=["fr"]
+    )
     await coordinator.request(**request_data_2)
-    
+
     final_heads = await lifecycle.request_and_process(request_data_2)
     head = final_heads["fr"]
     assert head.current_status == TranslationStatus.REVIEWED.value
@@ -62,37 +86,48 @@ async def test_e2e_tm_hit_workflow(
 @pytest.mark.asyncio
 async def test_publish_and_get_translation_workflow(
     coordinator: Coordinator, lifecycle: AppLifecycleManager
-):
+) -> None:
     """测试发布和获取已发布翻译的完整流程。"""
     request_data = create_uida_request_data(target_langs=["es"])
     final_heads = await lifecycle.request_and_process(request_data)
     head = final_heads["es"]
-    
+
     success = await coordinator.publish_translation(head.current_rev_id)
     assert success is True
-    
+
     get_params = {
         "project_id": request_data["project_id"],
         "namespace": request_data["namespace"],
         "keys": request_data["keys"],
         "target_lang": "es",
     }
-    result = await coordinator.get_translation(**get_params)
+    # 修复参数类型不兼容问题：将Collection[str]转换为str或dict[str, Any]
+    result = await coordinator.get_translation(
+        project_id=str(get_params["project_id"]),
+        namespace=str(get_params["namespace"]),
+        keys=dict(get_params["keys"]),
+        target_lang=str(get_params["target_lang"]),
+    )
     assert result is not None
-    assert result["text"] == f"Translated({request_data['source_payload']['text']}) to es"
+    assert (
+        result["text"] == f"Translated({request_data['source_payload']['text']}) to es"
+    )
 
 
 @pytest.mark.asyncio
 async def test_get_translation_with_fallback(
     coordinator: Coordinator, lifecycle: AppLifecycleManager
-):
+) -> None:
     """测试 get_translation 的语言回退逻辑。"""
     shared_keys = {"id": "fallback_test"}
     req_de = create_uida_request_data(keys=shared_keys, target_langs=["de"])
     heads_de = await lifecycle.request_and_process(req_de)
     await coordinator.publish_translation(heads_de["de"].current_rev_id)
 
-    async with lifecycle.handler._sessionmaker() as session:
+    # 类型转换：PersistenceHandler -> BasePersistenceHandler
+    from trans_hub.persistence.base import BasePersistenceHandler
+    base_handler = lifecycle.handler
+    async with base_handler._sessionmaker() as session:
         fallback_rule = ThLocalesFallbacks(
             project_id=TEST_PROJECT_ID, locale="fr", fallback_order=["de", "en"]
         )
@@ -101,13 +136,19 @@ async def test_get_translation_with_fallback(
 
     req_fr = create_uida_request_data(keys=shared_keys, target_langs=["fr"])
     await lifecycle.request_and_process(req_fr)
-    
+
     get_params = {
         "project_id": TEST_PROJECT_ID,
         "namespace": TEST_NAMESPACE,
         "keys": shared_keys,
         "target_lang": "fr",
     }
-    result = await coordinator.get_translation(**get_params)
+    # 修复参数类型不兼容问题：将Collection[str]转换为str或dict[str, Any]
+    result = await coordinator.get_translation(
+        project_id=str(get_params["project_id"]),
+        namespace=str(get_params["namespace"]),
+        keys=dict(get_params["keys"]),
+        target_lang=str(get_params["target_lang"]),
+    )
     assert result is not None
     assert result["text"] == f"Translated({req_de['source_payload']['text']}) to de"
