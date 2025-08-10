@@ -1,0 +1,52 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "trans-hub-server"
+version = "0.1.0"
+description = "Trans-Hub 服务端实现，包含应用、基础设施和表现层。"
+authors = ["Saken <saken.w@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "trans_hub", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+# 核心依赖
+pydantic = "^2.0"
+pydantic-settings = "^2.0"
+structlog = "^23.0"
+# 引用本地的 core 和 uida 包
+trans-hub-core = {path = "../core", develop = true}
+trans-hub-uida = {path = "../uida", develop = true}
+# 数据库核心
+sqlalchemy = {version = "^2.0", extras = ["asyncio"]}
+alembic = "^1.13.1"
+greenlet = "^3.0.3" # Alembic 异步依赖
+
+# --- 可选驱动与库 (通过 extras 安装) ---
+asyncpg = {version = ">=0.29.0", optional = true}
+aiosqlite = {version = ">=0.19.0", optional = true}
+redis = {version = ">=5.0.0", extras = ["hiredis"], optional = true}
+typer = {version = ">=0.9.0", extras = ["all"], optional = true}
+# rich 在 dev 组中
+
+[tool.poetry.extras]
+postgres = ["asyncpg"]
+sqlite = ["aiosqlite"]
+redis = ["redis"]
+cli = ["typer"]
+
+# --- 开发与测试依赖 ---
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4"
+pytest-asyncio = ">=0.21.0"
+pytest-cov = ">=4.1"
+ruff = ">=0.1.0"
+mypy = ">=1.5"
+# rich 是开发工具(CLI, snapshot)的依赖
+rich = ">=13.0.0"
+
+[tool.poetry.scripts]
+trans-hub = "trans_hub.presentation.cli.main:app"

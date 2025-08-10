@@ -1,53 +1,55 @@
-# trans_hub/cli/db.py
-"""处理数据库相关操作的 CLI 命令。"""
-
+# packages/server/src/trans_hub/presentation/cli/commands/db.py
+"""
+处理数据库迁移相关的 CLI 命令。
+"""
 from pathlib import Path
 
-import structlog
 import typer
 from rich.console import Console
 
-from alembic import command
-
-# [核心修改] 导入 Alembic 的配置和命令 API
-from alembic.config import Config
-from trans_hub.cli.state import State
-
-logger = structlog.get_logger(__name__)
+app = typer.Typer(help="数据库管理命令 (迁移等)。")
 console = Console()
-db_app = typer.Typer(help="数据库管理命令")
 
+@app.command("migrate")
+def db_migrate() -> None:
+    """
+    运行数据库迁移。
 
-@db_app.command("migrate")
-def db_migrate(ctx: typer.Context) -> None:
-    """使用 Alembic 对数据库执行所有待处理的迁移，使其达到最新版本。"""
-    state: State = ctx.obj
-    db_path = state.config.database_url
-
-    if "sqlite" in db_path and ":memory:" in db_path:
-        console.print("[yellow]警告：无法对内存数据库执行永久性迁移。[/yellow]")
-        raise typer.Exit()
-
-    console.print(f"数据库目标: [cyan]{db_path}[/cyan]")
-    console.print("正在使用 Alembic 应用数据库迁移...")
-
+    使用 Alembic 将数据库 Schema 升级到代码中定义的最新版本。
+    """
+    console.print("[cyan]正在启动数据库迁移流程...[/cyan]")
     try:
-        # 寻找 alembic.ini 文件的路径
-        alembic_cfg_path = Path(__file__).parent.parent.parent / "alembic.ini"
-        if not alembic_cfg_path.exists():
-            raise FileNotFoundError("alembic.ini 配置文件未找到！")
+        from alembic import command
+        from alembic.config import Config as AlembicConfig
+        from trans_hub.config import TransHubConfig
 
-        # 创建 Alembic 配置对象
-        alembic_cfg = Config(str(alembic_cfg_path))
+        config = TransHubConfig()
+        
+        # Alembic 需要相对于项目根目录的路径
+        # 假设此文件在 packages/server/src/trans_hub/presentation/cli/commands/
+        project_root = Path(__file__).resolve().parent.parent.parent.parent.parent.parent.parent
+        alembic_cfg_path = project_root / "packages/server/alembic.ini" # 假设 alembic.ini 在 server 包下
+        
+        if not alembic_cfg_path.is_file():
+            # Fallback for different execution contexts
+            alembic_cfg_path = Path.cwd() / "packages/server/alembic.ini"
+            if not alembic_cfg_path.is_file():
+                 raise FileNotFoundError(f"Alembic 配置文件 'alembic.ini' 未在预设路径找到。")
 
-        # [核心修改] 调用 Alembic 的升级命令
+        console.print(f"使用 Alembic 配置文件: [dim]{alembic_cfg_path}[/dim]")
+        
+        alembic_cfg = AlembicConfig(str(alembic_cfg_path))
+        
+        # 确保 Alembic 使用与应用相同的数据库 URL
+        # Alembic 需要同步驱动
+        sync_db_url = config.database_url.replace("+aiosqlite", "").replace("+asyncpg", "")
+        alembic_cfg.set_main_option("sqlalchemy.url", sync_db_url)
+        
+        console.print(f"目标数据库: [yellow]{sync_db_url}[/yellow]")
         command.upgrade(alembic_cfg, "head")
-
+        
         console.print("[bold green]✅ 数据库迁移成功完成！[/bold green]")
     except Exception as e:
-        logger.error("数据库迁移过程中发生错误。", exc_info=True)
-        console.print(
-            f"[bold red]❌ 数据库迁移失败: {e}[/bold red]\n"
-            "[dim]请检查 alembic.ini 配置和数据库连接。[/dim]"
-        )
-        raise typer.Exit(code=1) from e
+        console.print(f"[bold red]❌ 数据库迁移失败: {e}[/bold red]")
+        console.print_exception(show_locals=True)
+        raise typer.Exit(code=1)

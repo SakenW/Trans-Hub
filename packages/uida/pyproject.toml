@@ -1,0 +1,18 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "trans-hub-uida"
+version = "0.1.0"
+description = "Trans-Hub UIDA (统一标识符架构) 的标准实现。"
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+# rfc8785 是 JCS 规范化的核心依赖
+rfc8785 = "^0.1.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4"

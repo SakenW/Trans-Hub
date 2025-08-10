@@ -1,18 +1,10 @@
-# tests/unit/_uida/test_encoder.py
-# [v2.4] UIDA 编码器单元测试
-"""测试 UIDA 编码器、I-JSON 守卫和 RFC 8785 规范化逻辑。"""
-
-from __future__ import annotations
-
+# packages/uida/tests/unit/test_uida.py
+"""
+对 trans-hub-uida 包的核心功能进行单元测试。
+"""
 import base64
-
 import pytest
-
-from trans_hub._uida.encoder import (
-    CanonicalizationError,
-    generate_uid_components,
-    get_canonical_json_for_debug,
-)
+from trans_hub_uida import CanonicalizationError, generate_uida
 
 
 @pytest.fixture
