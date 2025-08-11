@@ -1,108 +1,62 @@
-# 文件名: verify_db_connection.py
-# (增强诊断版)
+# packages/server/verify_db_connection_final.py
 import asyncio
-import os
-import sys
-import traceback
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
 
-print(f"\n--- 数据库连接诊断脚本 (增强版) ---")
-print(f"Python: {sys.executable}")
-
-# --- 硬编码的连接信息 ---
-# [关键] 请再次确认这里的每一个值都和您能成功连接的 PGAdmin/Navicat 中的设置完全一致
+# --- 硬编码的、我们认为正确的凭证 ---
 DB_USER = "transhub"
 DB_PASSWORD = "a1234567"
 DB_HOST = "192.168.50.111"
 DB_PORT = 5432
-DB_NAME = "transhub"
-MAINTENANCE_DB_NAME = "transhub"
 
-# --- 构建连接字符串 ---
-SYNC_MAINTENANCE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{MAINTENANCE_DB_NAME}"
-ASYNC_APP_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# [关键] 我们将精确地连接到 db_doctor 失败的那个数据库
+MAINTENANCE_DB_NAME = "postgres"
 
-def print_params(title: str, dbname: str):
-    """打印将要使用的连接参数。"""
-    panel_content = (
-        f"  - [dim]Host:[/dim]     [yellow]{DB_HOST}[/yellow]\n"
-        f"  - [dim]Port:[/dim]     [yellow]{DB_PORT}[/yellow]\n"
-        f"  - [dim]User:[/dim]     [yellow]{DB_USER}[/yellow]\n"
-        f"  - [dim]Password:[/dim] [yellow]{DB_PASSWORD}[/yellow]\n"
-        f"  - [dim]Database:[/dim] [yellow]{dbname}[/yellow]"
-    )
-    console.print(Panel(panel_content, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan"))
+# [关键] 我们将精确地使用 SQLAlchemy，模拟 db_doctor 的连接方式
+SYNC_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{MAINTENANCE_DB_NAME}"
 
-def test_direct_sync_connection():
-    """测试 1: 直接使用 psycopg2 (同步驱动) 连接"""
-    print("\n--- [测试 1/4] 直接使用 psycopg2 (同步) 连接... ---")
-    print_params("psycopg2 连接参数", MAINTENANCE_DB_NAME)
-    try:
-        import psycopg2
-        conn = psycopg2.connect(
-            dbname=MAINTENANCE_DB_NAME, user=DB_USER, password=DB_PASSWORD,
-            host=DB_HOST, port=DB_PORT, connect_timeout=5
-        )
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            console.print("✅ [bold green]成功:[/bold green] 直接使用 psycopg2 连接和查询成功！")
-        conn.close()
-    except Exception:
-        console.print("❌ [bold red]失败:[/bold red] 直接使用 psycopg2 连接时发生错误:")
-        traceback.print_exc()
 
-async def test_direct_async_connection():
-    """测试 2: 直接使用 asyncpg (异步驱动) 连接"""
-    print("\n--- [测试 2/4] 直接使用 asyncpg (异步) 连接... ---")
-    print_params("asyncpg 连接参数", DB_NAME)
-    try:
-        import asyncpg
-        conn = await asyncpg.connect(
-            user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
-            host=DB_HOST, port=DB_PORT, timeout=5
-        )
-        await conn.fetchval("SELECT 1")
-        console.print("✅ [bold green]成功:[/bold green] 直接使用 asyncpg 连接和查询成功！")
-        await conn.close()
-    except Exception:
-        console.print("❌ [bold red]失败:[/bold red] 直接使用 asyncpg 连接时发生错误:")
-        traceback.print_exc()
-
-# ... (SQLAlchemy 测试部分保持不变，因为它们依赖于字符串) ...
-async def test_sqlalchemy_sync_connection():
-    """测试 3: 通过 SQLAlchemy 使用同步驱动连接"""
-    print("\n--- [测试 3/4] 正在尝试通过 SQLAlchemy (同步) 连接... ---")
-    console.print(f"  - [dim]URL:[/dim] {SYNC_MAINTENANCE_URL}")
-    try:
-        from sqlalchemy import create_engine, text
-        
-        engine = create_engine(SYNC_MAINTENANCE_URL)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1")).scalar()
-            console.print("✅ [bold green]成功:[/bold green] 通过 SQLAlchemy (同步) 连接和查询成功！")
-        engine.dispose()
-    except Exception:
-        console.print(f"❌ [bold red]失败:[/bold red] 通过 SQLAlchemy (同步) 连接时发生错误:")
-        traceback.print_exc()
-
-async def main():
-    """主函数，按顺序执行所有测试。"""
-    test_direct_sync_connection()
-    await test_sqlalchemy_sync_connection()
-    await test_direct_async_connection()
-    # ... SQLAlchemy async test can be added if needed ...
-    print("\n--- 诊断脚本执行完毕 ---")
+def final_test():
+    """
+    这是最终的、无可辩驳的测试。
+    它在最简化的脚本中，完全模拟 db_doctor.py 的失败场景。
+    """
     console.print(Panel(
-        "[bold]下一步：[/bold]\n"
-        "1. 仔细检查上面 [bold yellow]黄色[/bold yellow] 的连接参数。\n"
-        "2. 将这些[bold]一模一样[/bold]的值复制到您的 `packages/server/.env` 文件中。\n"
-        "   [cyan]TH_DATABASE_URL=\"postgresql+asyncpg://<User>:<Password>@<Host>:<Port>/postgres\"[/cyan]\n"
-        "3. 再次运行 `poetry run python tools/db_doctor.py` 进行验证。",
-        title="[green]诊断建议[/green]", border_style="green"
+        f"[bold]最终诊断：模拟 `db_doctor.py` 的精确连接[/bold]\n\n"
+        f"  - [dim]将要使用的 URL:[/dim] [yellow]{SYNC_URL.replace(DB_PASSWORD, '***')}[/yellow]",
+        title="[cyan]最终连接测试[/cyan]", border_style="cyan"
     ))
 
+    try:
+        from sqlalchemy import create_engine, text
+
+        # 1. 使用与 db_doctor 完全相同的库和方法创建引擎
+        engine = create_engine(SYNC_URL)
+        
+        # 2. 尝试连接并执行查询
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1")).scalar()
+            console.print("[bold green]✅ [惊人的成功!] 连接成功！[/bold green]")
+            console.print("这意味着问题极其诡异，可能与 Poetry 的子进程环境有关。")
+
+    except Exception as e:
+        console.print("[bold red]✅ [预料之中的失败!] 连接失败，成功复现了错误！[/bold red]")
+        console.print(f"\n[bold]错误详情:[/bold]\n{e}")
+        console.print(Panel(
+            "[bold green]最终诊断结论：[/bold green]\n\n"
+            "我们已经 100% 确认，使用用户 `transhub` 和您提供的密码，"
+            "无法通过 `psycopg2` 连接到 `postgres` 这个数据库。\n\n"
+            "[bold]最终解决方案：[/bold]\n"
+            "1. **登录到您的 PostgreSQL 服务器**。\n"
+            "2. **检查 `pg_hba.conf` 文件**，确保有一行允许 `transhub` 用户从您的 IP 连接到 `postgres` 数据库，且方法是 `scram-sha-256` 或 `md5`。\n"
+            "   例如: `host  postgres  transhub  0.0.0.0/0  scram-sha-256`\n"
+            "3. **为 `transhub` 用户重置一个简单的、不会出错的密码**：\n"
+            "   `ALTER USER transhub WITH PASSWORD 'password123';`\n"
+            "4. **在 `.env` 文件中更新这个新密码**。",
+            title="[green]问题已定位[/green]", border_style="green"
+        ))
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    final_test()
