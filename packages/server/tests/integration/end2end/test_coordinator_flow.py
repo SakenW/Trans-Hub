@@ -1,9 +1,12 @@
 # packages/server/tests/integration/end2end/test_coordinator_flow.py
 """
 对 Coordinator 进行端到端的核心业务流程测试。
+
+说明：
+- 环境与数据库初始化、临时测试库的创建与迁移，都由 tests/conftest.py 统一完成。
+- 这里仅依赖 conftest.py 提供的 `coordinator` fixture。
 """
 import pytest
-
 from trans_hub.application.coordinator import Coordinator
 from tests.helpers.factories import create_request_data
 
@@ -20,9 +23,13 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
 
     # 2. 模拟 Worker 处理：直接创建一个新的 'reviewed' 修订
     rev_id = await coordinator.handler.create_new_translation_revision(
-        head_id=head.id, project_id=head.project_id, content_id=head.content_id,
-        target_lang=head.target_lang, variant_key=head.variant_key,
-        status="reviewed", revision_no=head.current_no + 1,
+        head_id=head.id,
+        project_id=head.project_id,
+        content_id=head.content_id,
+        target_lang=head.target_lang,
+        variant_key=head.variant_key,
+        status="reviewed",
+        revision_no=head.current_no + 1,
         translated_payload_json={"text": "Hallo Welt"}
     )
     
@@ -34,6 +41,7 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
     result = await coordinator.get_translation(**req_data, target_lang="de")
     assert result is not None
     assert result["text"] == "Hallo Welt"
+
 
 async def test_commenting_flow(coordinator: Coordinator):
     """测试添加和获取评论的端到端流程。"""
