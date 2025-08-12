@@ -15,13 +15,13 @@ from .exceptions import (
     DatabaseError,
     EngineNotFoundError,
     TransHubError,
+    LockAcquisitionError,
 )
 from .interfaces import (
     CacheHandler,
     LockProvider,
     PersistenceHandler,
     QueueProducer,
-    RateLimiter,
     StreamProducer,
 )
 from .types import (
@@ -44,6 +44,7 @@ __all__ = [
     "EngineNotFoundError",
     "DatabaseError",
     "APIError",
+    "LockAcquisitionError",
     # from interfaces.py
     "PersistenceHandler",
     "CacheHandler",

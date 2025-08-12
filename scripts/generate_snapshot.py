@@ -254,6 +254,10 @@ def main() -> None:
     script_dir = Path(__file__).resolve().parent
     output_path = script_dir / args.output
 
+    # 在写入新内容之前，先删除或清空输出文件
+    if output_path.exists():
+        output_path.unlink()
+
     targets = iter_targets(scan_root, args.extra)
     files = walk_files(scan_root, targets)
 

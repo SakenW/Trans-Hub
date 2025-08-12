@@ -1,9 +1,9 @@
-# src/trans_hub_core/interfaces.py
+# packages/core/src/trans_hub_core/interfaces.py
 """
 定义了 Trans-Hub 系统中所有基础设施和服务的抽象接口协议 (Protocols)。
-
 这些接口是系统内部解耦的关键，高层模块（如 Application 层）应依赖于这些
 抽象接口，而不是具体的实现类。
+(v2.5.12 对齐版)
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from .types import Comment, ContentItem, Event, TranslationHead, TranslationStatus
+    from .types import Comment, ContentItem, Event, TranslationHead
 
 
 class PersistenceHandler(Protocol):
@@ -33,9 +33,15 @@ class PersistenceHandler(Protocol):
         namespace: str,
         keys: dict[str, Any],
         source_payload: dict[str, Any],
+        source_lang: str,
         content_version: int,
     ) -> str:
         """根据 UIDA 幂等地创建或更新 th_content 记录，返回 content_id。"""
+
+    async def get_content_id_by_uida(
+        self, project_id: str, namespace: str, keys_sha256_bytes: bytes
+    ) -> str | None:
+        """通过 UIDA 的核心组件查找 content_id。"""
 
     async def get_or_create_translation_head(
         self,
@@ -49,8 +55,8 @@ class PersistenceHandler(Protocol):
     async def create_new_translation_revision(
         self, *, head_id: str, project_id: str, content_id: str, **kwargs: Any
     ) -> str:
-        """在 th_trans_rev 中创建一条新的修订，并更新 th_trans_head 的指针，返回 rev_id。"""
-    
+        """在 th.trans_rev 中创建一条新的修订，并更新 th.trans_head 的指针，返回 rev_id。"""
+
     async def find_tm_entry(
         self, *, project_id: str, namespace: str, reuse_sha: bytes, **kwargs: Any
     ) -> tuple[str, dict[str, Any]] | None:
@@ -68,7 +74,7 @@ class PersistenceHandler(Protocol):
         self, content_id: str, target_lang: str, variant_key: str
     ) -> tuple[str, dict[str, Any]] | None:
         """获取已发布的译文，返回 (rev_id, translated_payload_json) 或 None。"""
-        
+
     async def publish_revision(self, revision_id: str) -> bool:
         """将一个 'reviewed' 状态的修订发布，返回是否成功。"""
 
@@ -88,19 +94,19 @@ class PersistenceHandler(Protocol):
         self, project_id: str, locale: str
     ) -> list[str] | None:
         """获取指定项目和语言的回退顺序。"""
-    
+
     async def set_fallback_order(
         self, project_id: str, locale: str, fallback_order: list[str]
     ) -> None:
         """设置语言回退顺序。"""
-        
+
     async def get_translation_head_by_uida(
-        self, *, project_id: str, namespace: str, keys_sha: bytes, **kwargs: Any
+        self, *, project_id: str, namespace: str, keys: dict[str, Any], target_lang: str, variant_key: str
     ) -> TranslationHead | None:
-        """根据 UIDA 获取一个翻译头记录的 ORM 对象。"""
+        """根据完整的 UIDA 和翻译维度获取一个翻译头记录的 DTO 对象。"""
 
     async def get_head_by_id(self, head_id: str) -> TranslationHead | None:
-        """根据 Head ID 获取一个翻译头记录的 ORM 对象。"""
+        """根据 Head ID 获取一个翻译头记录的 DTO 对象。"""
 
     async def get_head_by_revision(self, revision_id: str) -> TranslationHead | None:
         """根据 revision_id 查找其所属的 head。"""
@@ -109,6 +115,7 @@ class PersistenceHandler(Protocol):
         self, batch_size: int
     ) -> AsyncGenerator[list[ContentItem], None]:
         """流式获取待处理的 'draft' 状态翻译任务。"""
+        ...
 
 
 class CacheHandler(Protocol):

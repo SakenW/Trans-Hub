@@ -1,3 +1,4 @@
+# packages/server/pyproject.toml
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -15,15 +16,14 @@ packages = [{include = "trans_hub", from = "src"}]
 python = ">=3.10"
 # 核心依赖
 pydantic = "^2.0"
-pydantic-settings = "^2.0"
+pydantic-settings = "*"
 structlog = "^23.0"
 # 引用本地的 core 和 uida 包
-# core 包现在提供了 langcodes
 trans-hub-core = {path = "../core", develop = true}
 trans-hub-uida = {path = "../uida", develop = true}
 # 数据库核心
 sqlalchemy = {version = "^2.0", extras = ["asyncio"]}
-alembic = "^1.13.1"
+alembic = "^1.16.4"
 greenlet = "^3.0.3" # Alembic 在某些场景下需要
 
 # --- 可选驱动与库 (通过 extras 安装) ---
@@ -45,12 +45,12 @@ pytest-asyncio = ">=0.21.0"
 pytest-cov = ">=4.1"
 ruff = ">=0.1.0"
 mypy = ">=1.5"
-# rich 和 questionary 是开发工具的依赖
+# rich 和 questionary 是开发工具和 CLI 的依赖
 rich = ">=13.0.0"
 questionary = "^2.0.1"
-# 同步 PG 驱动，仅用于测试和迁移
-psycopg2-binary = ">=2.9.0"
-pytest-dotenv = "^0.5.2"
+# [新增] 测试框架需要同步驱动来创建/删除数据库
+psycopg = {version = ">=3.1.0", extras = ["binary"]}
+
 
 [tool.poetry.scripts]
 trans-hub = "trans_hub.presentation.cli.main:app"

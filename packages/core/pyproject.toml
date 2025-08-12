@@ -1,3 +1,4 @@
+# packages/core/pyproject.toml
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -12,4 +13,4 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = ">=3.10"
 pydantic = "^2.0"
-langcodes = ">=3.3.0" # [新增]
+langcodes = ">=3.3.0" # [新增] 白皮书要求，用于BCP-47校验

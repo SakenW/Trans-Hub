@@ -1,17 +1,16 @@
 # packages/server/src/trans_hub/config_loader.py
 """
-统一、简洁的配置加载器。
-(v26) 目标：
-- 按环境(test/prod)优先加载对应 .env.test / .env（可显式指定路径）
-- 测试可设置 strict=True：.env.test 不存在就报错，绝不回退到 .env
-- 非测试可宽松：没找到 .env 也可直接走已有环境变量
-- 不做任何“脱敏写回”操作；脱敏仅在打印时处理
+统一、简洁的配置加载器（改良版）
+- prod 模式使用 `.env`，test 模式使用 `.env.test`（生态友好）
+- 自顶向上查找项目根（含 packages + pyproject.toml）
+- 回退路径与主路径一致：都在 <project_root>/packages/server 下查找
+- strict=True 时强校验 .env 与关键变量
 """
-
 from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union, Any
 
 import structlog
 from dotenv import load_dotenv
@@ -20,99 +19,87 @@ from .config import TransHubConfig
 
 logger = structlog.get_logger(__name__)
 
-EnvMode = Literal["test", "prod"]
+PathLike = Union[os.PathLike[str], str]
 
 
-def _server_root() -> Path:
-    # 本文件在 packages/server/src/trans_hub/ 下
-    # server 根目录：packages/server
-    return Path(__file__).resolve().parents[2]
+def find_project_root(start_dir: Path) -> Path:
+    """
+    从起始目录向上查找包含 'packages' 目录且带有 'pyproject.toml' 的项目根。
+    约定：monorepo 根目录结构应包含:
+      - packages/
+      - pyproject.toml
+    """
+    current = start_dir.resolve()
+    while current.parent != current:
+        if (current / "packages").is_dir() and (current / "pyproject.toml").is_file():
+            return current
+        current = current.parent
+    raise FileNotFoundError(f"无法从 '{start_dir}' 向上找到项目根目录。")
 
 
-def _resolve_default_env_path(mode: EnvMode) -> Path:
-    root = _server_root()
-    return root / (".env.test" if mode == "test" else ".env")
+def _resolve_env_file(
+    mode: Literal["test", "prod"],
+    *,
+    dotenv_path: Optional[PathLike] = None,
+) -> Path:
+    """
+    计算应加载的 .env 文件路径。
+    优先级：
+      1) 显式传入的 dotenv_path
+      2) <project_root>/packages/server/{.env | .env.test}
+      3) 回退：<cwd>/packages/server/{.env | .env.test}
+    """
+    # 1) 显式路径优先
+    if dotenv_path:
+        return Path(dotenv_path)
+
+    # 根据模式确定文件名：prod→.env，test→.env.test
+    env_filename = ".env" if mode == "prod" else ".env.test"
+
+    # 2) 以源码文件所在目录为锚点自顶向上找项目根
+    try:
+        project_root = find_project_root(Path(__file__).parent)
+        return project_root / "packages" / "server" / env_filename
+    except FileNotFoundError:
+        # 3) 回退到 CWD，但仍保持 packages/server 的路径结构一致
+        project_root = Path.cwd()
+        return project_root / "packages" / "server" / env_filename
 
 
 def load_config_from_env(
-    mode: Optional[EnvMode] = None,
+    mode: Literal["test", "prod"] = "prod",
     *,
     strict: bool = False,
-    dotenv_path: Optional[os.PathLike[str] | str] = None,
+    dotenv_path: Optional[PathLike] = None,
 ) -> TransHubConfig:
     """
-    统一加载入口，返回 TransHubConfig 实例。
+    从 .env 文件或环境变量加载配置。
 
-    参数:
-        mode: "test" 或 "prod"。为 None 时，优先读 TH_ENV=test|production 推断，
-              推断不到则默认 "prod"（应用更安全）。——若你真想默认 test，请在调用处传入 mode="test"。
-        strict: 严格模式：
-            - 对 test: 若找不到 .env.test 且未指定 dotenv_path，直接报错；绝不回退到 .env。
-            - 对 prod: 若找不到 .env 且未指定 dotenv_path，报错或走已有环境变量（见下）。
-        dotenv_path: 显式指定 .env 路径（优先级最高），常用于 CI。
-
-    行为说明：
-        1) 从 dotenv_path 或默认路径加载对应 .env 文件（如存在）。
-        2) strict=True 时，要求关键变量存在，否则抛异常；
-           strict=False 时，若缺失 .env 但环境变量已齐，可以继续。
-        3) 绝不对任何环境变量做“掩码写回”。脱敏仅用于日志打印。
+    Args:
+        mode: "test" 或 "prod"。prod 使用 `.env`；test 使用 `.env.test`。
+        strict: 严格模式。若为 True：
+                - 未找到目标 .env 文件将抛出 FileNotFoundError
+                - 缺少关键环境变量将抛出 ValueError
+        dotenv_path: 显式指定 .env 文件路径，优先级最高。
     """
-    # 1) 确定 mode
-    if mode is None:
-        th_env = os.getenv("TH_ENV", "").lower()
-        if th_env == "test":
-            mode = "test"  # type: ignore[assignment]
-        else:
-            mode = "prod"  # 默认生产更安全
+    env_file = _resolve_env_file(mode, dotenv_path=dotenv_path)
 
-    # 2) 预置 TH_ENV 方便上层做分支控制（如生产保护）
-    os.environ.setdefault("TH_ENV", "test" if mode == "test" else "production")
-
-    # 3) 决定 .env 文件路径
-    env_file = Path(dotenv_path) if dotenv_path else _resolve_default_env_path(mode)
-
-    # 4) 加载 .env（若存在）
     if env_file.is_file():
         logger.info("加载 .env 文件", path=str(env_file))
+        # override=True：.env 覆盖进程已有的环境变量，保证本地开发一致性
         load_dotenv(dotenv_path=env_file, override=True)
     else:
-        # test 模式严格禁止回退到 .env
-        if mode == "test":
-            if strict:
-                raise FileNotFoundError(
-                    f"严格模式：未找到测试环境变量文件：{env_file}。请提供 .env.test 或使用 dotenv_path 指定。"
-                )
-            else:
-                logger.warning(
-                    "未找到测试环境变量文件，将直接使用当前环境变量（不会回退到 .env）。",
-                    expected=str(env_file),
-                )
-        else:
-            # prod 模式可以更宽松：若没有 .env，允许使用已有环境变量
-            if strict:
-                raise FileNotFoundError(
-                    f"严格模式：未找到正式环境变量文件：{env_file}。"
-                )
-            else:
-                logger.warning(
-                    "未找到正式环境变量文件，将直接使用当前环境变量。",
-                    expected=str(env_file),
-                )
+        if strict:
+            raise FileNotFoundError(f"严格模式下未找到所需的 .env 文件: {env_file}")
+        # 注意：这里不使用 f-string，占位信息放在结构化字段里
+        logger.warning(".env 文件未找到，将仅使用环境变量", expected_path=str(env_file))
 
-    # 5) 实例化配置
-    cfg = TransHubConfig()
+    if strict:
+        # 关键变量校验：根据你的项目约定增减
+        required_vars = ["TH_DATABASE_URL", "TH_MAINTENANCE_DATABASE_URL"]
+        missing_vars = [v for v in required_vars if not os.getenv(v)]
+        if missing_vars:
+            raise ValueError(f"严格模式下缺少必要的环境变量: {', '.join(missing_vars)}")
 
-    # 6) 严格校验关键变量
-    def _has(v: Optional[str]) -> bool:
-        return bool(v and v.strip())
-
-    if not _has(cfg.database_url):
-        raise ValueError("缺少 TH_DATABASE_URL。请在对应 .env 或环境变量中提供。")
-
-    # 维护库 URL 可选，但很多管理操作需要；给出提示
-    if not _has(cfg.maintenance_database_url):
-        logger.warning(
-            "TH_MAINTENANCE_DATABASE_URL 未设置。某些管理功能（如建库/删库）可能不可用。"
-        )
-
-    return cfg
+    # 由 Pydantic Settings 类负责进一步解析与校验
+    return TransHubConfig()

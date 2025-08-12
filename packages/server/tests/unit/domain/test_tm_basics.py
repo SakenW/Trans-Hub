@@ -1,13 +1,11 @@
-# tests/unit/_tm/test_normalizers.py
-# [v2.4] 文本归一化单元测试
-"""测试用于翻译记忆库 (TM) 的文本归一化逻辑。"""
-
-from __future__ import annotations
-
+# packages/server/tests/unit/domain/test_tm_basics.py
+"""
+测试用于翻译记忆库 (TM) 的文本归一化领域逻辑。
+(文件已从 uida 包移动并重命名)
+"""
 import pytest
 
-from trans_hub._tm.normalizers import normalize_plain_text_for_reuse
-
+from trans_hub.domain.tm import normalize_text_for_tm
 
 @pytest.mark.parametrize(
     "input_text, expected_output",
@@ -36,4 +34,4 @@ from trans_hub._tm.normalizers import normalize_plain_text_for_reuse
 )
 def test_normalization_scenarios(input_text, expected_output):
     """使用一组丰富的场景来验证文本归一化函数的正确性。"""
-    assert normalize_plain_text_for_reuse(input_text) == expected_output
+    assert normalize_text_for_tm(input_text) == expected_output

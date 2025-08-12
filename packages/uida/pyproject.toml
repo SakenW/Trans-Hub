@@ -6,8 +6,9 @@ build-backend = "poetry.core.masonry.api"
 name = "trans-hub-uida"
 version = "0.1.0"
 description = "Trans-Hub UIDA (统一标识符架构) 的标准实现。"
-authors = ["Your Name <you@example.com>"]
+authors = ["Saken <saken.w@gmail.com>"]
 license = "MIT"
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10"

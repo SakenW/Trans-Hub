@@ -1,8 +1,8 @@
-# src/trans_hub_core/types.py
+# packages/core/src/trans_hub_core/types.py
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
 这些类型是系统各层之间数据交换的契约。
-(Pydantic V2 语法修正版)
+(v2.5.12 对齐版)
 """
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from .interfaces import PersistenceHandler
-    from trans_hub_server.config import TransHubConfig
+    from trans_hub.config import TransHubConfig
 
 
 class TranslationStatus(str, Enum):
@@ -58,7 +58,7 @@ class ContentItem(BaseModel):
 
 class TranslationHead(BaseModel):
     """翻译头记录的数据传输对象 (DTO)。"""
-    model_config = ConfigDict(from_attributes=True) # [修复] 使用 Pydantic V2 的 ConfigDict
+    model_config = ConfigDict(from_attributes=True)
 
     id: str
     project_id: str
@@ -69,20 +69,27 @@ class TranslationHead(BaseModel):
     current_status: TranslationStatus
     current_no: int
     published_rev_id: str | None = None
+    published_no: int | None = None
+    published_at: datetime | None = None
 
 class TranslationRevision(BaseModel):
     """翻译修订记录的DTO。"""
-    model_config = ConfigDict(from_attributes=True) # [修复]
+    model_config = ConfigDict(from_attributes=True)
 
     id: str
     project_id: str
     content_id: str
     status: TranslationStatus
     revision_no: int
+    # 增加白皮书中定义的字段
+    translated_payload_json: dict[str, Any] | None = None
+    engine_name: str | None = None
+    engine_version: str | None = None
+
 
 class Comment(BaseModel):
     """评论记录的DTO。"""
-    model_config = ConfigDict(from_attributes=True) # [修复]
+    model_config = ConfigDict(from_attributes=True)
 
     id: str | None = None
     head_id: str
@@ -93,9 +100,10 @@ class Comment(BaseModel):
 
 class Event(BaseModel):
     """事件记录的DTO。"""
-    model_config = ConfigDict(from_attributes=True) # [修复]
+    model_config = ConfigDict(from_attributes=True)
 
     id: str | None = None
+    # 按照白皮书，事件应与 head 关联
     head_id: str
     project_id: str
     actor: str

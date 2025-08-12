@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from typing import Any, NamedTuple
 
 import rfc8785
 
 
-class CanonicalizationError(RuntimeError):
+class CanonicalizationError(ValueError):
     """当输入不满足 I-JSON 或 JCS 规范化失败时抛出。"""
 
 
@@ -77,11 +78,13 @@ def generate_uida(keys: dict[str, Any]) -> UIDAComponents:
     """
     _assert_i_json_compat(keys)
     try:
+        # separators 和 sort_keys 是为了保证确定性输出，rfc8785 内部已经处理了
         canonical_bytes = rfc8785.dumps(keys)
     except Exception as e:
         raise CanonicalizationError(f"JCS 规范化失败: {e}") from e
 
     sha_bytes = hashlib.sha256(canonical_bytes).digest()
+    # urlsafe_b64encode 产生的 '=' 是填充，可以安全移除
     b64_str = base64.urlsafe_b64encode(canonical_bytes).rstrip(b"=").decode("ascii")
 
     return UIDAComponents(

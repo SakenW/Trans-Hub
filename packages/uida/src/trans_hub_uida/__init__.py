@@ -7,8 +7,9 @@ Trans-Hub UIDA (统一标识符架构) 标准实现包。
 
 主要导出:
 - `generate_uida`: 核心函数，用于从 keys 生成 UIDA 的所有组件。
+- `UIDAComponents`: 包含 UIDA 各种形式的数据类。
 - `CanonicalizationError`: 当输入不满足 I-JSON 规范时抛出的异常。
 """
-from .uida import CanonicalizationError, generate_uida
+from .uida import CanonicalizationError, UIDAComponents, generate_uida
 
-__all__ = ["generate_uida", "CanonicalizationError"]
+__all__ = ["generate_uida", "CanonicalizationError", "UIDAComponents"]
