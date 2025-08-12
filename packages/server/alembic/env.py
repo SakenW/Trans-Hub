@@ -1,16 +1,21 @@
 # packages/server/alembic/env.py
 """
-Alembic 环境配置 (v34 - 终极正确版)
-- 在核心依赖升级后，恢复到最标准、最简洁的配置。
-- 依赖 engine_from_config 来自动处理从上下文传入的配置。
+Alembic 环境配置 (v35 - 日志规范化版)
+- 移除了所有调试用的 print 语句。
+- 使用标准 logging 模块输出关键信息，以便与项目日志系统集成。
 """
 from __future__ import annotations
 import sys
+import logging
 from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool, make_url
+from sqlalchemy import engine_from_config, pool
+
+# --- 日志配置 ---
+# 获取一个标准的 logger 实例
+log = logging.getLogger(__name__)
 
 # --- 保证可导入项目 Base ---
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
@@ -29,6 +34,7 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """离线模式。"""
     url = config.get_main_option("sqlalchemy.url")
+    log.info(f"以离线模式运行迁移，目标 URL: {url}")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -37,32 +43,23 @@ def run_migrations_offline() -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+    log.info("离线迁移完成。")
 
 def run_migrations_online() -> None:
     """在线模式。"""
-    # 获取命令行参数中的数据库URL
-    x_args = context.get_x_argument(as_dictionary=True)
-    db_url = x_args.get('db_url')
-    
-    # 从配置文件获取section
-    config_section = config.get_section(config.config_ini_section)
-    
-    # 如果提供了db_url参数，则覆盖配置中的url
-    if db_url:
-        config_section['sqlalchemy.url'] = db_url
-    
-    # 添加调试信息
-    print("=== 调试信息 ===")
-    print(f"配置section: {config_section}")
-    print(f"数据库URL: {config_section.get('sqlalchemy.url')}")
-    print("================")
-    
     # [核心] connectable 直接从 config 对象的 section 中创建
-    connectable = engine_from_config(
-        config_section,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # 这种方式允许 pytest fixture 通过 alembic.context 传递连接信息
+    connectable = context.config.attributes.get("connection", None)
+    
+    if connectable is None:
+        log.info("未从上下文获取到连接，将从 alembic.ini 创建引擎。")
+        connectable = engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+
+    log.info(f"以在线模式运行迁移，连接: {connectable.engine}")
 
     with connectable.connect() as connection:
         context.configure(
@@ -73,6 +70,7 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
+    log.info("在线迁移完成。")
 
 if context.is_offline_mode():
     run_migrations_offline()
