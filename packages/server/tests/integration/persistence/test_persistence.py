@@ -4,6 +4,7 @@
 """
 
 import pytest
+from datetime import datetime
 from sqlalchemy import select
 
 from tests.helpers.factories import create_request_data
@@ -52,7 +53,8 @@ async def test_upsert_content_is_idempotent(
 
     assert content_id_1 == content_id_2
 
-    async with coordinator._sessionmaker() as session:
+    # 使用handler的sessionmaker而非coordinator的，避免事件循环不匹配
+    async with handler._sessionmaker() as session:
         result = await session.get(ThContent, content_id_1)
         assert result is not None
         assert result.source_payload_json["text"] == "更新后的文本"
@@ -112,7 +114,9 @@ async def test_cascade_delete_from_content(
 ):
     """[新增] 验证删除 content 记录会级联删除所有关联的 rev, head 和 cache 记录。"""
     req = create_request_data(keys={"id": "cascade_delete_test"})
-    content_id = await handler.upsert_content(**req, content_version=1)
+    # 过滤掉 upsert_content 方法不接受的参数
+    filtered_req = {k: v for k, v in req.items() if k in ['project_id', 'namespace', 'keys', 'source_payload', 'source_lang']}
+    content_id = await handler.upsert_content(**filtered_req, content_version=1)
 
     head_id, _ = await handler.get_or_create_translation_head(
         project_id=req["project_id"],
@@ -122,26 +126,31 @@ async def test_cascade_delete_from_content(
     )
 
     # 手动创建一个 cache 记录来模拟
-    async with coordinator._sessionmaker.begin() as session:
-        cache_entry = ThResolveCache(
-            project_id=req["project_id"],
-            content_id=content_id,
-            target_lang="de",
-            variant_key="-",
-            resolved_rev_id="dummy_rev_id",
-            resolved_payload={"text": "dummy"},
-            expires_at=datetime.now(),
-        )
-        # 模拟一个 rev 记录以满足外键约束
-        dummy_rev = ThTransRev(
-            project_id=req["project_id"],
-            id="dummy_rev_id",
-            content_id=content_id,
-            revision_no=-1,
-            status=TranslationStatus.DRAFT,
-            src_payload_json={},
-        )
-        session.add_all([dummy_rev, cache_entry])
+    async with handler._sessionmaker.begin() as session:
+            # 先创建 rev 记录以满足外键约束
+            dummy_rev = ThTransRev(
+                project_id=req["project_id"],
+                id="dummy_rev_id",
+                content_id=content_id,
+                target_lang="de",  # 添加target_lang字段
+                revision_no=-1,
+                status=TranslationStatus.DRAFT,
+                src_payload_json={},
+            )
+            session.add(dummy_rev)
+            await session.flush()  # 确保 dummy_rev 被写入数据库
+
+            # 然后创建 cache 记录
+            cache_entry = ThResolveCache(
+                project_id=req["project_id"],
+                content_id=content_id,
+                target_lang="de",
+                variant_key="-",
+                resolved_rev_id=dummy_rev.id,
+                resolved_payload={"text": "dummy"},
+                expires_at=datetime.now(),
+            )
+            session.add(cache_entry)
 
     # 验证初始状态
     async with coordinator._sessionmaker() as session:
