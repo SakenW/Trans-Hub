@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import structlog
 from sqlalchemy import func, select, update
@@ -464,9 +464,17 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     .order_by(ThComments.created_at)
                 )
                 results = (await session.execute(stmt)).scalars().all()
-                return [
-                    Comment.model_validate(r, from_attributes=True) for r in results
-                ]
+                # 将整数 id 转换为字符串
+            return [
+                Comment(
+                    id=str(r.id),
+                    head_id=r.head_id,
+                    project_id=r.project_id,
+                    author=r.author,
+                    body=r.body,
+                    created_at=r.created_at
+                ) for r in results
+            ]
         except SQLAlchemyError as e:
             raise DatabaseError(f"获取评论失败: {e}") from e
 

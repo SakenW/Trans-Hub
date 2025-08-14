@@ -37,6 +37,7 @@ if TYPE_CHECKING:
         PersistenceHandler,
         StreamProducer,
     )
+    from trans_hub_core.types import TranslationHead
 
 
 logger = structlog.get_logger(__name__)
@@ -83,7 +84,7 @@ class Coordinator:
 
             redis_client = await get_redis_client(self.config)
             self.stream_producer = RedisStreamProducer(redis_client)
-            self.cache = RedisCacheHandler(redis_client, self.config.redis_key_prefix)
+            self.cache = RedisCacheHandler(redis_client, self.config.redis.key_prefix)
             logger.info("Redis 基础设施已初始化 (Stream, Cache)。")
 
         from .processors import TranslationProcessor
@@ -217,7 +218,7 @@ class Coordinator:
             )
             return None
 
-        cache_key = f"{self.config.redis_key_prefix}resolve:{content_id}:{target_lang}:{variant_key}"
+        cache_key = f"{self.config.redis.key_prefix}resolve:{content_id}:{target_lang}:{variant_key}"
         if self.cache:
             cached_result = await self.cache.get(cache_key)
             if cached_result:

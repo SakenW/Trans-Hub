@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import text
-from sqlalchemy import func
+from sqlalchemy import text, func
 import structlog
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 

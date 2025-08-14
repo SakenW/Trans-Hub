@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import func
 
 from trans_hub_core.types import ContentItem
 
