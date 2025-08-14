@@ -2,6 +2,7 @@
 """
 包含处理翻译任务的核心逻辑单元（处理器）。
 """
+
 import asyncio
 from typing import Any
 
@@ -9,7 +10,13 @@ import structlog
 
 from trans_hub.domain import tm as tm_domain
 from trans_hub_core.interfaces import PersistenceHandler
-from trans_hub_core.types import ContentItem, EngineError, EngineSuccess, TranslationStatus
+from trans_hub_core.types import (
+    ContentItem,
+    EngineError,
+    EngineSuccess,
+    TranslationStatus,
+)
+
 # from trans_hub.infrastructure.engines.base import BaseTranslationEngine # 避免循环导入
 from trans_hub_core.interfaces import StreamProducer
 
@@ -20,6 +27,7 @@ class TranslationProcessor:
     """
     负责处理一批翻译任务的默认策略。
     """
+
     PAYLOAD_TEXT_KEY = "text"
 
     def __init__(
@@ -41,7 +49,9 @@ class TranslationProcessor:
         self._event_stream_name = event_stream_name
 
     async def process_batch(
-        self, batch: list[ContentItem], active_engine: Any  # BaseTranslationEngine
+        self,
+        batch: list[ContentItem],
+        active_engine: Any,  # BaseTranslationEngine
     ) -> None:
         """
         处理一批待翻译的内容条目。
@@ -67,9 +77,7 @@ class TranslationProcessor:
         success_tasks = []
         for item, output in zip(batch, engine_outputs):
             if isinstance(output, EngineSuccess):
-                success_tasks.append(
-                    self._handle_success(item, output, active_engine)
-                )
+                success_tasks.append(self._handle_success(item, output, active_engine))
             elif isinstance(output, EngineError):
                 logger.error(
                     "引擎翻译失败，将等待重试",
@@ -77,12 +85,15 @@ class TranslationProcessor:
                     error=output.error_message,
                     is_retryable=output.is_retryable,
                 )
-        
+
         if success_tasks:
             await asyncio.gather(*success_tasks)
 
     async def _handle_success(
-        self, item: ContentItem, output: EngineSuccess, active_engine: Any # BaseTranslationEngine
+        self,
+        item: ContentItem,
+        output: EngineSuccess,
+        active_engine: Any,  # BaseTranslationEngine
     ) -> None:
         """处理单个翻译成功的结果。"""
         try:
@@ -106,7 +117,9 @@ class TranslationProcessor:
 
             # 3. 更新/创建 TM 条目并链接
             source_text_for_tm = item.source_payload.get(self.PAYLOAD_TEXT_KEY, "")
-            source_fields = {"text": tm_domain.normalize_text_for_tm(source_text_for_tm)}
+            source_fields = {
+                "text": tm_domain.normalize_text_for_tm(source_text_for_tm)
+            }
             reuse_sha = tm_domain.build_reuse_key(
                 namespace=item.namespace, reduced_keys={}, source_fields=source_fields
             )
@@ -122,9 +135,11 @@ class TranslationProcessor:
                 hash_algo_version=1,
                 source_text_json=source_fields,
                 translated_json=translated_payload,
-                quality_score=0.9, # 假设机器翻译质量为 0.9
+                quality_score=0.9,  # 假设机器翻译质量为 0.9
             )
-            await self._handler.link_translation_to_tm(new_rev_id, tm_id, item.project_id)
+            await self._handler.link_translation_to_tm(
+                new_rev_id, tm_id, item.project_id
+            )
 
         except Exception:
             logger.error(

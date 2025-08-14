@@ -2,6 +2,7 @@
 """
 Trans-Hub 应用服务总协调器。(v2.5.14 对齐版)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,10 +11,12 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from trans_hub.domain import tm as tm_domain
-from trans_hub.infrastructure.db._session import (
-    create_db_engine,
-    create_db_sessionmaker,
+from trans_hub.infrastructure.db import (
+    create_async_db_engine as create_db_engine,
+    create_async_sessionmaker as create_db_sessionmaker,
+    dispose_engine,
 )
+
 from trans_hub.infrastructure.persistence import create_persistence_handler
 from trans_hub_core.types import Comment, Event, TranslationStatus
 from trans_hub_uida import generate_uida
@@ -34,7 +37,6 @@ if TYPE_CHECKING:
         PersistenceHandler,
         StreamProducer,
     )
-    from trans_hub_core.types import TranslationHead
 
 
 logger = structlog.get_logger(__name__)
@@ -85,6 +87,7 @@ class Coordinator:
             logger.info("Redis 基础设施已初始化 (Stream, Cache)。")
 
         from .processors import TranslationProcessor
+
         self.processor = TranslationProcessor(
             self.handler, self.stream_producer, self.config.worker.event_stream_name
         )
@@ -99,10 +102,12 @@ class Coordinator:
         await asyncio.gather(
             *[eng.close() for eng in self._engine_instances.values()],
             self.handler.close(),
+            dispose_engine(self._engine),
             return_exceptions=True,
         )
         if self.config.redis_url:
             from trans_hub.infrastructure.redis._client import close_redis_client
+
             await close_redis_client()
         self.initialized = False
         logger.info("协调器优雅停机完成。")
@@ -207,7 +212,9 @@ class Coordinator:
             project_id, namespace, uida.keys_sha256_bytes
         )
         if not content_id:
-            logger.debug("内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace)
+            logger.debug(
+                "内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace
+            )
             return None
 
         cache_key = f"{self.config.redis_key_prefix}resolve:{content_id}:{target_lang}:{variant_key}"
@@ -258,9 +265,7 @@ class Coordinator:
                 return result[1], result[0]
 
         # 3. 查询并应用语言回退链
-        fallback_order = await self.handler.get_fallback_order(
-            project_id, target_lang
-        )
+        fallback_order = await self.handler.get_fallback_order(project_id, target_lang)
         if fallback_order:
             for fallback_lang in fallback_order:
                 logger.debug(
@@ -305,9 +310,7 @@ class Coordinator:
             )
         return success
 
-    async def reject_translation(
-        self, revision_id: str, actor: str = "system"
-    ) -> bool:
+    async def reject_translation(self, revision_id: str, actor: str = "system") -> bool:
         """拒绝一个修订。"""
         head = await self.handler.get_head_by_revision(revision_id)
         if not head:

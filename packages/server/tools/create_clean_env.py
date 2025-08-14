@@ -4,7 +4,9 @@ from pathlib import Path
 
 # --- [关键] 这是我们已知可以工作的、绝对正确的连接字符串 ---
 # (确保数据库名是 postgres，以便工具和测试可以创建数据库)
-CORRECT_URL_MAINTENANCE = "postgresql+asyncpg://transhub:a1234567@192.168.50.111:5432/postgres"
+CORRECT_URL_MAINTENANCE = (
+    "postgresql+asyncpg://transhub:a1234567@192.168.50.111:5432/postgres"
+)
 CORRECT_URL_APP = "postgresql+asyncpg://transhub:a1234567@192.168.50.111:5432/transhub"
 
 # --- 要写入新 .env 文件的完整内容 ---
@@ -17,11 +19,12 @@ TH_LOGGING__LEVEL="INFO"
 TH_LOGGING__FORMAT="console"
 """
 
+
 def main():
     """主函数，负责重建 .env 文件。"""
     env_path = Path.cwd() / ".env"
-    
-    print(f"--- 正在为您创建一个绝对干净的 .env 文件 ---")
+
+    print("--- 正在为您创建一个绝对干净的 .env 文件 ---")
     print(f"目标路径: {env_path}")
 
     # 备份旧文件
@@ -34,13 +37,14 @@ def main():
     # 然后写入 ASCII 编码的字节
     try:
         with open(env_path, "wb") as f:
-            f.write(env_content.strip().encode('ascii'))
-        
+            f.write(env_content.strip().encode("ascii"))
+
         print("\n✅ [成功] 一个全新的、干净的 .env 文件已创建！")
         print("请再次运行您的工具或测试。")
 
     except Exception as e:
         print(f"\n❌ [失败] 创建 .env 文件时出错: {e}")
+
 
 if __name__ == "__main__":
     main()

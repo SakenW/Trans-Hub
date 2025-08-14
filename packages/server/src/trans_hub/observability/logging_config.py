@@ -79,14 +79,16 @@ class HybridPanelRenderer:
 
         # 等宽级别标签，保证标题对齐；配色可按团队偏好调整
         self._level_styles: dict[str, tuple[str, str]] = {
-            "debug": ("cyan",        "DEBUG   "),
-            "info": ("green",        "INFO    "),
-            "warning": ("yellow",    "WARNING "),
-            "error": ("bold red",    "ERROR   "),
-            "critical": ("magenta",  "CRITICAL"),
+            "debug": ("cyan", "DEBUG   "),
+            "info": ("green", "INFO    "),
+            "warning": ("yellow", "WARNING "),
+            "error": ("bold red", "ERROR   "),
+            "critical": ("magenta", "CRITICAL"),
         }
 
-    def __call__(self, logger: Any, name: str, event_dict: MutableMapping[str, Any]) -> str:
+    def __call__(
+        self, logger: Any, name: str, event_dict: MutableMapping[str, Any]
+    ) -> str:
         # 提取核心字段
         event_msg = str(event_dict.pop("event", "")).strip()
         if not event_msg:
@@ -137,7 +139,9 @@ class HybridPanelRenderer:
 
         # 附加键值对：固定宽度键列 + 值折行；对超长字符串去引号以提升折行效果
         if kv:
-            kv_table = Table(show_header=False, show_edge=False, box=None, padding=(0, 1))
+            kv_table = Table(
+                show_header=False, show_edge=False, box=None, padding=(0, 1)
+            )
             kv_table.add_column(style="dim", justify="right", width=self._kv_key_width)
             kv_table.add_column(style="bright_white", overflow="fold")
 
@@ -153,7 +157,11 @@ class HybridPanelRenderer:
 
         render_group = Group(*renderables)
 
-        subtitle = Text(str(timestamp), style="dim") if (self._show_timestamp and timestamp) else None
+        subtitle = (
+            Text(str(timestamp), style="dim")
+            if (self._show_timestamp and timestamp)
+            else None
+        )
 
         with self._console.capture() as capture:
             self._console.print(

@@ -3,12 +3,13 @@
 持久化处理器的基类，封装了使用 SQLAlchemy ORM 实现的、
 跨数据库方言共享的核心数据访问逻辑。(v2.5.14 对齐版)
 """
+
 from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import structlog
 from sqlalchemy import func, select, update
@@ -206,7 +207,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 head = (
                     await session.execute(
                         select(ThTransHead).where(
-                            ThTransHead.project_id == project_id, ThTransHead.id == head_id
+                            ThTransHead.project_id == project_id,
+                            ThTransHead.id == head_id,
                         )
                     )
                 ).scalar_one()
@@ -239,22 +241,40 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     ) -> tuple[str, dict[str, Any]] | None:
         """在 TM 中查找可复用的翻译。"""
         try:
+            # 动态过滤项的允许列表：将传入的 key 映射到 ORM 列
+            ALLOWED_FILTERS = {
+                "src_lang": ThTmUnits.src_lang,
+                "tgt_lang": ThTmUnits.tgt_lang,
+                "variant_key": ThTmUnits.variant_key,
+            }
+
+            conditions = [
+                ThTmUnits.project_id == project_id,
+                ThTmUnits.namespace == namespace,
+                ThTmUnits.src_hash == reuse_sha,
+                ThTmUnits.approved.is_(True),
+            ]
+
+            for k, v in kwargs.items():
+                if v is None:
+                    continue
+                col = ALLOWED_FILTERS.get(k)
+                if col is not None:
+                    conditions.append(col == v)
+
             async with self._sessionmaker() as session:
                 stmt = (
                     select(ThTmUnits.id, ThTmUnits.tgt_payload)
-                    .where(
-                        ThTmUnits.project_id == project_id,
-                        ThTmUnits.namespace == namespace,
-                        ThTmUnits.src_hash == reuse_sha,
-                        ThTmUnits.approved == True,
-                        **kwargs,
-                    )
+                    .where(*conditions)
                     .order_by(ThTmUnits.updated_at.desc())
                     .limit(1)
                 )
-
-                result = (await session.execute(stmt)).first()
-                return (result.id, result.tgt_payload) if result else None
+                res = await session.execute(stmt)
+                row = res.first()
+                if not row:
+                    return None
+                tm_id, tgt_payload = row
+                return str(tm_id), (tgt_payload or {})
         except SQLAlchemyError as e:
             raise DatabaseError(f"查找 TM 条目失败: {e}") from e
 
@@ -444,7 +464,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     .order_by(ThComments.created_at)
                 )
                 results = (await session.execute(stmt)).scalars().all()
-                return [Comment.model_validate(r, from_attributes=True) for r in results]
+                return [
+                    Comment.model_validate(r, from_attributes=True) for r in results
+                ]
         except SQLAlchemyError as e:
             raise DatabaseError(f"获取评论失败: {e}") from e
 
@@ -506,7 +528,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     )
                 )
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return TranslationHead.model_validate(result, from_attributes=True) if result else None
+                return (
+                    TranslationHead.model_validate(result, from_attributes=True)
+                    if result
+                    else None
+                )
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 UIDA 获取 Head 失败: {e}") from e
 
@@ -516,7 +542,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
             async with self._sessionmaker() as session:
                 stmt = select(ThTransHead).where(ThTransHead.id == head_id)
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return TranslationHead.model_validate(result, from_attributes=True) if result else None
+                return (
+                    TranslationHead.model_validate(result, from_attributes=True)
+                    if result
+                    else None
+                )
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 ID 获取 Head 失败: {e}") from e
 
@@ -533,7 +563,11 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     .limit(1)
                 )
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return TranslationHead.model_validate(result, from_attributes=True) if result else None
+                return (
+                    TranslationHead.model_validate(result, from_attributes=True)
+                    if result
+                    else None
+                )
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 Revision 获取 Head 失败: {e}") from e
 
@@ -548,7 +582,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         content_map = {
             c.id: c
             for c in (
-                await session.execute(select(ThContent).where(ThContent.id.in_(content_ids)))
+                await session.execute(
+                    select(ThContent).where(ThContent.id.in_(content_ids))
+                )
             ).scalars()
         }
 

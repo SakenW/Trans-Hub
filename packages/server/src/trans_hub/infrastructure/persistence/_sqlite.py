@@ -2,6 +2,7 @@
 """
 `PersistenceHandler` 协议的 SQLite 实现。
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +23,7 @@ logger = structlog.get_logger(__name__)
 
 class SQLitePersistenceHandler(BasePersistenceHandler):
     """SQLite 持久化处理器。"""
-    
+
     def __init__(self, sessionmaker: Any):
         super().__init__(sessionmaker)
         logger.debug("SQLite 持久化处理器已初始化")
@@ -37,15 +38,19 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
             logger.error("无法连接到 SQLite 数据库", error=str(e))
             raise
 
-    def _get_upsert_stmt(self, model: Any, values: dict[str, Any], index_elements: list[str], update_cols: list[str]) -> Any:
+    def _get_upsert_stmt(
+        self,
+        model: Any,
+        values: dict[str, Any],
+        index_elements: list[str],
+        update_cols: list[str],
+    ) -> Any:
         """
         为 SQLite 生成一个 `INSERT ... ON CONFLICT ... DO UPDATE` 语句。
         """
         stmt = sqlite_insert(model).values(**values)
         if update_cols:
-            update_dict = {
-                col: getattr(stmt.excluded, col) for col in update_cols
-            }
+            update_dict = {col: getattr(stmt.excluded, col) for col in update_cols}
             # 确保 updated_at 总是被更新
             if "updated_at" in [c.name for c in model.__table__.columns]:
                 update_dict["updated_at"] = func.now()
@@ -56,7 +61,7 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
             )
         else:
             stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
-            
+
         return stmt
 
     async def stream_draft_translations(
@@ -80,7 +85,7 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
 
             items = await self._build_content_items_from_orm(session, head_results)
             yield items
-            
+
             if len(head_results) < batch_size:
                 break
             offset += batch_size

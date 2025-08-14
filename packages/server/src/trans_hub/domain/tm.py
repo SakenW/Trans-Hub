@@ -2,6 +2,7 @@
 """
 包含与翻译记忆库 (TM) 相关的核心领域逻辑。
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -2,13 +2,13 @@
 """
 处理翻译请求提交的 CLI 命令。
 """
+
 import asyncio
 import json
 from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.json import JSON
 
 from trans_hub.application.coordinator import Coordinator
 from ..main import CLISharedState
@@ -20,20 +20,38 @@ console = Console()
 @app.command("new")
 def request_new(
     ctx: typer.Context,
-    project_id: Annotated[str, typer.Option("--project-id", "-p", help="项目/租户的唯一标识符。")],
-    namespace: Annotated[str, typer.Option("--namespace", "-n", help="内容的命名空间，如 'ui.buttons.v1'。")],
-    keys_json: Annotated[str, typer.Option("--keys", "-k", help="定位内容的最小上下文键集 (JSON 字符串)。")],
-    source_payload_json: Annotated[str, typer.Option("--payload", "-d", help="要翻译的源内容 (JSON 字符串)。")],
-    target_langs: Annotated[list[str], typer.Option("--target", "-t", help="一个或多个目标语言代码 (可多次使用)。")],
-    source_lang: Annotated[str | None, typer.Option("--source", "-s", help="源语言代码 (可选，若配置中已提供)。")] = None,
-    variant_key: Annotated[str, typer.Option("--variant", "-v", help="语言内变体 (可选)。")] = "-",
+    project_id: Annotated[
+        str, typer.Option("--project-id", "-p", help="项目/租户的唯一标识符。")
+    ],
+    namespace: Annotated[
+        str,
+        typer.Option("--namespace", "-n", help="内容的命名空间，如 'ui.buttons.v1'。"),
+    ],
+    keys_json: Annotated[
+        str,
+        typer.Option("--keys", "-k", help="定位内容的最小上下文键集 (JSON 字符串)。"),
+    ],
+    source_payload_json: Annotated[
+        str, typer.Option("--payload", "-d", help="要翻译的源内容 (JSON 字符串)。")
+    ],
+    target_langs: Annotated[
+        list[str],
+        typer.Option("--target", "-t", help="一个或多个目标语言代码 (可多次使用)。"),
+    ],
+    source_lang: Annotated[
+        str | None,
+        typer.Option("--source", "-s", help="源语言代码 (可选，若配置中已提供)。"),
+    ] = None,
+    variant_key: Annotated[
+        str, typer.Option("--variant", "-v", help="语言内变体 (可选)。")
+    ] = "-",
     actor: Annotated[str, typer.Option("--actor", help="操作者身份。")] = "cli_user",
 ) -> None:
     """
     向 Trans-Hub 提交一个新的 UIDA 翻译请求。
     """
     state: CLISharedState = ctx.obj
-    
+
     try:
         keys = json.loads(keys_json)
         source_payload = json.loads(source_payload_json)
@@ -47,11 +65,13 @@ def request_new(
 
     final_source_lang = source_lang or state.config.default_source_lang
     if not final_source_lang:
-        console.print("[bold red]❌ 错误: 必须通过 --source 或在配置中提供源语言。[/bold red]")
+        console.print(
+            "[bold red]❌ 错误: 必须通过 --source 或在配置中提供源语言。[/bold red]"
+        )
         raise typer.Exit(code=1)
 
     console.print("[cyan]正在提交翻译请求...[/cyan]")
-    
+
     async def _run():
         coordinator = Coordinator(state.config)
         try:
@@ -66,7 +86,7 @@ def request_new(
                 variant_key=variant_key,
                 actor=actor,
             )
-            console.print(f"[bold green]✅ 翻译请求已成功提交！[/bold green]")
+            console.print("[bold green]✅ 翻译请求已成功提交！[/bold green]")
             console.print(f"  - [dim]内容 ID (Content ID):[/dim] {content_id}")
             console.print("  - [dim]TM 未命中时，任务已加入后台队列等待处理。[/dim]")
         finally:

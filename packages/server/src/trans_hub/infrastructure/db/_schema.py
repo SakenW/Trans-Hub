@@ -3,6 +3,7 @@
 定义了与数据库 `3f8b9e6a0c2c` Schema 完全对应的 SQLAlchemy ORM 模型。
 (v2.5.14 最终权威版 · 与 Alembic 最优化迁移一致)
 """
+
 from __future__ import annotations
 
 import uuid
@@ -36,6 +37,7 @@ except (ImportError, AttributeError):
 
 class Base(DeclarativeBase):
     """ORM 基类，默认绑定 th schema。"""
+
     __table_args__ = {"schema": "th"}
 
 
@@ -48,6 +50,7 @@ translation_status_enum = Enum(
 # =========================
 # 核心数据表
 # =========================
+
 
 class ThProjects(Base):
     __tablename__ = "projects"
@@ -63,7 +66,9 @@ class ThProjects(Base):
 class ThContent(Base):
     __tablename__ = "content"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     project_id: Mapped[str] = mapped_column(
         ForeignKey("th.projects.project_id", deferrable=True, initially="DEFERRED")
     )
@@ -90,7 +95,9 @@ class ThTransRev(Base):
     __tablename__ = "trans_rev"
 
     project_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     content_id: Mapped[str] = mapped_column(
         ForeignKey("th.content.id", ondelete="CASCADE")
     )
@@ -127,7 +134,9 @@ class ThTransHead(Base):
     __tablename__ = "trans_head"
 
     project_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     content_id: Mapped[str] = mapped_column(
         ForeignKey("th.content.id", ondelete="CASCADE")
     )
@@ -196,9 +205,7 @@ class ThResolveCache(Base):
             ["th.trans_rev.project_id", "th.trans_rev.id"],
             ondelete="CASCADE",
         ),
-        ForeignKeyConstraint(
-            ["content_id"], ["th.content.id"], ondelete="CASCADE"
-        ),
+        ForeignKeyConstraint(["content_id"], ["th.content.id"], ondelete="CASCADE"),
         {"schema": "th"},
     )
 
@@ -207,11 +214,16 @@ class ThResolveCache(Base):
 # TM 与扩展表
 # =========================
 
+
 class ThTmUnits(Base):
     __tablename__ = "tm_units"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(ForeignKey("th.projects.project_id", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("th.projects.project_id", ondelete="CASCADE")
+    )
     namespace: Mapped[str] = mapped_column(Text)
     src_lang: Mapped[str] = mapped_column(Text)
     tgt_lang: Mapped[str] = mapped_column(Text)
@@ -243,7 +255,9 @@ class ThTmUnits(Base):
 class ThTmLinks(Base):
     __tablename__ = "tm_links"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     project_id: Mapped[str] = mapped_column(Text)
     translation_rev_id: Mapped[str] = mapped_column(Text)
     tm_id: Mapped[str] = mapped_column(ForeignKey("th.tm_units.id", ondelete="CASCADE"))

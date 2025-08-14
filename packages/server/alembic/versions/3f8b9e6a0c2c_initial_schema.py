@@ -22,6 +22,7 @@ TRANS-HUB 初始架构 (v2.5.14 · 最终权威版 · Alembic 实现)
 非 PostgreSQL 方言 (如 SQLite):
 - 创建等价表与基础约束/索引，省略高级特性。
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
@@ -34,6 +35,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+
 # --- 工具函数 ---
 def _json_type(dialect_name: str) -> sa.types.TypeEngine:
     """根据数据库方言选择合适的 JSON 类型。"""
@@ -41,9 +43,11 @@ def _json_type(dialect_name: str) -> sa.types.TypeEngine:
         return postgresql.JSONB(astext_type=sa.Text())
     return sa.JSON()
 
+
 def _compact_args(*args: Any) -> tuple[Any, ...]:
     """过滤掉 None 值，以便安全地解包到 Alembic 操作中。"""
     return tuple(arg for arg in args if arg is not None)
+
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -92,31 +96,97 @@ def upgrade() -> None:
     # =====================================================================================
     op.create_table(
         "projects",
-        sa.Column("project_id", sa.Text(), primary_key=True, comment="人类可读项目 ID（不可变）"),
+        sa.Column(
+            "project_id",
+            sa.Text(),
+            primary_key=True,
+            comment="人类可读项目 ID（不可变）",
+        ),
         sa.Column("display_name", sa.Text(), nullable=False, comment="展示名称"),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("TRUE"), comment="项目是否启用"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), comment="创建时间"),
+        sa.Column(
+            "is_active",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("TRUE"),
+            comment="项目是否启用",
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+            comment="创建时间",
+        ),
         schema="th",
     )
 
     op.create_table(
         "content",
-        sa.Column("id", sa.Text(), primary_key=True, comment="内容主键（UIDA 映射，全局唯一）"),
-        sa.Column("project_id", sa.Text(), sa.ForeignKey("th.projects.project_id", deferrable=True, initially="DEFERRED"), nullable=False, comment="归属项目"),
+        sa.Column(
+            "id", sa.Text(), primary_key=True, comment="内容主键（UIDA 映射，全局唯一）"
+        ),
+        sa.Column(
+            "project_id",
+            sa.Text(),
+            sa.ForeignKey(
+                "th.projects.project_id", deferrable=True, initially="DEFERRED"
+            ),
+            nullable=False,
+            comment="归属项目",
+        ),
         sa.Column("namespace", sa.Text(), nullable=False, comment="命名空间（功能域）"),
-        sa.Column("keys_sha256_bytes", sa.LargeBinary(length=32), nullable=False, comment="规范化 keys JSON 的 SHA-256"),
+        sa.Column(
+            "keys_sha256_bytes",
+            sa.LargeBinary(length=32),
+            nullable=False,
+            comment="规范化 keys JSON 的 SHA-256",
+        ),
         sa.Column("source_lang", sa.Text(), nullable=False, comment="源语言（BCP-47）"),
-        sa.Column("source_payload_json", json_type, nullable=False, server_default=sa.text("'{}'::jsonb" if dialect == "postgresql" else "'{}'"), comment="源内容 JSON"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), comment="创建时间"),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), comment="更新时间"),
+        sa.Column(
+            "source_payload_json",
+            json_type,
+            nullable=False,
+            server_default=sa.text(
+                "'{}'::jsonb" if dialect == "postgresql" else "'{}'"
+            ),
+            comment="源内容 JSON",
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+            comment="创建时间",
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+            comment="更新时间",
+        ),
         *_compact_args(
-            sa.UniqueConstraint("project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"),
-            sa.CheckConstraint("octet_length(keys_sha256_bytes)=32", name="ck_content_sha256_len") if dialect == "postgresql" else sa.CheckConstraint("length(keys_sha256_bytes)=32", name="ck_content_sha256_len"),
-            sa.CheckConstraint("th.is_bcp47(source_lang)", name="ck_content_source_lang_bcp47") if dialect == "postgresql" else None,
+            sa.UniqueConstraint(
+                "project_id", "namespace", "keys_sha256_bytes", name="uq_content_uida"
+            ),
+            sa.CheckConstraint(
+                "octet_length(keys_sha256_bytes)=32", name="ck_content_sha256_len"
+            )
+            if dialect == "postgresql"
+            else sa.CheckConstraint(
+                "length(keys_sha256_bytes)=32", name="ck_content_sha256_len"
+            ),
+            sa.CheckConstraint(
+                "th.is_bcp47(source_lang)", name="ck_content_source_lang_bcp47"
+            )
+            if dialect == "postgresql"
+            else None,
         ),
         schema="th",
     )
-    op.create_index("ix_content_project", "content", ["project_id"], unique=False, schema="th")
+    op.create_index(
+        "ix_content_project", "content", ["project_id"], unique=False, schema="th"
+    )
 
     # =====================================================================================
     # 2. 修订与指针表 (th.trans_rev, th.trans_head)
@@ -179,12 +249,19 @@ def upgrade() -> None:
             """
         )
     else:
-        status_enum_type = sa.Enum("draft", "reviewed", "published", "rejected", name="translation_status")
+        status_enum_type = sa.Enum(
+            "draft", "reviewed", "published", "rejected", name="translation_status"
+        )
         op.create_table(
             "trans_rev",
             sa.Column("project_id", sa.Text(), nullable=False),
             sa.Column("id", sa.Text(), nullable=False),
-            sa.Column("content_id", sa.Text(), sa.ForeignKey("th.content.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "content_id",
+                sa.Text(),
+                sa.ForeignKey("th.content.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("target_lang", sa.Text(), nullable=False),
             sa.Column("variant_key", sa.Text(), nullable=False, server_default="-"),
             sa.Column("revision_no", sa.Integer(), nullable=False),
@@ -192,17 +269,39 @@ def upgrade() -> None:
             sa.Column("origin_lang", sa.Text(), nullable=True),
             sa.Column("src_payload_json", json_type, nullable=False),
             sa.Column("translated_payload_json", json_type, nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
             sa.PrimaryKeyConstraint("project_id", "id"),
-            sa.UniqueConstraint("project_id", "content_id", "target_lang", "variant_key", "revision_no", name="uq_rev_dim"),
+            sa.UniqueConstraint(
+                "project_id",
+                "content_id",
+                "target_lang",
+                "variant_key",
+                "revision_no",
+                name="uq_rev_dim",
+            ),
             schema="th",
         )
         op.create_table(
             "trans_head",
             sa.Column("project_id", sa.Text(), nullable=False),
             sa.Column("id", sa.Text(), nullable=False),
-            sa.Column("content_id", sa.Text(), sa.ForeignKey("th.content.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "content_id",
+                sa.Text(),
+                sa.ForeignKey("th.content.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("target_lang", sa.Text(), nullable=False),
             sa.Column("variant_key", sa.Text(), nullable=False, server_default="-"),
             sa.Column("current_rev_id", sa.Text(), nullable=False),
@@ -211,12 +310,33 @@ def upgrade() -> None:
             sa.Column("published_rev_id", sa.Text(), nullable=True),
             sa.Column("published_no", sa.Integer(), nullable=True),
             sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
             sa.PrimaryKeyConstraint("project_id", "id"),
-            sa.UniqueConstraint("project_id", "content_id", "target_lang", "variant_key", name="uq_head_dim"),
-            sa.UniqueConstraint("project_id", "published_rev_id", name="uq_head_published_rev"),
-            sa.ForeignKeyConstraint(["project_id", "current_rev_id"], ["th.trans_rev.project_id", "th.trans_rev.id"], ondelete="RESTRICT"),
-            sa.ForeignKeyConstraint(["project_id", "published_rev_id"], ["th.trans_rev.project_id", "th.trans_rev.id"], ondelete="RESTRICT"),
+            sa.UniqueConstraint(
+                "project_id",
+                "content_id",
+                "target_lang",
+                "variant_key",
+                name="uq_head_dim",
+            ),
+            sa.UniqueConstraint(
+                "project_id", "published_rev_id", name="uq_head_published_rev"
+            ),
+            sa.ForeignKeyConstraint(
+                ["project_id", "current_rev_id"],
+                ["th.trans_rev.project_id", "th.trans_rev.id"],
+                ondelete="RESTRICT",
+            ),
+            sa.ForeignKeyConstraint(
+                ["project_id", "published_rev_id"],
+                ["th.trans_rev.project_id", "th.trans_rev.id"],
+                ondelete="RESTRICT",
+            ),
             schema="th",
         )
 
@@ -228,56 +348,132 @@ def upgrade() -> None:
         sa.Column("project_id", sa.Text(), primary_key=True, nullable=False),
         sa.Column("content_id", sa.Text(), primary_key=True, nullable=False),
         sa.Column("target_lang", sa.Text(), primary_key=True, nullable=False),
-        sa.Column("variant_key", sa.Text(), primary_key=True, nullable=False, server_default="-"),
+        sa.Column(
+            "variant_key",
+            sa.Text(),
+            primary_key=True,
+            nullable=False,
+            server_default="-",
+        ),
         sa.Column("resolved_rev_id", sa.Text(), nullable=False),
         sa.Column("resolved_payload", json_type, nullable=False),
         sa.Column("origin_lang", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["project_id"], ["th.projects.project_id"], name=op.f("fk_resolve_cache_project_id_projects")),
-        sa.ForeignKeyConstraint(["content_id"], ["th.content.id"], name=op.f("fk_resolve_cache_content_id_content"), ondelete="CASCADE"),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id"],
+            ["th.projects.project_id"],
+            name=op.f("fk_resolve_cache_project_id_projects"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["content_id"],
+            ["th.content.id"],
+            name=op.f("fk_resolve_cache_content_id_content"),
+            ondelete="CASCADE",
+        ),
         *_compact_args(
-            sa.CheckConstraint("th.is_bcp47(target_lang)", name="ck_cache_target_lang_bcp47") if dialect == "postgresql" else None,
-            sa.CheckConstraint("origin_lang IS NULL OR th.is_bcp47(origin_lang)", name="ck_cache_origin_lang_bcp47") if dialect == "postgresql" else None,
+            sa.CheckConstraint(
+                "th.is_bcp47(target_lang)", name="ck_cache_target_lang_bcp47"
+            )
+            if dialect == "postgresql"
+            else None,
+            sa.CheckConstraint(
+                "origin_lang IS NULL OR th.is_bcp47(origin_lang)",
+                name="ck_cache_origin_lang_bcp47",
+            )
+            if dialect == "postgresql"
+            else None,
         ),
         schema="th",
     )
     if dialect == "postgresql":
-        op.create_foreign_key("fk_resolve_cache_rev", "resolve_cache", "trans_rev", ["project_id", "resolved_rev_id"], ["project_id", "id"], source_schema="th", referent_schema="th", ondelete="CASCADE")
-    op.create_index("ix_resolve_expires", "resolve_cache", ["expires_at"], unique=False, schema="th")
+        op.create_foreign_key(
+            "fk_resolve_cache_rev",
+            "resolve_cache",
+            "trans_rev",
+            ["project_id", "resolved_rev_id"],
+            ["project_id", "id"],
+            source_schema="th",
+            referent_schema="th",
+            ondelete="CASCADE",
+        )
+    op.create_index(
+        "ix_resolve_expires", "resolve_cache", ["expires_at"], unique=False, schema="th"
+    )
 
     op.create_table(
         "events",
-        sa.Column("id", sa.BigInteger().with_variant(sa.Integer, "sqlite"), primary_key=True),
+        sa.Column(
+            "id", sa.BigInteger().with_variant(sa.Integer, "sqlite"), primary_key=True
+        ),
         sa.Column("project_id", sa.Text(), nullable=False),
         sa.Column("head_id", sa.Text(), nullable=False),
-        sa.Column("actor", sa.Text(), nullable=False, server_default=sa.text("'system'")),
+        sa.Column(
+            "actor", sa.Text(), nullable=False, server_default=sa.text("'system'")
+        ),
         sa.Column("event_type", sa.Text(), nullable=False),
         sa.Column("payload", json_type, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["project_id", "head_id"], ["th.trans_head.project_id", "th.trans_head.id"], ondelete="CASCADE"),
-        schema="th"
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id", "head_id"],
+            ["th.trans_head.project_id", "th.trans_head.id"],
+            ondelete="CASCADE",
+        ),
+        schema="th",
     )
     op.create_index("ix_events_head", "events", ["project_id", "head_id"], schema="th")
 
     op.create_table(
         "comments",
-        sa.Column("id", sa.BigInteger().with_variant(sa.Integer, "sqlite"), primary_key=True),
+        sa.Column(
+            "id", sa.BigInteger().with_variant(sa.Integer, "sqlite"), primary_key=True
+        ),
         sa.Column("project_id", sa.Text(), nullable=False),
         sa.Column("head_id", sa.Text(), nullable=False),
         sa.Column("author", sa.Text(), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["project_id", "head_id"], ["th.trans_head.project_id", "th.trans_head.id"], ondelete="CASCADE"),
-        schema="th"
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id", "head_id"],
+            ["th.trans_head.project_id", "th.trans_head.id"],
+            ondelete="CASCADE",
+        ),
+        schema="th",
     )
-    op.create_index("ix_comments_head", "comments", ["project_id", "head_id"], schema="th")
+    op.create_index(
+        "ix_comments_head", "comments", ["project_id", "head_id"], schema="th"
+    )
 
     op.create_table(
         "tm_units",
         sa.Column("id", sa.Text(), primary_key=True),
-        sa.Column("project_id", sa.Text(), sa.ForeignKey("th.projects.project_id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.Text(),
+            sa.ForeignKey("th.projects.project_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("namespace", sa.Text(), nullable=False),
         sa.Column("src_lang", sa.Text(), nullable=False),
         sa.Column("tgt_lang", sa.Text(), nullable=False),
@@ -285,13 +481,36 @@ def upgrade() -> None:
         sa.Column("src_payload", json_type, nullable=False),
         sa.Column("tgt_payload", json_type, nullable=False),
         sa.Column("variant_key", sa.Text(), nullable=False, server_default="-"),
-        sa.Column("approved", sa.Boolean(), nullable=False, server_default=sa.text("TRUE")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.UniqueConstraint("project_id", "namespace", "src_hash", "tgt_lang", "variant_key", name="uq_tm_units_dim"),
+        sa.Column(
+            "approved", sa.Boolean(), nullable=False, server_default=sa.text("TRUE")
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.UniqueConstraint(
+            "project_id",
+            "namespace",
+            "src_hash",
+            "tgt_lang",
+            "variant_key",
+            name="uq_tm_units_dim",
+        ),
         *_compact_args(
-            sa.CheckConstraint("th.is_bcp47(src_lang)", name="ck_tm_src_lang_bcp47") if dialect == "postgresql" else None,
-            sa.CheckConstraint("th.is_bcp47(tgt_lang)", name="ck_tm_tgt_lang_bcp47") if dialect == "postgresql" else None,
+            sa.CheckConstraint("th.is_bcp47(src_lang)", name="ck_tm_src_lang_bcp47")
+            if dialect == "postgresql"
+            else None,
+            sa.CheckConstraint("th.is_bcp47(tgt_lang)", name="ck_tm_tgt_lang_bcp47")
+            if dialect == "postgresql"
+            else None,
         ),
         schema="th",
     )
@@ -301,22 +520,56 @@ def upgrade() -> None:
         sa.Column("id", sa.Text(), primary_key=True),
         sa.Column("project_id", sa.Text(), nullable=False),
         sa.Column("translation_rev_id", sa.Text(), nullable=False),
-        sa.Column("tm_id", sa.Text(), sa.ForeignKey("th.tm_units.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["project_id", "translation_rev_id"], ["th.trans_rev.project_id", "th.trans_rev.id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("project_id", "translation_rev_id", "tm_id", name="uq_tm_links_triplet"),
+        sa.Column(
+            "tm_id",
+            sa.Text(),
+            sa.ForeignKey("th.tm_units.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id", "translation_rev_id"],
+            ["th.trans_rev.project_id", "th.trans_rev.id"],
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "project_id", "translation_rev_id", "tm_id", name="uq_tm_links_triplet"
+        ),
         schema="th",
     )
-    op.create_index(op.f("ix_tm_links_tm_id"), "tm_links", ["project_id", "tm_id"], unique=False, schema="th")
+    op.create_index(
+        op.f("ix_tm_links_tm_id"),
+        "tm_links",
+        ["project_id", "tm_id"],
+        unique=False,
+        schema="th",
+    )
 
     op.create_table(
         "locales_fallbacks",
-        sa.Column("project_id", sa.Text(), sa.ForeignKey("th.projects.project_id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "project_id",
+            sa.Text(),
+            sa.ForeignKey("th.projects.project_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("locale", sa.Text(), primary_key=True),
         sa.Column("fallback_order", json_type, nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         *_compact_args(
-            sa.CheckConstraint("th.is_bcp47(locale)", name="ck_locales_fallbacks_bcp47") if dialect == "postgresql" else None,
+            sa.CheckConstraint("th.is_bcp47(locale)", name="ck_locales_fallbacks_bcp47")
+            if dialect == "postgresql"
+            else None,
         ),
         schema="th",
     )
@@ -426,18 +679,29 @@ def upgrade() -> None:
             """
         )
 
+
 def downgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect == "postgresql":
         op.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
-        op.execute("GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;")
+        op.execute(
+            "GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;"
+        )
         op.execute("DROP SCHEMA IF EXISTS th CASCADE;")
         op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;")
     else:
         tables_to_drop = [
-            "locales_fallbacks", "tm_links", "tm_units", "comments", "events", 
-            "resolve_cache", "trans_head", "trans_rev", "content", "projects"
+            "locales_fallbacks",
+            "tm_links",
+            "tm_units",
+            "comments",
+            "events",
+            "resolve_cache",
+            "trans_head",
+            "trans_rev",
+            "content",
+            "projects",
         ]
         for table in tables_to_drop:
             op.drop_table(table, schema="th")

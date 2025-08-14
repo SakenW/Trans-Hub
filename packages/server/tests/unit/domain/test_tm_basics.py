@@ -3,9 +3,11 @@
 测试用于翻译记忆库 (TM) 的文本归一化领域逻辑。
 (文件已从 uida 包移动并重命名)
 """
+
 import pytest
 
 from trans_hub.domain.tm import normalize_text_for_tm
+
 
 @pytest.mark.parametrize(
     "input_text, expected_output",

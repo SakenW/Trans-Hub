@@ -2,6 +2,7 @@
 """
 本模块负责动态发现和加载所有可用的翻译引擎。
 """
+
 import importlib
 import pkgutil
 from typing import Any
@@ -11,7 +12,7 @@ import structlog
 # from .base import BaseTranslationEngine # 避免循环导入
 
 logger = structlog.get_logger(__name__)
-ENGINE_REGISTRY: dict[str, Any] = {} # dict[str, type[BaseTranslationEngine[Any]]]
+ENGINE_REGISTRY: dict[str, Any] = {}  # dict[str, type[BaseTranslationEngine[Any]]]
 
 
 def discover_engines() -> None:
@@ -23,9 +24,9 @@ def discover_engines() -> None:
         return
 
     from . import base
-    
+
     successful_engines: list[str] = []
-    
+
     for module_info in pkgutil.iter_modules(__path__):
         module_name = module_info.name
         if module_name in ["base"] or module_name.startswith("_"):

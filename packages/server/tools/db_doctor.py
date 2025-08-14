@@ -74,7 +74,9 @@ def _build_alembic_config(alembic_ini: Path, sqlalchemy_url: URL) -> AlembicConf
         cfg.set_main_option("script_location", str(sl_path))
         print(f"[BOOT] 使用迁移脚本目录: {sl_path}")
     else:
-        print("[BOOT][WARN] alembic.ini 未配置 script_location，Alembic 将无法找到迁移脚本")
+        print(
+            "[BOOT][WARN] alembic.ini 未配置 script_location，Alembic 将无法找到迁移脚本"
+        )
     return cfg
 
 
@@ -83,7 +85,9 @@ class DatabaseDoctor:
         self.alembic_cfg_path = alembic_cfg_path
         try:
             app_url_obj = make_url(config.database_url)
-            maint_url_str = config.maintenance_database_url or str(app_url_obj.set(database="postgres"))
+            maint_url_str = config.maintenance_database_url or str(
+                app_url_obj.set(database="postgres")
+            )
             maint_url_obj = make_url(maint_url_str)
 
             self.app_db_name = app_url_obj.database
@@ -149,7 +153,11 @@ class DatabaseDoctor:
             engine = create_engine(self.maintenance_db_url)
             with engine.connect() as conn:
                 print("[CHECK] 维护库连接成功")
-                result = conn.execute(text("SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user;"))
+                result = conn.execute(
+                    text(
+                        "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user;"
+                    )
+                )
                 if result.scalar_one():
                     print("[CHECK] 当前用户拥有 CREATEDB 权限")
                 else:
@@ -201,9 +209,16 @@ class DatabaseDoctor:
                 Base.metadata.create_all(bind=conn)
                 print("[MIGRATE][FALLBACK] 已执行 Base.metadata.create_all()")
                 if head:
-                    conn.execute(text('CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)'))
-                    conn.execute(text('TRUNCATE alembic_version'))
-                    conn.execute(text('INSERT INTO alembic_version(version_num) VALUES (:v)'), {"v": head})
+                    conn.execute(
+                        text(
+                            "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"
+                        )
+                    )
+                    conn.execute(text("TRUNCATE alembic_version"))
+                    conn.execute(
+                        text("INSERT INTO alembic_version(version_num) VALUES (:v)"),
+                        {"v": head},
+                    )
                     print(f"[MIGRATE][FALLBACK] 已写入 alembic_version = {head}")
         except Exception as e:
             logger.error("兜底迁移失败", error=e, exc_info=True)
@@ -217,10 +232,14 @@ class DatabaseDoctor:
             print("[REBUILD][BLOCK] TH_ENV=production，禁止重建数据库")
             return
         try:
-            engine = create_engine(self.maintenance_db_url, isolation_level="AUTOCOMMIT")
+            engine = create_engine(
+                self.maintenance_db_url, isolation_level="AUTOCOMMIT"
+            )
             with engine.connect() as conn:
                 print(f"[REBUILD] 删除数据库: {self.app_db_name}")
-                conn.execute(text(f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)'))
+                conn.execute(
+                    text(f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)')
+                )
                 print(f"[REBUILD] 创建数据库: {self.app_db_name}")
                 conn.execute(text(f'CREATE DATABASE "{self.app_db_name}"'))
             print("[REBUILD] 重建完成，准备运行迁移 ...")
@@ -240,7 +259,9 @@ class DatabaseDoctor:
             with engine.begin() as conn:
                 for table in reversed(Base.metadata.sorted_tables):
                     print(f"[CLEAR] 清空表: {table.name}")
-                    conn.execute(text(f'TRUNCATE TABLE "{table.name}" RESTART IDENTITY CASCADE;'))
+                    conn.execute(
+                        text(f'TRUNCATE TABLE "{table.name}" RESTART IDENTITY CASCADE;')
+                    )
             print("[CLEAR][OK] 已清空数据库所有数据")
         except Exception as e:
             logger.error("清空数据库失败", error=e, exc_info=True)
@@ -293,7 +314,8 @@ def run_interactive(doctor: DatabaseDoctor) -> None:
             _pause_return()
         elif choice == "rebuild":
             confirm = questionary.confirm(
-                f"您确定要重建数据库 '{doctor.app_db_name}' 吗? 这会删除所有数据。", default=False
+                f"您确定要重建数据库 '{doctor.app_db_name}' 吗? 这会删除所有数据。",
+                default=False,
             ).unsafe_ask()
             if confirm:
                 _print_sep("开始：重建数据库")
@@ -302,7 +324,8 @@ def run_interactive(doctor: DatabaseDoctor) -> None:
                 _pause_return()
         elif choice == "clear":
             confirm = questionary.confirm(
-                f"您确定要清空数据库 '{doctor.app_db_name}' 中的所有数据吗?", default=False
+                f"您确定要清空数据库 '{doctor.app_db_name}' 中的所有数据吗?",
+                default=False,
             ).unsafe_ask()
             if confirm:
                 _print_sep("开始：清空数据")
@@ -342,7 +365,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     g.add_argument("--upgrade", action="store_true", help="运行 Alembic 迁移至 head")
     g.add_argument("--rebuild", action="store_true", help="删除并重建数据库（危险）")
     g.add_argument("--clear", action="store_true", help="清空所有表数据（危险）")
-    p.add_argument("--env", choices=["test", "prod"], default="test", help="运行环境（默认 test）")
+    p.add_argument(
+        "--env", choices=["test", "prod"], default="test", help="运行环境（默认 test）"
+    )
     p.add_argument("--yes", action="store_true", help="（占位，当前未强制）")
     return p.parse_args(argv)
 
@@ -356,19 +381,23 @@ def main():
         # 使用统一加载器（严格模式）加载对应环境配置
         config = load_config_from_env(mode=env_mode, strict=True)
 
-        alembic_cfg_path = Path(os.getenv("TH_ALEMBIC_INI_PATH", _server_root() / "alembic.ini"))
+        alembic_cfg_path = Path(
+            os.getenv("TH_ALEMBIC_INI_PATH", _server_root() / "alembic.ini")
+        )
 
         # 展示配置（用于诊断）
         try:
             from rich.console import Console
             from rich.panel import Panel
+
             Console().print(
                 Panel(
                     f"[bold]从环境加载的配置[/bold]\n\n"
                     f"  - [dim]TH_DATABASE_URL:[/dim] [yellow]{config.database_url}[/yellow]\n"
                     f"  - [dim]TH_MAINTENANCE_DATABASE_URL:[/dim] [yellow]{config.maintenance_database_url}[/yellow]\n"
                     f"  - [dim]Alembic INI 路径:[/dim] [yellow]{alembic_cfg_path}[/yellow]",
-                    title="[cyan]配置加载诊断[/cyan]", border_style="cyan"
+                    title="[cyan]配置加载诊断[/cyan]",
+                    border_style="cyan",
                 )
             )
         except Exception:

@@ -2,6 +2,7 @@
 """
 对 Coordinator 进行端到端的核心业务流程测试。(v2.5.14 对齐版)
 """
+
 import pytest
 from trans_hub.application.coordinator import Coordinator
 from trans_hub_core.types import TranslationStatus
@@ -14,7 +15,7 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
     """测试从请求 -> (模拟处理) -> 发布 -> 获取的完整快乐路径。"""
     req_data = create_request_data(target_langs=["de"])
 
-    content_id = await coordinator.request_translation(**req_data)
+    await coordinator.request_translation(**req_data)
 
     head = await coordinator.handler.get_translation_head_by_uida(
         project_id=req_data["project_id"],

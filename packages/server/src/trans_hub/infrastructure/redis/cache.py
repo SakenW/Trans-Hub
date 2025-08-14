@@ -2,6 +2,7 @@
 """
 使用 Redis 实现 `CacheHandler` 接口。
 """
+
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -11,7 +12,7 @@ from trans_hub_core.interfaces import CacheHandler
 
 class RedisCacheHandler(CacheHandler):
     """基于 Redis 的分布式缓存实现。"""
-    
+
     def __init__(self, client: aioredis.Redis, key_prefix: str = "trans-hub:cache:"):
         self._client = client
         self._prefix = key_prefix

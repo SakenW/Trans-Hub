@@ -1,74 +1,166 @@
 # packages/server/src/trans_hub/config.py
 """
-定义 Trans-Hub Server 的所有配置选项。
+定义 Trans-Hub Server 的所有配置选项（Pydantic v2，遵守技术宪章）。
+
+要点：
+- 配置集中在此处，仅提供“值与校验”，不做引擎创建等副作用；
+- 支持嵌套配置（database/redis/worker），并提供与历史扁平字段兼容的属性别名：
+  - cfg.database_url -> cfg.database.url
+  - cfg.redis_url    -> cfg.redis.url
+- 自动推导维护库 DSN（Postgres 时缺省推导为 psycopg2 + postgres）
 """
-from typing import Any, Literal, Optional
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from langcodes import tag_is_valid
 
-class LoggingConfig(BaseSettings):
-    """日志配置。"""
-    model_config = SettingsConfigDict(env_prefix="TH_LOGGING_")
-    level: str = "INFO"
-    format: Literal["json", "console"] = "console"
+from __future__ import annotations
+
+from typing import Optional
+
+import langcodes
+from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings
+from sqlalchemy.engine.url import make_url
 
 
-class WorkerConfig(BaseSettings):
-    """后台 Worker 配置。"""
-    model_config = SettingsConfigDict(env_prefix="TH_WORKER_")
-    batch_size: int = Field(50, gt=0, description="单次从数据库获取任务进行处理的最大批次大小。")
-    poll_interval: int = Field(10, gt=0, description="在轮询模式下，Worker 两次检查之间的等待间隔（秒）。")
-    event_stream_name: str = Field("trans_hub::events", description="用于发布系统事件的 Redis Stream 名称。")
-    translation_queue_name: str = Field("trans_hub::queue::translations", description="用于后台翻译任务的队列名称。")
+# ===================== 嵌套子模型 =====================
 
-class CacheConfig(BaseSettings):
-    """缓存配置"""
-    model_config = SettingsConfigDict(env_prefix="TH_CACHE_CONFIG__")
-    ttl: int = Field(3600, description="缓存默认 TTL（秒）")
-    maxsize: int = Field(1000, description="缓存最大条目数（LRU 模式下生效）")
 
-class RetryPolicyConfig(BaseSettings):
-    """重试策略配置"""
-    model_config = SettingsConfigDict(env_prefix="TH_RETRY_POLICY__")
-    max_attempts: int = 2
-    initial_backoff: float = 1.0
-    max_backoff: float = 60.0
+class DatabaseSettings(BaseModel):
+    """数据库连接配置（主库，异步驱动）"""
+
+    url: str = Field(
+        default="postgresql+asyncpg://transhub:transhub@localhost:5432/transhub_dev",
+        description="PostgreSQL 异步连接 URL（或 sqlite+aiosqlite://）",
+    )
+
+    # 连接池/行为参数（如不需要可保持默认）
+    echo: bool = Field(default=False, description="是否输出 SQL 调试日志")
+
+
+class RedisSettings(BaseModel):
+    """Redis 缓存配置（可选）"""
+
+    url: Optional[str] = Field(
+        default=None,
+        description="Redis 连接 URL；为空表示不启用 Redis",
+    )
+    key_prefix: str = Field(default="th:", description="统一的 Redis key 前缀")
+
+
+class WorkerSettings(BaseModel):
+    """工作进程/事件流配置"""
+
+    event_stream_name: str = Field(
+        default="th_events",
+        description="事件流名称（测试环境固定默认即可）",
+    )
+
+
+# ===================== 顶层配置 =====================
+
 
 class TransHubConfig(BaseSettings):
     """
-    主配置类，从环境变量和 .env 文件中加载。
+    Trans-Hub 核心配置。
+    - 仅负责“值与校验”，不创建任何外部资源；
+    - 通过环境变量覆盖，前缀 TRANSHUB_，嵌套用双下划线分隔（见 model_config）。
     """
-    model_config = SettingsConfigDict(
-        env_prefix="TH_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+
+    # --- 服务器通用 ---
+    debug: bool = Field(default=True, description="是否开启调试模式")
+    host: str = Field(default="0.0.0.0", description="服务绑定地址")
+    port: int = Field(default=8000, description="服务监听端口")
+
+    # --- 模块化配置 ---
+    database: DatabaseSettings = Field(
+        default_factory=DatabaseSettings, description="主库配置（异步）"
     )
-    database_url: str = Field(..., description="主应用数据库的 SQLAlchemy 连接 URL。")
+    redis: RedisSettings = Field(
+        default_factory=RedisSettings, description="Redis 配置"
+    )
+    worker: WorkerSettings = Field(
+        default_factory=WorkerSettings, description="工作进程/事件流配置"
+    )
+
+    # --- 连接池高级参数（供引擎工厂映射；可选）---
+    db_pool_size: Optional[int] = Field(
+        default=None, ge=1, description="连接池大小；None=默认"
+    )
+    db_max_overflow: Optional[int] = Field(
+        default=None, ge=0, description="最大溢出连接数；None=默认"
+    )
+    db_pool_timeout: int = Field(default=30, ge=1, description="获取连接超时（秒）")
+    db_pool_recycle: Optional[int] = Field(
+        default=None, ge=1, description="连接回收（秒），长连接建议设置"
+    )
+    db_pool_pre_ping: bool = Field(default=True, description="是否启用 pre_ping")
+    db_echo: bool = Field(
+        default=False, description="覆盖 database.echo；为 True 时打印 SQL"
+    )
+
+    # --- 维护库（同步驱动，运维建删库用；可选）---
     maintenance_database_url: Optional[str] = Field(
-        None, 
-        description="用于数据库管理的维护连接 URL (例如，指向 'postgres' 数据库)。"
+        default=None,
+        description="维护库 DSN（同步驱动）。未提供且主库为 Postgres 时自动推导为 postgresql+psycopg2://.../postgres",
     )
-    redis_url: Optional[str] = Field(None, description="Redis 的连接 URL。")
-    redis_key_prefix: str = Field("th:dev:", description="缓存 key 前缀（区分环境）")
-    
-    # --- 业务逻辑配置 ---
-    default_source_lang: str = Field("en", description="默认的源语言代码 (例如 'en', 'zh-CN')。")
-    default_resolve_ttl_seconds: int = Field(60, gt=0, description="解析缓存的默认 TTL (秒)。")
-    active_engine: str = Field("debug", description="默认启用的翻译引擎，可选：debug | translators | openai")
-    
-    # --- 模块配置 ---
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    worker: WorkerConfig = Field(default_factory=WorkerConfig)
-    cache_config: CacheConfig = Field(default_factory=CacheConfig)
-    retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
-    
-    # --- 引擎动态配置 ---
-    engines: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+    # --- 语言/引擎（示例字段，按需扩展）---
+    default_source_lang: Optional[str] = Field(
+        default=None, description="默认源语言（BCP-47 标签）"
+    )
+    active_engine: str = Field(default="debug", description="默认翻译引擎标识")
+
+    # ---------- 校验与兼容别名 ----------
 
     @field_validator("default_source_lang")
     @classmethod
-    def _validate_lang_code(cls, v: str | None) -> str | None:
-        """校验语言代码是否符合 BCP-47 规范。"""
-        if v is not None:
-            if not tag_is_valid(v):
-                raise ValueError(f"'{v}' 不是一个有效的 BCP-47 语言标签。")
+    def _validate_lang(cls, v: Optional[str]) -> Optional[str]:
+        if v in (None, ""):
+            return None
+        if not langcodes.tag_is_valid(v):
+            raise ValueError(f"非法语言代码: {v}")
         return v
+
+    @field_validator("maintenance_database_url", mode="before")
+    @classmethod
+    def _autofill_maint(cls, v: Optional[str], info):  # type: ignore[override]
+        """若未显式给出维护库且主库为 Postgres，则自动推导为 psycopg2 + postgres 库。"""
+        if v:
+            return v
+        data = getattr(info, "data", {}) or {}
+        db = data.get("database")
+        dsn = getattr(db, "url", None) if db is not None else None
+        if not isinstance(dsn, str):
+            return v
+        try:
+            url = make_url(dsn)
+        except Exception:
+            return v
+        if url.get_backend_name().startswith("postgresql"):
+            return str(url.set(drivername="postgresql+psycopg2", database="postgres"))
+        return v
+
+    # ----- 与历史扁平字段兼容的属性别名 -----
+
+    @property
+    def database_url(self) -> str:
+        """兼容读取主库 DSN：cfg.database_url"""
+        return self.database.url
+
+    @property
+    def redis_url(self) -> Optional[str]:
+        """兼容读取 Redis DSN：cfg.redis_url"""
+        return getattr(self.redis, "url", None)
+
+    @property
+    def redis_key_prefix(self) -> str:
+        # ★ 新增：Coordinator 里会用到
+        return self.redis.key_prefix
+
+    # ----- Pydantic v2 配置 -----
+    model_config = {
+        "env_nested_delimiter": "__",
+        "env_prefix": "TRANSHUB_",
+        "case_sensitive": False,
+        "extra": "ignore",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+    }

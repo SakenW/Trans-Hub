@@ -4,6 +4,7 @@ Alembic 环境配置 (v35 - 日志规范化版)
 - 移除了所有调试用的 print 语句。
 - 使用标准 logging 模块输出关键信息，以便与项目日志系统集成。
 """
+
 from __future__ import annotations
 import sys
 import logging
@@ -31,6 +32,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+
 def run_migrations_offline() -> None:
     """离线模式。"""
     url = config.get_main_option("sqlalchemy.url")
@@ -45,12 +47,13 @@ def run_migrations_offline() -> None:
         context.run_migrations()
     log.info("离线迁移完成。")
 
+
 def run_migrations_online() -> None:
     """在线模式。"""
     # [核心] connectable 直接从 config 对象的 section 中创建
     # 这种方式允许 pytest fixture 通过 alembic.context 传递连接信息
     connectable = context.config.attributes.get("connection", None)
-    
+
     if connectable is None:
         log.info("未从上下文获取到连接，将从 alembic.ini 创建引擎。")
         connectable = engine_from_config(
@@ -71,6 +74,7 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
     log.info("在线迁移完成。")
+
 
 if context.is_offline_mode():
     run_migrations_offline()

@@ -5,6 +5,7 @@
 Redis Streams 是一种功能强大的数据结构，非常适合用作持久化的、
 可消费的事件总线。
 """
+
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -19,7 +20,7 @@ class RedisStreamProducer(StreamProducer):
     """
     基于 Redis Streams 的事件流生产者实现。
     """
-    
+
     def __init__(self, client: aioredis.Redis):
         """
         初始化生产者。
@@ -44,10 +45,10 @@ class RedisStreamProducer(StreamProducer):
             flat_event_data = {
                 str(k): str(v) for k, v in event_data.items() if v is not None
             }
-            
+
             # 使用 XADD 命令将事件添加到 Stream 的末尾
             await self._client.xadd(stream_name, flat_event_data)
-            
+
             logger.debug("事件已成功发布到 Redis Stream", stream=stream_name)
 
         except Exception:

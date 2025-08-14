@@ -2,7 +2,6 @@
 """
 Trans-Hub Server CLI 的主入口点。
 """
-from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -26,10 +25,13 @@ app.add_typer(status.app, name="status")
 
 console = Console()
 
+
 class CLISharedState:
     """用于在 Typer 上下文中传递共享对象的容器。"""
+
     def __init__(self, config: TransHubConfig):
         self.config = config
+
 
 @app.callback()
 def main(ctx: typer.Context):

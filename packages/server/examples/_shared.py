@@ -2,7 +2,7 @@
 """
 包含所有示例共享的辅助函数和上下文管理器。
 """
-import asyncio
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -61,7 +61,9 @@ async def example_runner(
         project_root = Path(__file__).resolve().parent.parent
         alembic_cfg_path = project_root / "alembic.ini"
         if not alembic_cfg_path.is_file():
-            alembic_cfg_path = project_root.parent / "alembic.ini" # monorepo adjustment
+            alembic_cfg_path = (
+                project_root.parent / "alembic.ini"
+            )  # monorepo adjustment
 
         alembic_cfg = AlembicConfig(str(alembic_cfg_path))
         sync_db_url = config.database_url.replace("+aiosqlite", "")
