@@ -2,14 +2,18 @@
 """
 Trans-Hub Server CLI 的主入口点。
 """
-
 import typer
 from rich.console import Console
+from rich.traceback import install as install_rich_tracebacks
 
-from trans_hub.config import TransHubConfig
+from trans_hub.config_loader import load_config_from_env
 from trans_hub.observability.logging_config import setup_logging
 
+from ._state import CLISharedState
 from .commands import db, request, status
+
+# 安装 Rich 全局回溯处理器，美化所有未捕获的异常
+install_rich_tracebacks(show_locals=True, word_wrap=True)
 
 app = typer.Typer(
     name="trans-hub",
@@ -26,20 +30,15 @@ app.add_typer(status.app, name="status")
 console = Console()
 
 
-class CLISharedState:
-    """用于在 Typer 上下文中传递共享对象的容器。"""
-
-    def __init__(self, config: TransHubConfig):
-        self.config = config
-
-
 @app.callback()
 def main(ctx: typer.Context):
     """
     主回调函数，在任何子命令执行前运行，负责加载配置和初始化日志。
     """
     try:
-        config = TransHubConfig()
+        # [REVERTED] CLI 始终默认加载生产配置 (.env)。
+        # 测试环境将通过 CliRunner 的 'env' 参数注入配置。
+        config = load_config_from_env(mode="prod", strict=True)
         setup_logging(log_level=config.logging.level, log_format=config.logging.format)
         ctx.obj = CLISharedState(config=config)
     except Exception as e:

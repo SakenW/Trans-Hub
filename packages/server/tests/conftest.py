@@ -8,6 +8,7 @@ Pytest 共享夹具（全链路异步，遵守技术宪章）
 
 from __future__ import annotations
 
+import pytest_asyncio
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -18,7 +19,7 @@ from trans_hub.infrastructure.db import (
     create_async_sessionmaker,
     dispose_engine,
 )
-from trans_hub.infrastructure.db._schema import Base  # 假定已有元数据定义
+from trans_hub.infrastructure.db._schema import Base
 from trans_hub.application.coordinator import Coordinator
 
 
@@ -28,7 +29,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def engine() -> AsyncEngine:
     """
     会话级共享引擎：
@@ -39,9 +40,14 @@ async def engine() -> AsyncEngine:
     cfg = load_config_from_env(mode="test", strict=True)
     eng = create_async_db_engine(cfg)
     async with eng.begin() as conn:
+        # 在测试开始前，清理掉旧的 schema 和 public schema 中的所有内容
+        await conn.execute(text("DROP SCHEMA IF EXISTS th CASCADE;"))
+        await conn.execute(text("CREATE SCHEMA th;"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("SELECT 1"))
+    
     yield eng
+    
     await dispose_engine(eng)
 
 
@@ -51,16 +57,22 @@ def sessionmaker(engine: AsyncEngine):
     return create_async_sessionmaker(engine)
 
 
-# 提供一个已初始化的 Coordinator，并注入共享 engine/sessionmaker。
-@pytest.fixture
+@pytest_asyncio.fixture
 async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
+    """
+    提供一个已初始化的 Coordinator。
+    [REFACTOR] 使用 pytest_asyncio.fixture 并确保正确的异步清理。
+    """
     cfg = load_config_from_env(mode="test", strict=True)
     coord = Coordinator(cfg)
-    # 最小侵入式依赖注入（按你当前实现）
-    coord._engine = engine  # type: ignore[attr-defined]
-    coord._sessionmaker = sessionmaker  # type: ignore[attr-defined]
+    
+    # 最小侵入式依赖注入
+    coord._engine = engine
+    coord._sessionmaker = sessionmaker
+    
     await coord.initialize()
     try:
         yield coord
     finally:
-        await coord.close()  # 只关业务层资源；engine 由会话级夹具统一 await 释放
+        # 确保在异步 fixture 的 finally 块中 await 关闭操作
+        await coord.close()

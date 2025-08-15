@@ -3,51 +3,24 @@
 处理翻译状态查询和管理的 CLI 命令，包括评论功能。
 """
 
-import asyncio
 import json
-from typing import Annotated, TYPE_CHECKING
+from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 
-from trans_hub.application.coordinator import Coordinator
-
-# 在类型检查时导入 CLISharedState
-if TYPE_CHECKING:
-    from ..main import CLISharedState
+from .._utils import get_coordinator
+from .._state import CLISharedState
 
 app = typer.Typer(help="查询和管理翻译记录的状态与评论。")
 console = Console()
 
-# --- 辅助函数 ---
-
-
-async def _get_head_id_from_uida(
-    coordinator: Coordinator,
-    project_id: str,
-    namespace: str,
-    keys: dict,
-    target_lang: str,
-    variant_key: str,
-) -> str | None:
-    """通过 UIDA 查找 Head ID。"""
-    head = await coordinator.handler.get_translation_head_by_uida(
-        project_id=project_id,
-        namespace=namespace,
-        keys=keys,
-        target_lang=target_lang,
-        variant_key=variant_key,
-    )
-    return head.id if head else None
-
-
-# --- 命令实现 ---
-
 
 @app.command("get")
-def get_translation(
+async def get_translation(
     ctx: typer.Context,
     project_id: Annotated[str, typer.Option("-p", help="项目 ID。")],
     namespace: Annotated[str, typer.Option("-n", help="命名空间。")],
@@ -56,44 +29,37 @@ def get_translation(
     variant_key: Annotated[str, typer.Option("-v", help="变体键。")] = "-",
 ):
     """根据 UIDA 查询最终已发布的翻译，会自动应用回退逻辑。"""
-    state: "CLISharedState" = ctx.obj
+    state: CLISharedState = ctx.obj
     try:
         keys = json.loads(keys_json)
     except json.JSONDecodeError as e:
         console.print(f"[bold red]❌ Keys JSON 格式错误: {e}[/bold red]")
         raise typer.Exit(code=1)
 
-    async def _run():
-        coordinator = Coordinator(state.config)
-        try:
-            await coordinator.initialize()
-            result = await coordinator.get_translation(
-                project_id=project_id,
-                namespace=namespace,
-                keys=keys,
-                target_lang=target_lang,
-                variant_key=variant_key,
+    async with get_coordinator(state) as coordinator:
+        result = await coordinator.get_translation(
+            project_id=project_id,
+            namespace=namespace,
+            keys=keys,
+            target_lang=target_lang,
+            variant_key=variant_key,
+        )
+        if result:
+            console.print(
+                Panel(
+                    Syntax(json.dumps(result, indent=2, ensure_ascii=False), "json", theme="monokai"),
+                    title="[green]✅ 已解析的翻译内容[/green]",
+                    border_style="green",
+                )
             )
-            if result:
-                console.print(
-                    Panel(
-                        JSON(json.dumps(result, indent=2, ensure_ascii=False)),
-                        title="[green]✅ 已解析的翻译内容[/green]",
-                        border_style="green",
-                    )
-                )
-            else:
-                console.print(
-                    "[yellow]⚠️ 未找到该 UIDA 对应的已发布翻译（或其回退版本）。[/yellow]"
-                )
-        finally:
-            await coordinator.close()
-
-    asyncio.run(_run())
+        else:
+            console.print(
+                "[yellow]⚠️ 未找到该 UIDA 对应的已发布翻译（或其回退版本）。[/yellow]"
+            )
 
 
 @app.command("publish")
-def publish(
+async def publish(
     ctx: typer.Context,
     revision_id: Annotated[
         str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")
@@ -101,65 +67,51 @@ def publish(
     actor: Annotated[str, typer.Option("--actor", help="操作者身份。")] = "cli_user",
 ):
     """将一条 'reviewed' 状态的翻译修订发布为最新版本。"""
-    state: "CLISharedState" = ctx.obj
-
-    async def _run():
-        coordinator = Coordinator(state.config)
-        try:
-            await coordinator.initialize()
-            success = await coordinator.publish_translation(revision_id, actor=actor)
-            if success:
-                console.print(
-                    f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]"
-                )
-            else:
-                console.print(
-                    "[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]"
-                )
-        finally:
-            await coordinator.close()
-
-    asyncio.run(_run())
+    state: CLISharedState = ctx.obj
+    async with get_coordinator(state) as coordinator:
+        success = await coordinator.publish_translation(revision_id, actor=actor)
+        if success:
+            console.print(
+                f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]"
+            )
+        else:
+            console.print(
+                "[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]"
+            )
 
 
 @app.command("comments")
-def get_comments(
+async def get_comments(
     ctx: typer.Context,
     head_id: Annotated[str, typer.Argument(help="要查询评论的翻译头 (Head) ID。")],
 ):
     """获取指定翻译头 (Head) 的所有评论。"""
-    state: "CLISharedState" = ctx.obj
-
-    async def _run():
-        coordinator = Coordinator(state.config)
-        try:
-            await coordinator.initialize()
-            comments = await coordinator.get_comments(head_id)
-            if not comments:
-                console.print(
-                    f"[yellow]Head ID [bold]{head_id}[/bold] 尚无评论。[/yellow]"
-                )
-                return
-
-            table = Table(
-                title=f"Comments for Head ID: {head_id}",
-                show_header=True,
-                header_style="bold magenta",
+    state: CLISharedState = ctx.obj
+    async with get_coordinator(state) as coordinator:
+        comments = await coordinator.get_comments(head_id)
+        if not comments:
+            console.print(
+                f"[yellow]Head ID [bold]{head_id}[/bold] 尚无评论。[/yellow]"
             )
-            table.add_column("Author", style="cyan", width=20)
-            table.add_column("Comment")
-            table.add_column("Timestamp", style="dim", width=22)
-            for c in comments:
-                table.add_row(c.author, c.body, str(c.created_at))
-            console.print(table)
-        finally:
-            await coordinator.close()
+            return
 
-    asyncio.run(_run())
+        table = Table(
+            title=f"Comments for Head ID: {head_id}",
+            show_header=True,
+            header_style="bold magenta",
+        )
+        table.add_column("Author", style="cyan", width=20)
+        table.add_column("Comment")
+        table.add_column("Timestamp", style="dim", width=22)
+        for c in comments:
+            # Ensure created_at is not None before formatting
+            timestamp_str = str(c.created_at) if c.created_at else "N/A"
+            table.add_row(c.author, c.body, timestamp_str)
+        console.print(table)
 
 
 @app.command("comment")
-def add_comment(
+async def add_comment(
     ctx: typer.Context,
     head_id: Annotated[str, typer.Argument(help="要评论的翻译头的 ID。")],
     body: Annotated[str, typer.Argument(help="评论内容。")],
@@ -173,16 +125,10 @@ def add_comment(
         console.print("[red]❌ 评论内容不能为空。[/red]")
         raise typer.Exit(code=1)
 
-    async def _run():
-        coordinator = Coordinator(state.config)
+    async with get_coordinator(state) as coordinator:
         try:
-            await coordinator.initialize()
             comment_id = await coordinator.add_comment(head_id, author, body)
             console.print(f"[green]✅ 评论已添加！[/green] Comment ID: {comment_id}")
         except ValueError as e:
             console.print(f"[red]❌ 操作失败: {e}[/red]")
             raise typer.Exit(code=1)
-        finally:
-            await coordinator.close()
-
-    asyncio.run(_run())
