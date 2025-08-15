@@ -37,7 +37,6 @@ if TYPE_CHECKING:
         PersistenceHandler,
         StreamProducer,
     )
-    from trans_hub_core.types import TranslationHead
 
 
 logger = structlog.get_logger(__name__)

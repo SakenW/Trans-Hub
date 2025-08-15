@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import structlog
 from sqlalchemy import func, select, update
@@ -472,8 +472,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     project_id=r.project_id,
                     author=r.author,
                     body=r.body,
-                    created_at=r.created_at
-                ) for r in results
+                    created_at=r.created_at,
+                )
+                for r in results
             ]
         except SQLAlchemyError as e:
             raise DatabaseError(f"获取评论失败: {e}") from e
