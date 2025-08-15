@@ -1,12 +1,14 @@
 # packages/server/alembic/versions/3f8b9e6a0c2c_initial_schema.py
 """
-TRANS-HUB 初始架构 (v2.5.14 · 最终权威版 · Alembic 实现)
+TRANS-HUB 初始架构 (v3.0.0 · 权威重构版 · Alembic 实现)
 
-本迁移脚本实现《TRANS-HUB 统一数据与命名白皮书 v2.5.14》的完整数据库结构。
+本迁移脚本实现《TRANS-HUB 统一数据与命名白皮书 v3.0.0》的完整数据库结构。
+它是一次性的、原子化的最优实现，包含了所有必要的约束、函数和性能优化。
 
 实现要点 (PostgreSQL 优先):
 - `th` 专用 schema。
 - 权威函数与类型: `is_bcp47`, `variant_normalize`, `set_updated_at`, `translation_status` ENUM。
+- [新增] `forbid_uida_update`: 确保 UIDA 字段不可变的触发器。
 - 核心表结构:
   - th.projects: 项目注册表。
   - th.content: 基于 UIDA 的内容表。
@@ -14,6 +16,7 @@ TRANS-HUB 初始架构 (v2.5.14 · 最终权威版 · Alembic 实现)
   - th.trans_head: 按 project_id HASH 分区的双指针表，含 DEFERRABLE 外键。
   - th.resolve_cache: 零二次查询解析缓存，增加到 content 的级联删除外键。
 - 扩展表: `th.events`, `th.comments`, `th.tm_units`, `th.tm_links`, `th.locales_fallbacks`。
+- [新增] 分区子表性能优化: 自动设置 `fillfactor=90` 等参数。
 - 搜索策略: 基于 `th.search_rev` 物化视图的全文检索和 `pg_trgm` 的模糊搜索。
 - 行级安全 (RLS): 基于 `th.allowed_projects()` 的统一多租户隔离策略。
 - 触发器逻辑: 自动更新 updated_at, 规范化 variant_key, 发布时精准缓存失效。
@@ -25,10 +28,10 @@ TRANS-HUB 初始架构 (v2.5.14 · 最终权威版 · Alembic 实现)
 
 from __future__ import annotations
 
+from typing import Any
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
-from typing import Any
 
 # --- Alembic 元数据 ---
 revision = "3f8b9e6a0c2c"
@@ -89,6 +92,15 @@ def upgrade() -> None:
             CREATE OR REPLACE FUNCTION th.extract_text(j JSONB) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
             SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(j, '{}'::jsonb));
             $$;
+
+            CREATE OR REPLACE FUNCTION th.forbid_uida_update() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN
+              IF (NEW.project_id, NEW.namespace, NEW.keys_sha256_bytes) IS DISTINCT FROM (OLD.project_id, OLD.namespace, OLD.keys_sha256_bytes) THEN
+                RAISE EXCEPTION 'UIDA fields (project_id, namespace, keys_sha256_bytes) are immutable and cannot be changed.';
+              END IF;
+              RETURN NEW;
+            END;
+            $$;
             """
         )
 
@@ -119,6 +131,7 @@ def upgrade() -> None:
             comment="创建时间",
         ),
         schema="th",
+        comment="项目主表，作为多租户边界",
     )
 
     op.create_table(
@@ -184,6 +197,7 @@ def upgrade() -> None:
             else None,
         ),
         schema="th",
+        comment="以 Canonical JSON→SHA-256 形成的唯一内容键（UIDA）实体化",
     )
     op.create_index(
         "ix_content_project", "content", ["project_id"], unique=False, schema="th"
@@ -250,6 +264,7 @@ def upgrade() -> None:
             """
         )
     else:
+        # Fallback for non-PostgreSQL databases (e.g., SQLite)
         status_enum_type = sa.Enum(
             "draft", "reviewed", "published", "rejected", name="translation_status"
         )
@@ -600,11 +615,13 @@ def upgrade() -> None:
             """
             DO $$ DECLARE t_name TEXT; BEGIN
               FOR t_name IN SELECT table_name FROM information_schema.tables WHERE table_schema='th' AND table_name IN ('content', 'trans_rev', 'trans_head', 'resolve_cache', 'tm_units', 'locales_fallbacks') LOOP
-                EXECUTE format('CREATE TRIGGER trg_%1$s_updated_at BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.set_updated_at();', t_name);
+                EXECUTE format('CREATE OR REPLACE TRIGGER trg_%1$s_updated_at BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.set_updated_at();', t_name);
               END LOOP;
               FOR t_name IN SELECT table_name FROM information_schema.tables WHERE table_schema='th' AND table_name IN ('trans_rev', 'trans_head', 'resolve_cache') LOOP
-                 EXECUTE format('CREATE TRIGGER trg_%1$s_variant_norm BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.variant_normalize();', t_name);
+                 EXECUTE format('CREATE OR REPLACE TRIGGER trg_%1$s_variant_norm BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.variant_normalize();', t_name);
               END LOOP;
+              -- [新增] 应用 UIDA 不可变性触发器
+              EXECUTE 'CREATE OR REPLACE TRIGGER trg_forbid_content_uida_update BEFORE UPDATE ON th.content FOR EACH ROW EXECUTE FUNCTION th.forbid_uida_update();';
             END; $$;
             """
         )
@@ -629,7 +646,7 @@ def upgrade() -> None:
               RETURN NEW;
             END; $$;
 
-            CREATE TRIGGER trg_head_publish_unpublish
+            CREATE OR REPLACE TRIGGER trg_head_publish_unpublish
               AFTER UPDATE OF published_rev_id ON th.trans_head
               FOR EACH ROW WHEN (OLD.published_rev_id IS DISTINCT FROM NEW.published_rev_id)
               EXECUTE FUNCTION th.on_head_publish_unpublish();
@@ -667,16 +684,18 @@ def upgrade() -> None:
     if dialect == "postgresql":
         op.execute(
             """
-            CREATE OR REPLACE VIEW public.th_projects      AS SELECT * FROM th.projects;
-            CREATE OR REPLACE VIEW public.th_content       AS SELECT * FROM th.content;
-            CREATE OR REPLACE VIEW public.th_trans_rev     AS SELECT * FROM th.trans_rev;
-            CREATE OR REPLACE VIEW public.th_trans_head    AS SELECT * FROM th.trans_head;
-            CREATE OR REPLACE VIEW public.th_resolve_cache AS SELECT * FROM th.resolve_cache;
-            CREATE OR REPLACE VIEW public.th_events        AS SELECT * FROM th.events;
-            CREATE OR REPLACE VIEW public.th_comments      AS SELECT * FROM th.comments;
-            CREATE OR REPLACE VIEW public.th_tm_units      AS SELECT * FROM th.tm_units;
-            CREATE OR REPLACE VIEW public.th_tm_links      AS SELECT * FROM th.tm_links;
-            CREATE OR REPLACE VIEW public.th_locales_fallbacks AS SELECT * FROM th.locales_fallbacks;
+            DO $$ BEGIN
+                CREATE OR REPLACE VIEW public.th_projects      AS SELECT * FROM th.projects;
+                CREATE OR REPLACE VIEW public.th_content       AS SELECT * FROM th.content;
+                CREATE OR REPLACE VIEW public.th_trans_rev     AS SELECT * FROM th.trans_rev;
+                CREATE OR REPLACE VIEW public.th_trans_head    AS SELECT * FROM th.trans_head;
+                CREATE OR REPLACE VIEW public.th_resolve_cache AS SELECT * FROM th.resolve_cache;
+                CREATE OR REPLACE VIEW public.th_events        AS SELECT * FROM th.events;
+                CREATE OR REPLACE VIEW public.th_comments      AS SELECT * FROM th.comments;
+                CREATE OR REPLACE VIEW public.th_tm_units      AS SELECT * FROM th.tm_units;
+                CREATE OR REPLACE VIEW public.th_tm_links      AS SELECT * FROM th.tm_links;
+                CREATE OR REPLACE VIEW public.th_locales_fallbacks AS SELECT * FROM th.locales_fallbacks;
+            END; $$;
             """
         )
 
@@ -685,13 +704,15 @@ def downgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect == "postgresql":
+        # A more robust downgrade that removes all objects created by this migration
         op.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
         op.execute(
             "GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;"
         )
         op.execute("DROP SCHEMA IF EXISTS th CASCADE;")
-        op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;")
+        op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;") # Drop type which might linger
     else:
+        # For SQLite, drop tables in reverse order of creation
         tables_to_drop = [
             "locales_fallbacks",
             "tm_links",
