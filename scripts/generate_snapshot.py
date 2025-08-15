@@ -255,8 +255,20 @@ def main() -> None:
     output_path = script_dir / args.output
 
     # 在写入新内容之前，先删除或清空输出文件
-    if output_path.exists():
-        output_path.unlink()
+    try:
+        if output_path.exists():
+            output_path.unlink()
+            print(f"🔄 已删除旧文件: {output_path}")
+    except OSError as e:
+        print(f"⚠️ 无法删除旧文件 {output_path}: {e}", file=sys.stderr)
+        # 尝试清空文件内容而不是删除
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write('')
+            print(f"🔄 已清空旧文件内容: {output_path}")
+        except OSError as e2:
+            print(f"❌ 无法清空旧文件 {output_path}: {e2}", file=sys.stderr)
+            sys.exit(3)
 
     targets = iter_targets(scan_root, args.extra)
     files = walk_files(scan_root, targets)
