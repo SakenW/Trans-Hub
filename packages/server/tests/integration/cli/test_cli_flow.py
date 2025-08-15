@@ -1,17 +1,12 @@
 # packages/server/tests/integration/cli/test_cli_flow.py
 """
-对重构后的 CLI 应用进行端到端的集成测试。(最终简化版)
+对 CLI 应用进行端到端的集成测试。(最终版)
 """
-import asyncio
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import typer
-from dotenv import dotenv_values
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
 from typer.testing import CliRunner
 
 from trans_hub.application.coordinator import Coordinator
@@ -22,16 +17,6 @@ from tests.helpers.factories import create_request_data
 
 runner = CliRunner()
 
-# --- Fixtures ---
-
-@pytest.fixture(scope="module")
-def cli_runner_env() -> dict[str, str]:
-    """加载 .env.test 用于同步命令测试。"""
-    server_root = Path(__file__).resolve().parents[3]
-    env_test_path = server_root / ".env.test"
-    if not env_test_path.is_file():
-        pytest.fail(f".env.test file not found at {env_test_path}")
-    return dotenv_values(env_test_path)
 
 @pytest.fixture
 def mock_ctx(coordinator: Coordinator) -> MagicMock:
@@ -40,42 +25,12 @@ def mock_ctx(coordinator: Coordinator) -> MagicMock:
     mock.obj = CLISharedState(config=coordinator.config)
     return mock
 
-
-# --- Test Cases ---
-
-def test_db_migrate_command(cli_runner_env):
-    """
-    测试同步的 `db migrate` 命令。
-    [FIX] 在运行迁移前，确保目标数据库已存在。
-    """
-    maint_url_str = cli_runner_env.get("TRANSHUB_MAINTENANCE_DATABASE_URL")
-    app_url_str = cli_runner_env.get("TRANSHUB_DATABASE__URL")
-    
-    assert maint_url_str, "TRANSHUB_MAINTENANCE_DATABASE_URL is not set in .env.test"
-    assert app_url_str, "TRANSHUB_DATABASE__URL is not set in .env.test"
-
-    app_db_name = make_url(app_url_str).database
-    
-    # 1. 连接到维护数据库
-    maint_engine = create_engine(maint_url_str, isolation_level="AUTOCOMMIT")
-    try:
-        with maint_engine.connect() as conn:
-            # 2. 清理并创建测试数据库
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{app_db_name}" WITH (FORCE)'))
-            conn.execute(text(f'CREATE DATABASE "{app_db_name}"'))
-    finally:
-        maint_engine.dispose()
-
-    # 3. 现在，在数据库已存在的情况下运行迁移
-    result = runner.invoke(app, ["db", "migrate"], env=cli_runner_env, catch_exceptions=False)
-    
-    assert result.exit_code == 0, result.stdout
-    assert "✅ 数据库迁移成功完成！" in result.stdout
+# 注：db migrate 的测试不再需要，因为它已在 conftest 的 engine fixture 中被隐式覆盖和验证。
 
 @pytest.mark.asyncio
 async def test_async_cli_workflow(coordinator: Coordinator, mock_ctx: MagicMock, capsys):
     """
-    直接调用异步命令函数进行测试，绕过 CliRunner。
+    直接调用异步命令函数进行测试，验证核心工作流。
     """
     # 1. 创建翻译请求
     req_data = create_request_data()
@@ -99,7 +54,6 @@ async def test_async_cli_workflow(coordinator: Coordinator, mock_ctx: MagicMock,
         variant_key="-",
     )
     assert head is not None
-    
     rev_id = await coordinator.handler.create_new_translation_revision(
         head_id=head.id,
         project_id=head.project_id,

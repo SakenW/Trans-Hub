@@ -1,16 +1,22 @@
 # packages/server/tests/conftest.py
 """
-Pytest 共享夹具（全链路异步，遵守技术宪章）
+Pytest 共享夹具 (最终权威版)
 
-- 仅使用包级公共 API：trans_hub.infrastructure.db
-- 测试开始时建表并做一次连通性检查；测试结束统一 await 释放连接池。
+- engine fixture:
+  - 自动在会话开始时重建测试数据库。
+  - 使用 `Base.metadata.create_all` 创建与 ORM 模型完全一致的 Schema。
+  - 通过在独立的事务中创建 schema，解决了 `UndefinedTableError`。
+- 确保测试环境的数据库准备是简单、快速且可靠的。
 """
 
 from __future__ import annotations
+import os
+from pathlib import Path
 
 import pytest_asyncio
 import pytest
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from trans_hub.config_loader import load_config_from_env
@@ -25,27 +31,45 @@ from trans_hub.application.coordinator import Coordinator
 
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
-    """让 pytest-asyncio/anyio 使用 asyncio 事件循环。"""
+    """强制 pytest-asyncio 使用 asyncio 后端。"""
     return "asyncio"
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def engine() -> AsyncEngine:
     """
-    会话级共享引擎：
-    - 基于严格模式加载的配置创建
-    - 执行建表与 SELECT 1 连通性检查
-    - 会话结束统一释放（await dispose）
+    会话级共享引擎, 自动在会话开始时重建测试数据库。
     """
     cfg = load_config_from_env(mode="test", strict=True)
+    
+    # --- 1. 同步操作：重建数据库 ---
+    maint_url_str = cfg.maintenance_database_url
+    assert maint_url_str, "TRANSHUB_MAINTENANCE_DATABASE_URL is required for tests"
+    
+    app_url = make_url(cfg.database.url)
+    app_db_name = app_url.database
+    app_db_user = app_url.username
+
+    maint_url = make_url(maint_url_str).set(drivername="postgresql+psycopg")
+    sync_maint_engine = create_engine(maint_url, isolation_level="AUTOCOMMIT")
+    try:
+        with sync_maint_engine.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{app_db_name}" WITH (FORCE)'))
+            conn.execute(text(f'CREATE DATABASE "{app_db_name}" OWNER {app_db_user}'))
+    finally:
+        sync_maint_engine.dispose()
+
+    # --- 2. 异步操作：创建 schema 和所有表 ---
     eng = create_async_db_engine(cfg)
     async with eng.begin() as conn:
-        # 在测试开始前，清理掉旧的 schema 和 public schema 中的所有内容
-        await conn.execute(text("DROP SCHEMA IF EXISTS th CASCADE;"))
-        await conn.execute(text("CREATE SCHEMA th;"))
+        # [CRITICAL FIX] 先创建 schema 并提交，再创建表
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+    
+    async with eng.begin() as conn:
+        # 现在 schema 肯定存在，可以安全地创建所有表
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("SELECT 1"))
-    
+
     yield eng
     
     await dispose_engine(eng)
@@ -53,20 +77,16 @@ async def engine() -> AsyncEngine:
 
 @pytest.fixture(scope="session")
 def sessionmaker(engine: AsyncEngine):
-    """提供异步 Session 工厂给各测试模块使用。"""
+    """提供一个会话级的异步 Session 工厂。"""
     return create_async_sessionmaker(engine)
 
 
 @pytest_asyncio.fixture
 async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
-    """
-    提供一个已初始化的 Coordinator。
-    [REFACTOR] 使用 pytest_asyncio.fixture 并确保正确的异步清理。
-    """
+    """提供一个函数级的、已初始化的 Coordinator 实例。"""
     cfg = load_config_from_env(mode="test", strict=True)
     coord = Coordinator(cfg)
     
-    # 最小侵入式依赖注入
     coord._engine = engine
     coord._sessionmaker = sessionmaker
     
@@ -74,5 +94,4 @@ async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
     try:
         yield coord
     finally:
-        # 确保在异步 fixture 的 finally 块中 await 关闭操作
         await coord.close()
