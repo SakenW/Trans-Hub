@@ -28,6 +28,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
+from typing import Any
 
 # --- Alembic 元数据 ---
 revision = "3f8b9e6a0c2c"

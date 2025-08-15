@@ -10,14 +10,13 @@ _redis_client: aioredis.Redis | None = None
 
 
 async def get_redis_client(config: TransHubConfig) -> aioredis.Redis:
-    """
-    获取一个单例的 Redis 异步客户端实例。
-    """
+    """获取一个单例的 Redis 异步客户端实例。"""
     global _redis_client
     if _redis_client is None:
-        if not config.redis_url:
-            raise ValueError("Redis URL 未配置 (TH_REDIS_URL)")
-        _redis_client = aioredis.from_url(config.redis_url, decode_responses=True)
+        url = config.redis.url
+        if not url:
+            raise ValueError("Redis URL 未配置（请设置 TRANSHUB_REDIS__URL）")
+        _redis_client = aioredis.from_url(url, decode_responses=True)
     return _redis_client
 
 

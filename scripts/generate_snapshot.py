@@ -51,7 +51,7 @@ EXCLUDE_NAMES = {
 BINARY_EXTS = {
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
     ".ico", ".pdf", ".zip", ".tar", ".gz", ".7z",
-    ".so", ".dylib", ".dll", ".wasm",
+    ".so", ".dylib", ".dll", ".wasm", ".db",
 }
 LANG_MAP = {
     ".py": "python", ".toml": "toml", ".ini": "ini",

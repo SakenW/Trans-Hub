@@ -152,4 +152,4 @@ def _render_head_panel(session, head: ThTransHead):
 
 if __name__ == "__main__":
     config = TransHubConfig()
-    inspect_database(config.database_url)
+    inspect_database(config.database.url)

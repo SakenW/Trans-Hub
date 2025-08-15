@@ -51,7 +51,11 @@ async def example_runner(
     base_config = {"database_url": database_url, "default_source_lang": "en"}
     final_config_data = {**base_config, **config_overrides}
 
-    config = TransHubConfig(**final_config_data)
+    config = TransHubConfig(
+        database={"url": database_url},
+        default_source_lang="en",
+        **final_config_data,
+    )
 
     # --- 运行 Alembic 迁移 ---
     try:
@@ -66,7 +70,7 @@ async def example_runner(
             )  # monorepo adjustment
 
         alembic_cfg = AlembicConfig(str(alembic_cfg_path))
-        sync_db_url = config.database_url.replace("+aiosqlite", "")
+        sync_db_url = config.database.url.replace("+aiosqlite", "")
         alembic_cfg.set_main_option("sqlalchemy.url", sync_db_url)
         command.upgrade(alembic_cfg, "head")
         logger.info("Alembic 迁移已应用到示例数据库。")

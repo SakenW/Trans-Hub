@@ -1,15 +1,17 @@
 # packages/server/src/trans_hub/observability/logging_config.py
 """
-本模块集中配置项目日志系统，并与 Rich 深度集成，提供：
-- console：开发环境的美观、信息丰富的面板式输出；
-- json：生产环境的机器可读结构化日志（ISO8601 + UTC 时间戳）。
+集中配置项目日志系统：structlog ⇄ 标准 logging，并与 Rich 深度集成。
 
-合并优点：
+提供两种输出：
+- console：开发环境的面板式人类友好输出（本地时间，配色/对齐/长值折行）。
+- json   ：生产环境的结构化日志（ISO-8601 且 UTC），便于日志平台聚合。
+
+要点：
 1) 使用 structlog 官方推荐的 ProcessorFormatter 桥接到标准 logging；
-2) 自定义 HybridPanelRenderer 具备完美对齐、长值折行与首行缓冲换行；
-3) console 本地友好时间，json 统一 UTC；
-4) 可选依赖 rich 的软降级与清晰安装提示；
-5) 默认 root=WARNING 降噪，应用 logger 按需下调（可通过参数覆盖）。
+2) 自定义 HybridPanelRenderer 实现完美对齐、长值折行与首行空行；
+3) console 用本地时间，json 统一 UTC；
+4) 新增 setup_logging_from_config(cfg, service=...) 一步到位；
+5) 可选屏蔽第三方噪声 logger（urllib3/sqlalchemy.engine 等）。
 """
 
 from __future__ import annotations
@@ -44,10 +46,11 @@ else:
 
 class HybridPanelRenderer:
     """
-    一个智能的 structlog 处理器：将日志渲染为 Rich 面板。
+    structlog 处理器：将日志渲染为 Rich 面板。
+
     设计目标：
-    - 标题等宽级别标签，完美对齐；
-    - 值的长文本可折行显示（移除引号改善换行）；
+    - 标题等宽级别标签（保证对齐）；
+    - 值的长文本可折行显示（去引号改善折行）；
     - 首次打印前插入换行，避免与上文粘连；
     - 可配置是否显示时间戳与 logger 名称、键列宽度与截断长度。
     """
@@ -188,6 +191,8 @@ def setup_logging(
     kv_truncate_at: int = 256,
     kv_key_width: int = 15,
     root_level: str | None = None,
+    service: str | None = None,
+    silence_noisy_libs: bool = True,
 ) -> None:
     """
     配置全局 structlog 日志系统。
@@ -200,6 +205,8 @@ def setup_logging(
         kv_truncate_at: console 值字段的截断阈值。
         kv_key_width: console 键列固定宽度，用于对齐。
         root_level: 根 logger 级别；默认 None 表示使用 WARNING 以降低第三方噪声。
+        service: 统一绑定到日志的服务名（通过 contextvars 注入）。
+        silence_noisy_libs: 是否下调常见噪声 logger 的级别（默认 True）。
     """
     if log_format == "console" and Console is None:
         raise ImportError(
@@ -208,22 +215,28 @@ def setup_logging(
             "或：pip install rich"
         )
 
-    # 结构化处理链（按官方推荐的 ProcessorFormatter 桥接范式）
+    # 结构化处理链（官方推荐 ProcessorFormatter 桥接范式）
     pre_chain: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
     ]
 
+    # 默认本地时间；如为 JSON 模式会在下方覆盖为 ISO+UTC
+    timestamper_local = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False)
+
     processors: list[Processor] = [
         *pre_chain,
-        # console：人读友好时间；json：ISO + UTC（见下）
-        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
+        timestamper_local,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
+
+    # JSON：ISO + UTC
+    if log_format == "json":
+        processors[3] = structlog.processors.TimeStamper(fmt="iso", utc=True)  # 覆盖为 ISO+UTC
 
     structlog.configure(
         processors=processors,
@@ -232,7 +245,7 @@ def setup_logging(
         cache_logger_on_first_use=True,
     )
 
-    # 选择最终渲染器
+    # 最终渲染器
     if log_format == "console":
         final_renderer: Processor = HybridPanelRenderer(
             log_level=log_level,
@@ -242,14 +255,12 @@ def setup_logging(
             kv_key_width=kv_key_width,
         )
     else:
-        # JSON 统一使用 ISO + UTC，便于日志平台聚合
         final_renderer = structlog.processors.JSONRenderer()
-        # 将 TimeStamper 切换为 ISO + UTC（覆盖 pre_chain 中的本地时间设置）
-        processors[3] = structlog.processors.TimeStamper(fmt="iso", utc=True)  # noqa: E501 位置对应上方列表
 
     formatter = structlog.stdlib.ProcessorFormatter(
         processor=final_renderer,
         foreign_pre_chain=[
+            structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,
         ],
@@ -270,6 +281,22 @@ def setup_logging(
     app_logger.setLevel(log_level.upper())
     app_logger.propagate = True
 
+    # 绑定全局上下文（service 等），所有日志都会带上
+    structlog.contextvars.clear_contextvars()
+    if service:
+        structlog.contextvars.bind_contextvars(service=service)
+
+    # 静音常见噪声（可选）
+    if silence_noisy_libs:
+        for noisy in (
+            "urllib3",
+            "httpcore",
+            "httpx",
+            "asyncio",
+            "sqlalchemy.engine.Engine",  # 细粒度：引擎 SQL 回显
+        ):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+
     # 配置完成日志（使用 structlog）
     s_logger = structlog.get_logger("trans_hub.logging_config")
     s_logger.info(
@@ -277,4 +304,28 @@ def setup_logging(
         log_format=log_format,
         app_log_level=log_level.upper(),
         root_log_level=(root_level or "WARNING").upper(),
+        service=service,
     )
+
+
+# -------- 便捷入口：从 TransHubConfig 初始化 --------
+
+def setup_logging_from_config(cfg: "TransHubConfig", *, service: str = "trans-hub-server") -> None:
+    """
+    根据 TransHubConfig 一键初始化日志系统。
+    - cfg.logging.format: 'console' | 'json'
+    - cfg.logging.level : 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
+    - 其余参数使用默认值（可按需扩展）
+    """
+    setup_logging(
+        log_level=cfg.logging.level,
+        log_format=cfg.logging.format,
+        service=service,
+    )
+
+
+# 类型仅用于注解，避免运行期循环依赖
+try:  # 运行期不导入（避免配置层与观测层互相依赖），仅用于类型提示
+    from trans_hub.config import TransHubConfig  # noqa: F401
+except Exception:  # pragma: no cover
+    pass

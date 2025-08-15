@@ -29,7 +29,7 @@ def run_test():
         )
         console.print("✅ [bold green]成功加载 .env.test 配置。[/bold green]")
         console.print(
-            f"   - 用户名: [yellow]{config.database_url.split('//')[1].split(':')[0]}[/yellow]"
+            f"   - 用户名: [yellow]{config.database.url.split('//')[1].split(':')[0]}[/yellow]"
         )
         console.print(
             f"   - 维护库: [yellow]{make_url(config.maintenance_database_url).database}[/yellow]"
@@ -42,7 +42,7 @@ def run_test():
     maint_url = make_url(config.maintenance_database_url).set(
         drivername="postgresql+psycopg2"
     )
-    app_url = make_url(config.database_url)  # 保留原始信息
+    app_url = make_url(config.database.url)  # 保留原始信息
     test_db_name = f"test_debug_{uuid.uuid4().hex[:8]}"
 
     # 3. 连接到维护库并创建新数据库

@@ -84,7 +84,7 @@ class DatabaseDoctor:
     def __init__(self, config: TransHubConfig, alembic_cfg_path: Path):
         self.alembic_cfg_path = alembic_cfg_path
         try:
-            app_url_obj = make_url(config.database_url)
+            app_url_obj = make_url(config.database.url)
             maint_url_str = config.maintenance_database_url or str(
                 app_url_obj.set(database="postgres")
             )
@@ -393,8 +393,8 @@ def main():
             Console().print(
                 Panel(
                     f"[bold]从环境加载的配置[/bold]\n\n"
-                    f"  - [dim]TH_DATABASE_URL:[/dim] [yellow]{config.database_url}[/yellow]\n"
-                    f"  - [dim]TH_MAINTENANCE_DATABASE_URL:[/dim] [yellow]{config.maintenance_database_url}[/yellow]\n"
+                    f"  - [dim]TRANSHUB_DATABASE__URL:[/dim] [yellow]{config.database.url}[/yellow]\n"
+                    f"  - [dim]TRANSHUB_MAINTENANCE_DATABASE_URL:[/dim] [yellow]{config.maintenance_database_url}[/yellow]\n"
                     f"  - [dim]Alembic INI 路径:[/dim] [yellow]{alembic_cfg_path}[/yellow]",
                     title="[cyan]配置加载诊断[/cyan]",
                     border_style="cyan",

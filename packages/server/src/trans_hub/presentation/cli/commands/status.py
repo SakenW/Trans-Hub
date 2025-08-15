@@ -5,7 +5,7 @@
 
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -13,7 +13,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from trans_hub.application.coordinator import Coordinator
-from ..main import CLISharedState
+
+# 在类型检查时导入 CLISharedState
+if TYPE_CHECKING:
+    from ..main import CLISharedState
 
 app = typer.Typer(help="查询和管理翻译记录的状态与评论。")
 console = Console()
@@ -53,7 +56,7 @@ def get_translation(
     variant_key: Annotated[str, typer.Option("-v", help="变体键。")] = "-",
 ):
     """根据 UIDA 查询最终已发布的翻译，会自动应用回退逻辑。"""
-    state: CLISharedState = ctx.obj
+    state: "CLISharedState" = ctx.obj
     try:
         keys = json.loads(keys_json)
     except json.JSONDecodeError as e:
@@ -98,7 +101,7 @@ def publish(
     actor: Annotated[str, typer.Option("--actor", help="操作者身份。")] = "cli_user",
 ):
     """将一条 'reviewed' 状态的翻译修订发布为最新版本。"""
-    state: CLISharedState = ctx.obj
+    state: "CLISharedState" = ctx.obj
 
     async def _run():
         coordinator = Coordinator(state.config)
@@ -125,7 +128,7 @@ def get_comments(
     head_id: Annotated[str, typer.Argument(help="要查询评论的翻译头 (Head) ID。")],
 ):
     """获取指定翻译头 (Head) 的所有评论。"""
-    state: CLISharedState = ctx.obj
+    state: "CLISharedState" = ctx.obj
 
     async def _run():
         coordinator = Coordinator(state.config)

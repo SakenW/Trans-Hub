@@ -5,13 +5,16 @@
 
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, TYPE_CHECKING
 
 import typer
 from rich.console import Console
 
 from trans_hub.application.coordinator import Coordinator
-from ..main import CLISharedState
+
+# 在类型检查时导入 CLISharedState
+if TYPE_CHECKING:
+    from ..main import CLISharedState
 
 app = typer.Typer(help="提交和管理翻译请求。")
 console = Console()
@@ -50,7 +53,7 @@ def request_new(
     """
     向 Trans-Hub 提交一个新的 UIDA 翻译请求。
     """
-    state: CLISharedState = ctx.obj
+    state: "CLISharedState" = ctx.obj
 
     try:
         keys = json.loads(keys_json)

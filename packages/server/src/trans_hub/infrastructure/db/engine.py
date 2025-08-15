@@ -22,7 +22,7 @@ def _is_sqlite(url: str) -> bool:
 
 def create_async_db_engine(cfg: TransHubConfig) -> AsyncEngine:
     """创建符合最优化策略的 AsyncEngine。"""
-    url = cfg.database_url
+    url = cfg.database.url
     kwargs: dict[str, Any] = {
         "echo": cfg.db_echo or getattr(cfg.database, "echo", False),
         "pool_pre_ping": cfg.db_pool_pre_ping,
@@ -30,8 +30,10 @@ def create_async_db_engine(cfg: TransHubConfig) -> AsyncEngine:
     }
 
     if _is_sqlite(url):
+        # SQLite 推荐使用 NullPool，避免多进程/多线程下的共享句柄问题
         kwargs["poolclass"] = NullPool
     else:
+        # 仅在非 SQLite 时应用池参数
         if cfg.db_pool_size is not None:
             kwargs["pool_size"] = cfg.db_pool_size
         if cfg.db_max_overflow is not None:

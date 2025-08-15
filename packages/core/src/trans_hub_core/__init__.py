@@ -23,6 +23,7 @@ from .interfaces import (
     PersistenceHandler,
     QueueProducer,
     StreamProducer,
+    RateLimiter,
 )
 from .types import (
     Comment,

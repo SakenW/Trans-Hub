@@ -76,7 +76,7 @@ class Coordinator:
 
         await self.handler.connect()
 
-        if self.config.redis_url:
+        if self.config.redis.url:
             from trans_hub.infrastructure.redis._client import get_redis_client
             from trans_hub.infrastructure.redis.cache import RedisCacheHandler
             from trans_hub.infrastructure.redis.streams import RedisStreamProducer
@@ -105,7 +105,7 @@ class Coordinator:
             dispose_engine(self._engine),
             return_exceptions=True,
         )
-        if self.config.redis_url:
+        if self.config.redis.url:
             from trans_hub.infrastructure.redis._client import close_redis_client
 
             await close_redis_client()
@@ -229,9 +229,7 @@ class Coordinator:
         )
 
         if result_payload and self.cache:
-            await self.cache.set(
-                cache_key, result_payload, ttl=self.config.default_resolve_ttl_seconds
-            )
+            await self.cache.set(cache_key, result_payload, ttl=self.config.redis.cache.ttl)
             logger.debug("解析结果已写入缓存", key=cache_key)
 
         return result_payload

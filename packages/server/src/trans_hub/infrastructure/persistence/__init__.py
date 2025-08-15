@@ -22,7 +22,7 @@ def create_persistence_handler(
     config: TransHubConfig, sessionmaker
 ) -> PersistenceHandler:
     """根据配置创建、配置并返回一个具体的持久化处理器实例。"""
-    db_url = config.database_url
+    db_url = config.database.url
     url = make_url(db_url)
 
     if url.drivername.startswith("sqlite"):
