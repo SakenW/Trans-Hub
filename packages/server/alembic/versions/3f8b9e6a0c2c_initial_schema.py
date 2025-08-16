@@ -848,9 +848,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """
+    [最终权威修复] 确保 downgrade 遵循正确的依赖逆序进行清理。
+    先删除依赖对象（视图、函数），再删除被依赖对象（表）。
+    """
     bind = op.get_bind()
     dialect = bind.dialect.name
+
+    # 1. PostgreSQL 特有对象的清理 (依赖性对象优先)
     if dialect == "postgresql":
+        # [关键修复] 首先删除所有依赖于表的视图和函数
         op.execute(
             """
             DO $$
@@ -879,8 +886,12 @@ def downgrade() -> None:
         )
         op.execute("DROP FUNCTION IF EXISTS th.on_head_publish_unpublish() CASCADE;")
         op.execute("DROP FUNCTION IF EXISTS th.allowed_projects() CASCADE;")
+        
+        # [关键修复] 类型 (TYPE) 也是被表依赖的对象，也需要先删除
         op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;")
 
+    # 2. 表的清理 (被依赖对象后删除)
+    # 这个顺序是精心安排的，从依赖链的末端开始
     tables_to_drop = [
         "locales_fallbacks",
         "tm_links",
@@ -895,3 +906,9 @@ def downgrade() -> None:
     ]
     for table in tables_to_drop:
         op.drop_table(table, schema="th")
+
+    # 3. [可选] 清理 schema，现在是安全的了
+    # 我们之前的修复是移除这一行，以保留 alembic_version 表。
+    # 保持这个修复，因为它是正确的。
+    # if dialect == "postgresql":
+    #     op.execute("DROP SCHEMA IF EXISTS th CASCADE")
