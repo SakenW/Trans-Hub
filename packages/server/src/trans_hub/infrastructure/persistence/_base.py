@@ -241,7 +241,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     ) -> tuple[str, dict[str, Any]] | None:
         """在 TM 中查找可复用的翻译。"""
         try:
-            # 动态过滤项的允许列表：将传入的 key 映射到 ORM 列
+            # [修复] 修正 ALLOWED_FILTERS 中的列名
             ALLOWED_FILTERS = {
                 "src_lang": ThTmUnits.src_lang,
                 "tgt_lang": ThTmUnits.tgt_lang,

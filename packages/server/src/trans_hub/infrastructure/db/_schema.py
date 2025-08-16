@@ -110,6 +110,10 @@ class ThTransRev(Base):
     translated_payload_json: Mapped[dict[str, Any] | None] = mapped_column(
         json_type, nullable=True
     )
+    # [新增] 添加用于存储引擎信息的字段
+    engine_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    engine_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -225,8 +229,8 @@ class ThTmUnits(Base):
         ForeignKey("th.projects.project_id", ondelete="CASCADE")
     )
     namespace: Mapped[str] = mapped_column(Text)
-    src_lang: Mapped[str] = mapped_column(Text)
-    tgt_lang: Mapped[str] = mapped_column(Text)
+    src_lang: Mapped[str] = mapped_column(Text) # [修复] 补全字段
+    tgt_lang: Mapped[str] = mapped_column(Text) # [修复] 补全字段
     src_hash: Mapped[bytes] = mapped_column(LargeBinary(32))
     src_payload: Mapped[dict[str, Any]] = mapped_column(json_type)
     tgt_payload: Mapped[dict[str, Any]] = mapped_column(json_type)

@@ -111,7 +111,8 @@ class TranslationProcessor:
                 status=TranslationStatus.REVIEWED,
                 revision_no=item.current_no + 1,
                 translated_payload_json=translated_payload,
-                engine_name=active_engine.name,
+                # [最终权威修复] 正确调用类方法，在后面加上 ()
+                engine_name=active_engine.name(),
                 engine_version=active_engine.VERSION,
             )
 
@@ -124,18 +125,17 @@ class TranslationProcessor:
                 namespace=item.namespace, reduced_keys={}, source_fields=source_fields
             )
 
+            # [修复] 修正参数名以匹配 ThTmUnits ORM 模型
             tm_id = await self._handler.upsert_tm_entry(
                 project_id=item.project_id,
                 namespace=item.namespace,
-                reuse_sha256_bytes=reuse_sha,
-                source_lang=item.source_lang or "auto",
-                target_lang=item.target_lang,
+                src_hash=reuse_sha,
+                src_lang=item.source_lang or "auto",
+                tgt_lang=item.target_lang,
                 variant_key=item.variant_key,
-                policy_version=1,
-                hash_algo_version=1,
-                source_text_json=source_fields,
-                translated_json=translated_payload,
-                quality_score=0.9,  # 假设机器翻译质量为 0.9
+                src_payload=source_fields,
+                tgt_payload=translated_payload,
+                approved=True,  # 机器翻译结果默认为 approved
             )
             await self._handler.link_translation_to_tm(
                 new_rev_id, tm_id, item.project_id

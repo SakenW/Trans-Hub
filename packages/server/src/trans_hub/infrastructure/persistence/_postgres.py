@@ -7,13 +7,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import text, func
+from sqlalchemy import func, select, text
 import structlog
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from trans_hub_core.types import ContentItem
+from trans_hub_core.types import ContentItem, TranslationStatus
 
 from ._base import BasePersistenceHandler
+from trans_hub.infrastructure.db._schema import ThTransHead
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -73,21 +74,46 @@ class PostgresPersistenceHandler(BasePersistenceHandler):
     async def stream_draft_translations(
         self, batch_size: int
     ) -> AsyncGenerator[list[ContentItem], None]:
-        """使用 `FOR UPDATE SKIP LOCKED` 并发安全地流式获取任务。"""
+        """
+        [关键修复] 使用分页和短暂事务并发安全地流式获取 'draft' 任务。
+
+        修复逻辑：
+        1. 在一个独立的、短暂的事务中查询并使用 `FOR UPDATE SKIP LOCKED` 锁定一批任务。
+        2. 在该事务内部，将 ORM 对象转换为 DTO (`ContentItem`)。
+        3. 事务提交，立即释放行锁。
+        4. 在事务外部 `yield` DTO 列表，避免在持有锁的同时将控制权交还给调用方，从而根除死锁。
+        """
+        offset = 0
         while True:
+            items_to_yield = []
+            
+            # 步骤 1 & 2: 在短暂事务中获取并转换数据
             async with self._sessionmaker.begin() as session:
-                # 使用 with_for_update 实现行级锁
-                head_results = await self._stream_drafts_query(
-                    session, batch_size, skip_locked=True
+                stmt = (
+                    select(ThTransHead)
+                    .where(ThTransHead.current_status == TranslationStatus.DRAFT.value)
+                    .order_by(ThTransHead.updated_at)
+                    .limit(batch_size)
+                    .offset(offset)
+                    .with_for_update(skip_locked=True)
                 )
+                result = await session.execute(stmt)
+                head_results = list(result.scalars().all())
+
                 if not head_results:
                     break
 
-                items = await self._build_content_items_from_orm(session, head_results)
-                if not items:
+                items_to_yield = await self._build_content_items_from_orm(session, head_results)
+                
+                # 如果构建 DTO 后列表为空，也应终止
+                if not items_to_yield:
                     break
 
-                yield items
+            # 步骤 3 & 4: 事务已提交，锁已释放，现在可以安全地 yield
+            yield items_to_yield
 
-                # 更新状态为 'pending' 或类似状态，防止其他 worker 重复获取
-                # 此处简化为在事务结束时自动释放锁
+            # 如果获取到的批次小于请求大小，说明是最后一批
+            if len(items_to_yield) < batch_size:
+                break
+            
+            offset += batch_size

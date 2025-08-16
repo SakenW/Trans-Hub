@@ -66,7 +66,6 @@ class Coordinator:
         self.stream_producer: StreamProducer | None = None
         self.cache: CacheHandler | None = None
         self.processor: TranslationProcessor | None = None
-        self._engine_instances: dict[str, Any] = {}
         self.initialized = False
 
     async def initialize(self) -> None:
@@ -104,7 +103,6 @@ class Coordinator:
             return
         logger.info("协调器开始优雅停机...")
         await asyncio.gather(
-            *[eng.close() for eng in self._engine_instances.values()],
             self.handler.close(),
             dispose_engine(self._engine),
             return_exceptions=True,

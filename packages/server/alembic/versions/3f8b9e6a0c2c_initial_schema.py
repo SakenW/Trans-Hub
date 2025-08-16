@@ -235,6 +235,8 @@ def upgrade() -> None:
               origin_lang             TEXT CHECK (origin_lang IS NULL OR th.is_bcp47(origin_lang)),
               src_payload_json        JSONB NOT NULL,
               translated_payload_json JSONB,
+              engine_name             TEXT,
+              engine_version          TEXT,
               created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
               updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
               PRIMARY KEY (project_id, id),
@@ -307,6 +309,9 @@ def upgrade() -> None:
             sa.Column("origin_lang", sa.Text(), nullable=True),
             sa.Column("src_payload_json", json_type, nullable=False),
             sa.Column("translated_payload_json", json_type, nullable=True),
+            # [整合] 添加新列
+            sa.Column("engine_name", sa.Text(), nullable=True),
+            sa.Column("engine_version", sa.Text(), nullable=True),
             sa.Column(
                 "created_at",
                 sa.DateTime(timezone=True),
