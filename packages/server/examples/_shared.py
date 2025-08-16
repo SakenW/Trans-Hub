@@ -25,8 +25,6 @@ logger.setLevel("INFO")
 logger.addHandler(handler)
 
 
-
-
 @asynccontextmanager
 async def example_runner(
     db_file_name: str, **config_overrides: Any
@@ -48,7 +46,7 @@ async def example_runner(
         # 模拟环境变量的格式
         env_key = f"TRANSHUB_{key.upper()}"
         os.environ[env_key] = str(value)
-    
+
     config = create_app_config(env_mode="prod")
 
     # 2. 使用生产级的 DbService 来运行迁移
@@ -57,7 +55,7 @@ async def example_runner(
         sync_db_url = config.database.url.replace("+aiosqlite", "")
         # 临时设置维护URL，以便DbService工作
         config.maintenance_database_url = sync_db_url
-        
+
         service = DbService(config, str(find_alembic_ini()))  # [修改] 使用导入的函数
         service.run_migrations()
         logger.info("Alembic 迁移已应用到示例数据库。")

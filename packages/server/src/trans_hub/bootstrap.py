@@ -12,6 +12,7 @@
 - 执行在配置加载后必须进行的、符合技术宪章的严格校验。
 - 成为 CLI、测试、Alembic 和应用运行时获取配置的唯一入口。
 """
+
 from __future__ import annotations
 
 import os

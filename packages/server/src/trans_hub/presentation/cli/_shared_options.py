@@ -6,6 +6,7 @@ CLI 共享参数定义库
 提供单一事实来源 (SSOT)。这确保了所有命令中相同参数的
 帮助文本、短名称和行为完全一致。
 """
+
 from __future__ import annotations
 
 from typing import Annotated

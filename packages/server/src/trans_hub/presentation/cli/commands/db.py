@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -18,8 +17,6 @@ app = typer.Typer(help="数据库管理命令 (迁移、检查、重建等)。",
 console = Console()
 
 
-
-
 @app.command("migrate")
 def db_migrate(
     ctx: typer.Context,
@@ -30,7 +27,9 @@ def db_migrate(
     """运行数据库迁移，将 Schema 升级到最新版本。"""
     state: CLISharedState = ctx.obj
     try:
-        service = DbService(state.config, str(find_alembic_ini()))  # [修改] 使用导入的函数
+        service = DbService(
+            state.config, str(find_alembic_ini())
+        )  # [修改] 使用导入的函数
         service.run_migrations(force=force)
     except Exception as e:
         console.print(f"[bold red]❌ 迁移命令执行失败: {e}[/bold red]")
@@ -45,7 +44,9 @@ def db_stamp(
     """[高级] 将数据库版本标记为指定值，而不运行迁移脚本。"""
     state: CLISharedState = ctx.obj
     try:
-        service = DbService(state.config, str(find_alembic_ini()))  # [修改] 使用导入的函数
+        service = DbService(
+            state.config, str(find_alembic_ini())
+        )  # [修改] 使用导入的函数
         service.stamp_version(revision)
     except Exception as e:
         console.print(f"[bold red]❌ 标记命令执行失败: {e}[/bold red]")
@@ -57,7 +58,9 @@ def db_inspect(ctx: typer.Context) -> None:
     """以可读格式显示数据库中的核心内容。"""
     state: CLISharedState = ctx.obj
     try:
-        service = DbService(state.config, str(find_alembic_ini()))  # [修改] 使用导入的函数
+        service = DbService(
+            state.config, str(find_alembic_ini())
+        )  # [修改] 使用导入的函数
         service.inspect_database()
     except Exception as e:
         console.print(f"[bold red]❌ 审查数据库失败: {e}[/bold red]")
@@ -76,7 +79,9 @@ def db_doctor(
     """提供交互式或命令式的数据库诊断与修复工具。"""
     state: CLISharedState = ctx.obj
     try:
-        service = DbService(state.config, str(find_alembic_ini()))  # [修改] 使用导入的函数
+        service = DbService(
+            state.config, str(find_alembic_ini())
+        )  # [修改] 使用导入的函数
 
         if any([check, deep, rebuild, clear]):
             if check or deep:

@@ -2,7 +2,7 @@
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
 这些类型是系统各层之间数据交换的契约。
-(v2.5.12 对齐版)
+(v3.0.0 重构版)
 """
 from __future__ import annotations
 
@@ -72,6 +72,14 @@ class TranslationHead(BaseModel):
     published_no: int | None = None
     published_at: datetime | None = None
 
+    @classmethod
+    def from_orm_model(cls, orm_obj: Any) -> "TranslationHead":
+        """
+        [防腐层] 从 SQLAlchemy ORM 实例安全地创建 DTO。
+        封装了 ORM -> DTO 的转换逻辑。
+        """
+        return cls.model_validate(orm_obj, from_attributes=True)
+
 class TranslationRevision(BaseModel):
     """翻译修订记录的DTO。"""
     model_config = ConfigDict(from_attributes=True)
@@ -97,6 +105,29 @@ class Comment(BaseModel):
     author: str
     body: str
     created_at: datetime | None = None
+
+    @classmethod
+    def from_orm_model(cls, orm_obj: Any) -> "Comment":
+        """
+        [防腐层] 从 SQLAlchemy ORM 实例安全地创建 DTO。
+        
+        采用“预处理 -> 验证”模式，以处理 ORM 模型 (id: int) 与 
+        领域 DTO (id: str) 之间的类型不匹配。
+        """
+        if orm_obj is None:
+            # Pydantic v2.7+ model_validate 会处理 None，但为了清晰和兼容性，显式处理
+            raise ValueError("orm_obj cannot be None")
+
+        # 1. 提取原始数据
+        # SQLAlchemy ORM 对象可以像字典一样访问其列属性
+        data = {c.name: getattr(orm_obj, c.name) for c in orm_obj.__table__.columns}
+        
+        # 2. 预处理数据：在验证前进行必要的类型转换
+        if 'id' in data and data['id'] is not None:
+            data['id'] = str(data['id'])
+            
+        # 3. 使用预处理过的、类型正确的字典进行验证
+        return cls.model_validate(data)
 
 class Event(BaseModel):
     """事件记录的DTO。"""

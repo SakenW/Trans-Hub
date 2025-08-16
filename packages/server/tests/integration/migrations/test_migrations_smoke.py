@@ -5,6 +5,7 @@
 本测试利用 `managed_temp_database` 上下文管理器来确保测试环境的
 绝对纯净和零残留。核心逻辑只关注 Alembic 命令本身的正确性。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -50,7 +51,9 @@ async def test_upgrade_downgrade_cycle_on_temp_db() -> None:
         tenant_real_dsn = temp_db_url.render_as_string(hide_password=False)
         cfg.set_main_option("sqlalchemy.url", _cfg_safe(tenant_real_dsn))
 
-        print(f"Running migration cycle on: {temp_db_url.render_as_string(hide_password=True)}")
+        print(
+            f"Running migration cycle on: {temp_db_url.render_as_string(hide_password=True)}"
+        )
 
         # 3. 执行升级 -> 降级 -> 升级的完整循环
         command.upgrade(cfg, "head")

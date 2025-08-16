@@ -43,7 +43,7 @@ def resolve_maint_dsn() -> URL:
         pytest.skip(f"{ENV_KEY_MAINT_DSN} 必须为 psycopg 驱动，当前为: {raw!r}")
 
     url = make_url(raw)
-    
+
     # Pydantic Settings v2 可能会自动从 .env 文件中加载，所以密码通常是真实的
     # 但我们保留此逻辑以应对手动设置或 CI 环境中的脱敏占位符
     if (url.password or "").strip() in ("", "***"):
@@ -60,7 +60,7 @@ def create_db(maint_engine_url: URL, db_name: str) -> None:
     engine = create_engine(maint_engine_url, isolation_level="AUTOCOMMIT")
     try:
         with engine.connect() as conn:
-            conn.execute(text(f'CREATE DATABASE "{db_name}" ENCODING \'UTF8\''))
+            conn.execute(text(f"CREATE DATABASE \"{db_name}\" ENCODING 'UTF8'"))
     except Exception as e:
         if isinstance(getattr(e, "orig", None), InsufficientPrivilege):
             pytest.skip("维护账号缺少 CREATEDB 权限，跳过测试")

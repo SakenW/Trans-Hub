@@ -5,6 +5,7 @@ Pytest 共享夹具 (v3.0.0 重构版)
 - 复用 tests.helpers.db_manager 中的工具函数来创建和销毁主测试数据库。
 - 确保测试环境的准备逻辑与迁移测试的逻辑共享相同的底层实现。
 """
+
 from __future__ import annotations
 
 import pytest_asyncio
@@ -37,7 +38,9 @@ async def engine() -> AsyncEngine:
     # 1. 加载测试配置以获取数据库名
     cfg = create_app_config(env_mode="test")
     app_db_name = cfg.database.url.split("/")[-1]
-    assert app_db_name.startswith("transhub_test"), "测试数据库名必须以 'transhub_test' 开头"
+    assert app_db_name.startswith("transhub_test"), (
+        "测试数据库名必须以 'transhub_test' 开头"
+    )
 
     # 2. 复用 db_manager 的工具来获取维护库 DSN
     maint_url = resolve_maint_dsn()

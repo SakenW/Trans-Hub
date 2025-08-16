@@ -1,7 +1,7 @@
 # packages/server/alembic/env.py
-# 
+#
 # TRANS-HUB v3.x 权威 Alembic 环境配置 (最终修正版)
-# 
+#
 # 特性：
 # - [最终修复] 修正 SQLAlchemy API 调用，直接在配置了 AUTOCOMMIT 的连接上执行 DDL。
 # - 在主迁移事务开始前，以 AUTOCOMMIT 模式创建 schema 和自定义 ENUM 类型。
@@ -26,15 +26,13 @@ try:
     SRC_DIR = Path(__file__).resolve().parents[2] / "src"
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
-    
+
     # [v3.0.0] 不再需要 bootstrap，Alembic 自身通过 alembic.ini + 环境变量加载
     from trans_hub.infrastructure.db._schema import Base
 
 except (ImportError, IndexError, RuntimeError) as e:
     sys.stderr.write(
-        f"错误: 无法加载 ORM Base 元数据。\n"
-        f"  - 查找路径: {SRC_DIR}\n"
-        f"  - 错误: {e}\n"
+        f"错误: 无法加载 ORM Base 元数据。\n  - 查找路径: {SRC_DIR}\n  - 错误: {e}\n"
     )
     sys.exit(1)
 

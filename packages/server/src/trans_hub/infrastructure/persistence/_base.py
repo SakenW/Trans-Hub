@@ -1,7 +1,7 @@
 # packages/server/src/trans_hub/infrastructure/persistence/_base.py
 """
 持久化处理器的基类，封装了使用 SQLAlchemy ORM 实现的、
-跨数据库方言共享的核心数据访问逻辑。(v2.5.14 对齐版)
+跨数据库方言共享的核心数据访问逻辑。(v3.0.0 重构版)
 """
 
 from __future__ import annotations
@@ -464,18 +464,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     .order_by(ThComments.created_at)
                 )
                 results = (await session.execute(stmt)).scalars().all()
-                # 将整数 id 转换为字符串
-            return [
-                Comment(
-                    id=str(r.id),
-                    head_id=r.head_id,
-                    project_id=r.project_id,
-                    author=r.author,
-                    body=r.body,
-                    created_at=r.created_at,
-                )
-                for r in results
-            ]
+                # [修改] 统一使用 .from_orm_model() 进行转换
+                return [Comment.from_orm_model(r) for r in results]
         except SQLAlchemyError as e:
             raise DatabaseError(f"获取评论失败: {e}") from e
 
@@ -537,11 +527,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     )
                 )
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return (
-                    TranslationHead.model_validate(result, from_attributes=True)
-                    if result
-                    else None
-                )
+                # [修改] 统一使用 .from_orm_model() 进行转换
+                return TranslationHead.from_orm_model(result) if result else None
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 UIDA 获取 Head 失败: {e}") from e
 
@@ -551,11 +538,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
             async with self._sessionmaker() as session:
                 stmt = select(ThTransHead).where(ThTransHead.id == head_id)
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return (
-                    TranslationHead.model_validate(result, from_attributes=True)
-                    if result
-                    else None
-                )
+                # [修改] 统一使用 .from_orm_model() 进行转换
+                return TranslationHead.from_orm_model(result) if result else None
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 ID 获取 Head 失败: {e}") from e
 
@@ -572,11 +556,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                     .limit(1)
                 )
                 result = (await session.execute(stmt)).scalar_one_or_none()
-                return (
-                    TranslationHead.model_validate(result, from_attributes=True)
-                    if result
-                    else None
-                )
+                # [修改] 统一使用 .from_orm_model() 进行转换
+                return TranslationHead.from_orm_model(result) if result else None
         except SQLAlchemyError as e:
             raise DatabaseError(f"通过 Revision 获取 Head 失败: {e}") from e
 
