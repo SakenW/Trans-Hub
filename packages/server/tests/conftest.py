@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from trans_hub.config_loader import load_config_from_env
+from trans_hub.bootstrap import create_app_config  # [修改] 导入新的工厂函数
 from trans_hub.infrastructure.db import (
     create_async_db_engine,
     create_async_sessionmaker,
@@ -38,7 +38,8 @@ async def engine() -> AsyncEngine:
     """
     会话级共享引擎, 自动在会话开始时重建测试数据库。
     """
-    cfg = load_config_from_env(mode="test", strict=True)
+    # [修改] 使用新的引导程序加载测试配置
+    cfg = create_app_config(env_mode="test")
 
     # --- 1. 同步操作：重建数据库 ---
     maint_url_str = cfg.maintenance_database_url
@@ -82,7 +83,8 @@ def sessionmaker(engine: AsyncEngine):
 @pytest_asyncio.fixture
 async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
     """提供一个函数级的、已初始化的 Coordinator 实例。"""
-    cfg = load_config_from_env(mode="test", strict=True)
+    # [修改] 使用新的引导程序加载测试配置
+    cfg = create_app_config(env_mode="test")
     coord = Coordinator(cfg)
 
     coord._engine = engine

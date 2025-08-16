@@ -1,9 +1,10 @@
 # packages/server/alembic/env.py
-#
+# 
 # TRANS-HUB v3.x 权威 Alembic 环境配置 (最终修正版)
-#
+# 
 # 特性：
-# - [关键修复] 使用 AUTOCOMMIT 模式确保 `CREATE SCHEMA` 被立即持久化。
+# - [最终修复] 修正 SQLAlchemy API 调用，直接在配置了 AUTOCOMMIT 的连接上执行 DDL。
+# - 在主迁移事务开始前，以 AUTOCOMMIT 模式创建 schema 和自定义 ENUM 类型。
 # - 完全符合白皮书 v3.x 规范。
 # - 智能路径解析，确保能从任何位置运行并导入项目 ORM Base。
 # - 启用 `include_schemas=True` 和 `version_table_schema="th"`，正确处理 PostgreSQL schema。
@@ -20,15 +21,18 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
 
-# --- 路径设置 ---
+# --- 路径与配置加载 ---
 try:
     SRC_DIR = Path(__file__).resolve().parents[2] / "src"
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
+    
+    # [v3.0.0] 不再需要 bootstrap，Alembic 自身通过 alembic.ini + 环境变量加载
     from trans_hub.infrastructure.db._schema import Base
-except (ImportError, IndexError) as e:
+
+except (ImportError, IndexError, RuntimeError) as e:
     sys.stderr.write(
-        f"错误: 无法找到或导入 ORM Base 元数据。请确保 'src' 目录结构正确。\n"
+        f"错误: 无法加载 ORM Base 元数据。\n"
         f"  - 查找路径: {SRC_DIR}\n"
         f"  - 错误: {e}\n"
     )
@@ -74,10 +78,22 @@ def run_migrations_online() -> None:
         )
 
     with connectable.connect() as connection:
-        # [关键修复] 使用 AUTOCOMMIT 模式执行 CREATE SCHEMA，确保其在事务外被立即持久化。
-        # 这是因为 PostgreSQL 不允许在事务块内执行 CREATE SCHEMA。
-        connection.execution_options(isolation_level="AUTOCOMMIT").execute(
-            text("CREATE SCHEMA IF NOT EXISTS th")
+        # [最终修复] 修正 API 调用方式。
+        # 直接在配置了 execution_options 的 connection 上执行，而不是在 transaction 对象上。
+        autocommit_connection = connection.execution_options(
+            isolation_level="AUTOCOMMIT"
+        )
+        autocommit_connection.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+        autocommit_connection.execute(
+            text(
+                """
+                DO $$ BEGIN 
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='translation_status' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'th')) THEN 
+                        CREATE TYPE th.translation_status AS ENUM ('draft','reviewed','published','rejected'); 
+                    END IF; 
+                END $$; 
+                """
+            )
         )
 
         context.configure(

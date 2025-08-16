@@ -256,8 +256,8 @@ class TransHubConfig(BaseSettings):
         "env_nested_delimiter": "__",
         "env_prefix": "TRANSHUB_",
         "case_sensitive": False,
-        "extra": "ignore",  # 未被使用的额外键忽略（安全无害）
-        "env_file": ".env",
+        "extra": "ignore",
+        # [修改] 移除静态的 env_file，由 bootstrap 模块动态提供
         "env_file_encoding": "utf-8",
     }
 

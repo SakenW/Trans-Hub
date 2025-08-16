@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.traceback import install as install_rich_tracebacks
 
-from trans_hub.config_loader import load_config_from_env
+from trans_hub.bootstrap import create_app_config  # [修改] 导入新的工厂函数
 from trans_hub.observability.logging_config import setup_logging
 
 from ._state import CLISharedState
@@ -37,9 +37,8 @@ def main(ctx: typer.Context):
     主回调函数，在任何子命令执行前运行，负责加载配置和初始化日志。
     """
     try:
-        # [REVERTED] CLI 始终默认加载生产配置 (.env)。
-        # 测试环境将通过 CliRunner 的 'env' 参数注入配置。
-        config = load_config_from_env(mode="prod", strict=True)
+        # [修改] 使用新的引导程序加载生产配置
+        config = create_app_config(env_mode="prod")
         setup_logging(log_level=config.logging.level, log_format=config.logging.format)
         ctx.obj = CLISharedState(config=config)
     except Exception as e:

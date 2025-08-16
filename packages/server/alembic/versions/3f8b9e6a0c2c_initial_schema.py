@@ -66,15 +66,16 @@ def upgrade() -> None:
         op.execute("CREATE SCHEMA IF NOT EXISTS th;")
         op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
 
-        op.execute(
-            """
-            DO $$ BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='translation_status') THEN
-                    CREATE TYPE th.translation_status AS ENUM ('draft','reviewed','published','rejected');
-                END IF;
-            END $$;
-            """
-        )
+        # [修改] 移除 CREATE TYPE 逻辑，因为它已被移至 alembic/env.py 中
+        # op.execute(
+        #     """
+        #     DO $$ BEGIN
+        #         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='translation_status') THEN
+        #             CREATE TYPE th.translation_status AS ENUM ('draft','reviewed','published','rejected');
+        #         END IF;
+        #     END $$;
+        #     """
+        # )
 
         op.execute(
             """

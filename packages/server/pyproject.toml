@@ -59,4 +59,4 @@ trans-hub = "trans_hub.presentation.cli.main:app"
 asyncio_mode = "auto"
 # 告诉 pytest 将包的根目录（即 packages/server）加入到搜索路径
 pythonpath = [".", "src", "tests"]
-env_files = ".env.test"
+
