@@ -30,6 +30,7 @@ __all__ = ["load_config_from_env"]
 # 内部工具
 # ---------------------------
 
+
 def _load_env_files(mode: Literal["test", "prod"]) -> None:
     """
     加载 .env / .env.test：
@@ -117,6 +118,7 @@ def _validate_dsn_drivers(cfg: TransHubConfig, strict: bool) -> None:
 # 公共入口
 # ---------------------------
 
+
 def load_config_from_env(
     mode: Literal["test", "prod"] = "test",
     strict: bool = True,
@@ -134,7 +136,9 @@ def load_config_from_env(
     _load_env_files(mode)
     _ensure_no_legacy_prefix(strict=strict)
 
-    cfg = TransHubConfig()  # 内部固定：env_prefix="TRANSHUB_", env_nested_delimiter="__"
+    cfg = (
+        TransHubConfig()
+    )  # 内部固定：env_prefix="TRANSHUB_", env_nested_delimiter="__"
     _validate_dsn_drivers(cfg, strict=strict)
 
     return cfg

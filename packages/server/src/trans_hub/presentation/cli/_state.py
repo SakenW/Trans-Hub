@@ -2,6 +2,7 @@
 """
 定义了 CLI 应用中用于上下文传递的共享状态容器。
 """
+
 from trans_hub.config import TransHubConfig
 
 

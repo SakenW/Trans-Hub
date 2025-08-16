@@ -47,7 +47,11 @@ async def get_translation(
         if result:
             console.print(
                 Panel(
-                    Syntax(json.dumps(result, indent=2, ensure_ascii=False), "json", theme="monokai"),
+                    Syntax(
+                        json.dumps(result, indent=2, ensure_ascii=False),
+                        "json",
+                        theme="monokai",
+                    ),
                     title="[green]✅ 已解析的翻译内容[/green]",
                     border_style="green",
                 )
@@ -90,9 +94,7 @@ async def get_comments(
     async with get_coordinator(state) as coordinator:
         comments = await coordinator.get_comments(head_id)
         if not comments:
-            console.print(
-                f"[yellow]Head ID [bold]{head_id}[/bold] 尚无评论。[/yellow]"
-            )
+            console.print(f"[yellow]Head ID [bold]{head_id}[/bold] 尚无评论。[/yellow]")
             return
 
         table = Table(

@@ -229,7 +229,9 @@ class Coordinator:
         )
 
         if result_payload and self.cache:
-            await self.cache.set(cache_key, result_payload, ttl=self.config.redis.cache.ttl)
+            await self.cache.set(
+                cache_key, result_payload, ttl=self.config.redis.cache.ttl
+            )
             logger.debug("解析结果已写入缓存", key=cache_key)
 
         return result_payload

@@ -223,7 +223,9 @@ def setup_logging(
     ]
 
     # 默认本地时间；如为 JSON 模式会在下方覆盖为 ISO+UTC
-    timestamper_local = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False)
+    timestamper_local = structlog.processors.TimeStamper(
+        fmt="%Y-%m-%d %H:%M:%S", utc=False
+    )
 
     processors: list[Processor] = [
         *pre_chain,
@@ -236,7 +238,9 @@ def setup_logging(
 
     # JSON：ISO + UTC
     if log_format == "json":
-        processors[3] = structlog.processors.TimeStamper(fmt="iso", utc=True)  # 覆盖为 ISO+UTC
+        processors[3] = structlog.processors.TimeStamper(
+            fmt="iso", utc=True
+        )  # 覆盖为 ISO+UTC
 
     structlog.configure(
         processors=processors,
@@ -310,7 +314,10 @@ def setup_logging(
 
 # -------- 便捷入口：从 TransHubConfig 初始化 --------
 
-def setup_logging_from_config(cfg: "TransHubConfig", *, service: str = "trans-hub-server") -> None:
+
+def setup_logging_from_config(
+    cfg: "TransHubConfig", *, service: str = "trans-hub-server"
+) -> None:
     """
     根据 TransHubConfig 一键初始化日志系统。
     - cfg.logging.format: 'console' | 'json'

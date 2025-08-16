@@ -2,6 +2,7 @@
 """
 CLI 内部共享的辅助工具，例如用于管理 Coordinator 生命周期的上下文管理器。
 """
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 

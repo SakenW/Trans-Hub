@@ -48,6 +48,7 @@ target_metadata = Base.metadata
 
 # --- Alembic 运行模式 ---
 
+
 def run_migrations_offline() -> None:
     """在“离线”模式下运行迁移。
 
@@ -60,7 +61,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_schemas=True, # 保持一致
+        include_schemas=True,  # 保持一致
         version_table_schema="th",
     )
 
@@ -89,7 +90,7 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         # 1. [关键修复] 幂等地创建 'th' schema
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-        
+
         # 2. 配置 Alembic 上下文，使其知道我们的 schema
         context.configure(
             connection=connection,

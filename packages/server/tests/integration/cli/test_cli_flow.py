@@ -2,6 +2,7 @@
 """
 对 CLI 应用进行端到端的集成测试。(最终版)
 """
+
 import json
 from unittest.mock import MagicMock
 
@@ -12,7 +13,6 @@ from typer.testing import CliRunner
 from trans_hub.application.coordinator import Coordinator
 from trans_hub.presentation.cli._state import CLISharedState
 from trans_hub.presentation.cli.commands import request, status
-from trans_hub.presentation.cli.main import app
 from tests.helpers.factories import create_request_data
 
 runner = CliRunner()
@@ -25,10 +25,14 @@ def mock_ctx(coordinator: Coordinator) -> MagicMock:
     mock.obj = CLISharedState(config=coordinator.config)
     return mock
 
+
 # 注：db migrate 的测试不再需要，因为它已在 conftest 的 engine fixture 中被隐式覆盖和验证。
 
+
 @pytest.mark.asyncio
-async def test_async_cli_workflow(coordinator: Coordinator, mock_ctx: MagicMock, capsys):
+async def test_async_cli_workflow(
+    coordinator: Coordinator, mock_ctx: MagicMock, capsys
+):
     """
     直接调用异步命令函数进行测试，验证核心工作流。
     """
@@ -80,6 +84,7 @@ async def test_async_cli_workflow(coordinator: Coordinator, mock_ctx: MagicMock,
     )
     captured = capsys.readouterr()
     assert "Direct Call Test" in captured.out
+
 
 @pytest.mark.asyncio
 async def test_async_cli_error_handling(mock_ctx: MagicMock):

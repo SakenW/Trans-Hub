@@ -10,8 +10,6 @@ Pytest 共享夹具 (最终权威版)
 """
 
 from __future__ import annotations
-import os
-from pathlib import Path
 
 import pytest_asyncio
 import pytest
@@ -41,11 +39,11 @@ async def engine() -> AsyncEngine:
     会话级共享引擎, 自动在会话开始时重建测试数据库。
     """
     cfg = load_config_from_env(mode="test", strict=True)
-    
+
     # --- 1. 同步操作：重建数据库 ---
     maint_url_str = cfg.maintenance_database_url
     assert maint_url_str, "TRANSHUB_MAINTENANCE_DATABASE_URL is required for tests"
-    
+
     app_url = make_url(cfg.database.url)
     app_db_name = app_url.database
     app_db_user = app_url.username
@@ -64,14 +62,14 @@ async def engine() -> AsyncEngine:
     async with eng.begin() as conn:
         # [CRITICAL FIX] 先创建 schema 并提交，再创建表
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-    
+
     async with eng.begin() as conn:
         # 现在 schema 肯定存在，可以安全地创建所有表
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("SELECT 1"))
 
     yield eng
-    
+
     await dispose_engine(eng)
 
 
@@ -86,10 +84,10 @@ async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
     """提供一个函数级的、已初始化的 Coordinator 实例。"""
     cfg = load_config_from_env(mode="test", strict=True)
     coord = Coordinator(cfg)
-    
+
     coord._engine = engine
     coord._sessionmaker = sessionmaker
-    
+
     await coord.initialize()
     try:
         yield coord

@@ -25,8 +25,10 @@ from sqlalchemy.engine.url import make_url
 
 # ===================== 子模型 =====================
 
+
 class DatabaseSettings(BaseModel):
     """主库（运行期异步驱动）"""
+
     url: str = Field(
         default="sqlite+aiosqlite:///transhub.db",
         description="异步 DSN（sqlite+aiosqlite / postgresql+asyncpg / mysql+aiomysql）",
@@ -56,6 +58,7 @@ class DatabaseSettings(BaseModel):
 
 class RedisClusterSettings(BaseModel):
     """Redis 集群（预留占位）"""
+
     nodes: Optional[str] = Field(
         default=None,
         description="逗号分隔节点，如 redis://n1:6379,redis://n2:6379",
@@ -64,18 +67,21 @@ class RedisClusterSettings(BaseModel):
 
 class RedisSentinelSettings(BaseModel):
     """Redis Sentinel（预留占位）"""
+
     nodes: Optional[str] = Field(default=None, description="host:port,host:port")
     master: Optional[str] = Field(default=None, description="主节点名，如 mymaster")
 
 
 class CacheSettings(BaseModel):
     """缓存策略（可选增强）"""
+
     ttl: int = Field(default=3600, ge=1, description="默认 TTL（秒）")
     maxsize: int = Field(default=1000, ge=1, description="最大条目数（LRU 等）")
 
 
 class RedisSettings(BaseModel):
     """Redis（可选增强；未配置 url 视为未启用）"""
+
     url: Optional[str] = Field(default=None, description="Redis 连接 URL")
     key_prefix: str = Field(default="th:", description="统一 key 前缀")
     cluster: RedisClusterSettings = Field(default_factory=RedisClusterSettings)
@@ -85,18 +91,21 @@ class RedisSettings(BaseModel):
 
 class WorkerSettings(BaseModel):
     """工作进程 / 事件流"""
+
     event_stream_name: str = Field(default="th_events", description="事件流名称")
     poll_interval: float = Field(default=2.0, gt=0, description="轮询/心跳间隔（秒）")
 
 
 class LoggingSettings(BaseModel):
     """日志参数"""
+
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
     format: Literal["console", "json"] = Field(default="console")
 
 
 class RetryPolicySettings(BaseModel):
     """重试策略"""
+
     max_attempts: int = Field(default=2, ge=0)
     initial_backoff: float = Field(default=1.0, gt=0)
     max_backoff: float = Field(default=60.0, gt=0)
@@ -104,6 +113,7 @@ class RetryPolicySettings(BaseModel):
 
 class QueueSettings(BaseModel):
     """队列 / 事件流路由"""
+
     kind: Literal["redis", "db"] = Field(default="db", description="队列类型")
     prefix: str = Field(default="th:queue:", description="队列 key 前缀")
     streams_prefix: str = Field(default="th:streams:", description="事件流 key 前缀")
@@ -111,8 +121,11 @@ class QueueSettings(BaseModel):
 
 class OpenAISettings(BaseModel):
     """OpenAI 引擎配置（当 active_engine=openai 时使用）"""
+
     api_key: Optional[str] = Field(default=None)
-    base_url: Optional[str] = Field(default=None, description="自定义网关可设定；默认官方端点")
+    base_url: Optional[str] = Field(
+        default=None, description="自定义网关可设定；默认官方端点"
+    )
     model: Optional[str] = Field(default=None, description="如 gpt-4o / gpt-4o-mini")
     temperature: float = Field(default=0.1, ge=0)
     timeout: float = Field(default=60.0, gt=0, description="整体超时（秒）")
@@ -122,11 +135,13 @@ class OpenAISettings(BaseModel):
 
 class TranslatorsSettings(BaseModel):
     """Translators 引擎配置（预留）"""
+
     provider: Optional[str] = Field(default=None, description="如 google / deeplx 等")
 
 
 class DebugEngineSettings(BaseModel):
     """Debug 引擎配置"""
+
     mode: Literal["SUCCESS", "FAIL"] = Field(default="SUCCESS")
     fail_on_text: Optional[str] = Field(default=None)
     fail_is_retryable: bool = Field(default=True)
@@ -134,12 +149,14 @@ class DebugEngineSettings(BaseModel):
 
 class ObservabilitySettings(BaseModel):
     """可观测性/OTEL（预留）"""
+
     otel_exporter: Optional[str] = Field(
         default=None, description="如 prometheus / jaeger；未实现时忽略"
     )
 
 
 # ===================== 顶层配置 =====================
+
 
 class TransHubConfig(BaseSettings):
     """
@@ -170,7 +187,9 @@ class TransHubConfig(BaseSettings):
     db_pool_timeout: int = Field(default=30, ge=1)
     db_pool_recycle: Optional[int] = Field(default=None, ge=1)
     db_pool_pre_ping: bool = Field(default=True)
-    db_echo: bool = Field(default=False, description="覆盖 database.echo；True 时打印 SQL")
+    db_echo: bool = Field(
+        default=False, description="覆盖 database.echo；True 时打印 SQL"
+    )
 
     # --- 维护库（同步驱动，运维建删库用；可选）---
     maintenance_database_url: Optional[str] = Field(
@@ -182,7 +201,9 @@ class TransHubConfig(BaseSettings):
     )
 
     # --- 语言/引擎/批量/GC ---
-    default_source_lang: Optional[str] = Field(default=None, description="默认源语言（BCP-47）")
+    default_source_lang: Optional[str] = Field(
+        default=None, description="默认源语言（BCP-47）"
+    )
     active_engine: Literal["debug", "translators", "openai"] = Field(default="debug")
     batch_size: int = Field(default=50, ge=1)
     gc_retention_days: int = Field(default=90, ge=1)
@@ -235,7 +256,7 @@ class TransHubConfig(BaseSettings):
         "env_nested_delimiter": "__",
         "env_prefix": "TRANSHUB_",
         "case_sensitive": False,
-        "extra": "ignore",          # 未被使用的额外键忽略（安全无害）
+        "extra": "ignore",  # 未被使用的额外键忽略（安全无害）
         "env_file": ".env",
         "env_file_encoding": "utf-8",
     }

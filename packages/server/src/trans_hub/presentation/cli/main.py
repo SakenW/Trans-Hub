@@ -2,6 +2,7 @@
 """
 Trans-Hub Server CLI 的主入口点。
 """
+
 import typer
 from rich.console import Console
 from rich.traceback import install as install_rich_tracebacks

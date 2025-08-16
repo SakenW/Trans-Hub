@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from .._utils import get_coordinator
-from .._state import CLISharedState # [REFACTOR] 显式从 _state 导入以保持清晰
+from .._state import CLISharedState  # [REFACTOR] 显式从 _state 导入以保持清晰
 
 app = typer.Typer(help="提交和管理翻译请求。")
 console = Console()
