@@ -1,6 +1,6 @@
 # packages/server/src/trans_hub/application/coordinator.py
 """
-Trans-Hub 应用服务总协调器。(v2.5.14 对齐版)
+Trans-Hub 应用服务总协调器。(v3.0.0 重构版)
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from trans_hub.infrastructure.db import (
 )
 
 from trans_hub.infrastructure.persistence import create_persistence_handler
+from trans_hub.application.resolvers import TranslationResolver  # [新增] 导入新的解析器
 from trans_hub_core.types import Comment, Event, TranslationStatus
 from trans_hub_uida import generate_uida
 
@@ -59,6 +60,9 @@ class Coordinator:
         self.handler: PersistenceHandler = create_persistence_handler(
             config, self._sessionmaker
         )
+        # [新增] 初始化解析器，将持久化处理器注入其中
+        self.resolver = TranslationResolver(self.handler)
+
         self.stream_producer: StreamProducer | None = None
         self.cache: CacheHandler | None = None
         self.processor: TranslationProcessor | None = None
@@ -224,7 +228,8 @@ class Coordinator:
                 logger.debug("解析缓存命中", key=cache_key)
                 return cached_result
 
-        result_payload, _ = await self._resolve_from_db_with_fallback(
+        # [修改] 将核心解析逻辑委托给 self.resolver
+        result_payload, _ = await self.resolver.resolve_with_fallback(
             project_id, content_id, target_lang, variant_key
         )
 
@@ -235,60 +240,6 @@ class Coordinator:
             logger.debug("解析结果已写入缓存", key=cache_key)
 
         return result_payload
-
-    async def _resolve_from_db_with_fallback(
-        self, project_id: str, content_id: str, target_lang: str, variant_key: str
-    ) -> tuple[dict[str, Any] | None, str | None]:
-        """[v2.5.14 核心逻辑] 从数据库解析翻译，并应用变体和语言回退链。"""
-        # 1. 精确匹配 (语言 + 变体)
-        result = await self.handler.get_published_translation(
-            content_id, target_lang, variant_key
-        )
-        if result:
-            logger.debug(
-                "解析成功: 精确匹配",
-                content_id=content_id,
-                lang=target_lang,
-                variant=variant_key,
-            )
-            return result[1], result[0]
-
-        # 2. 如果请求了非默认变体，则回退到默认变体
-        if variant_key != "-":
-            result = await self.handler.get_published_translation(
-                content_id, target_lang, "-"
-            )
-            if result:
-                logger.debug(
-                    "解析成功: 回退到默认变体", content_id=content_id, lang=target_lang
-                )
-                return result[1], result[0]
-
-        # 3. 查询并应用语言回退链
-        fallback_order = await self.handler.get_fallback_order(project_id, target_lang)
-        if fallback_order:
-            for fallback_lang in fallback_order:
-                logger.debug(
-                    "正在尝试语言回退",
-                    content_id=content_id,
-                    fallback_lang=fallback_lang,
-                )
-                # 回退时，总是使用默认变体
-                result = await self.handler.get_published_translation(
-                    content_id, fallback_lang, "-"
-                )
-                if result:
-                    logger.debug(
-                        "解析成功: 语言回退命中",
-                        content_id=content_id,
-                        hit_lang=fallback_lang,
-                    )
-                    return result[1], result[0]
-
-        logger.debug(
-            "解析失败: 所有回退均未命中", content_id=content_id, lang=target_lang
-        )
-        return None, None
 
     async def publish_translation(
         self, revision_id: str, actor: str = "system"
