@@ -2,6 +2,7 @@
 """
 数据库管理命令，整合了迁移、健康检查、重建和数据审查等功能。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,7 +34,9 @@ def _find_alembic_ini() -> Path:
 @app.command("migrate")
 def db_migrate(
     ctx: typer.Context,
-    force: bool = typer.Option(False, "--force", help="迁移失败时，强制使用 ORM 兜底。"),
+    force: bool = typer.Option(
+        False, "--force", help="迁移失败时，强制使用 ORM 兜底。"
+    ),
 ) -> None:
     """运行数据库迁移，将 Schema 升级到最新版本。"""
     state: CLISharedState = ctx.obj

@@ -45,6 +45,7 @@ target_metadata = Base.metadata
 
 # --- Alembic 运行模式 ---
 
+
 def run_migrations_offline() -> None:
     """在“离线”模式下运行迁移。"""
     url = config.get_main_option("sqlalchemy.url")

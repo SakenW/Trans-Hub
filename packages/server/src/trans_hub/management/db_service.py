@@ -3,6 +3,7 @@
 提供用于数据库管理和诊断的服务。
 这是所有数据库运维操作的核心逻辑封装，属于项目的“管理平面”。
 """
+
 from __future__ import annotations
 
 import os
@@ -16,13 +17,13 @@ from rich.syntax import Syntax
 from rich.table import Table
 from sqlalchemy import create_engine, text, Engine, inspect
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
-from alembic.util import CommandError # [新增] 用于捕获 Alembic 自己的错误
+from alembic.util import CommandError  # [新增] 用于捕获 Alembic 自己的错误
 
 from trans_hub.infrastructure.db._schema import Base, ThContent, ThTransHead, ThTransRev
 from trans_hub.config import TransHubConfig
@@ -45,6 +46,7 @@ STATUS_STYLES = {
     "rejected": "bold red",
 }
 
+
 class DbService:
     """封装了数据库诊断、迁移、修复和审查的所有操作。"""
 
@@ -59,7 +61,9 @@ class DbService:
 
         maint_url_str = self.config.maintenance_database_url
         if not maint_url_str:
-            raise ValueError("维护数据库 URL (TRANSHUB_MAINTENANCE_DATABASE_URL) 未配置。")
+            raise ValueError(
+                "维护数据库 URL (TRANSHUB_MAINTENANCE_DATABASE_URL) 未配置。"
+            )
         self.sync_maint_url: URL = self._to_sync_url(make_url(maint_url_str))
 
     @staticmethod
@@ -103,7 +107,9 @@ class DbService:
 
             if "th" in schemas:
                 th_tables = inspector.get_table_names(schema="th")
-                table.add_row("`th` schema下的表", f"{th_tables if th_tables else '[空]'}")
+                table.add_row(
+                    "`th` schema下的表", f"{th_tables if th_tables else '[空]'}"
+                )
                 if "alembic_version" in th_tables:
                     table.add_row("`th.alembic_version`", "[green]✅ 物理存在[/green]")
                 else:
@@ -130,7 +136,8 @@ class DbService:
             table.add_row("维护库连接", f"[red]❌ 失败: {e}[/red]")
             errors += 1
         finally:
-            if 'engine' in locals(): engine.dispose()
+            if "engine" in locals():
+                engine.dispose()
 
         db_version = "无法访问"
         engine = self._create_sync_engine(self.sync_app_url)
@@ -141,7 +148,9 @@ class DbService:
                     self._run_deep_structure_probe(engine, table)
 
                 try:
-                    res = conn.execute(text("SELECT version_num FROM th.alembic_version"))
+                    res = conn.execute(
+                        text("SELECT version_num FROM th.alembic_version")
+                    )
                     db_version = res.scalar_one_or_none() or "[空]"
                 except ProgrammingError:
                     db_version = "[表不存在]"
@@ -183,7 +192,9 @@ class DbService:
                 console.print("提示: 可尝试使用 --force 标志启用兜底模式。")
                 sys.exit(1)
 
-            console.print(f"[bold yellow]⚠️ 标准迁移失败: {e}。正在启动强制兜底模式...[/bold yellow]")
+            console.print(
+                f"[bold yellow]⚠️ 标准迁移失败: {e}。正在启动强制兜底模式...[/bold yellow]"
+            )
             self._fallback_migration(alembic_cfg)
 
     def _fallback_migration(self, alembic_cfg: AlembicConfig) -> None:
@@ -200,13 +211,19 @@ class DbService:
                 if head:
                     conn.execute(text("DROP TABLE IF EXISTS th.alembic_version"))
                     conn.execute(
-                        text("CREATE TABLE th.alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)")
+                        text(
+                            "CREATE TABLE th.alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                        )
                     )
                     conn.execute(
-                        text("INSERT INTO th.alembic_version (version_num) VALUES (:v)"),
+                        text(
+                            "INSERT INTO th.alembic_version (version_num) VALUES (:v)"
+                        ),
                         {"v": head},
                     )
-                    console.print(f"  - 已强制写入 Alembic 版本: [yellow]{head}[/yellow]")
+                    console.print(
+                        f"  - 已强制写入 Alembic 版本: [yellow]{head}[/yellow]"
+                    )
             console.print("[bold green]✅ 兜底迁移成功！[/bold green]")
         except Exception as e:
             console.print(f"[bold red]❌ 兜底迁移失败: {e}[/bold red]")
@@ -214,7 +231,11 @@ class DbService:
 
     def stamp_version(self, revision: str) -> None:
         """将数据库的 Alembic 版本标记为指定版本，而不运行迁移。"""
-        console.print(Panel(f"标记数据库版本为: [yellow]{revision}[/yellow]", border_style="yellow"))
+        console.print(
+            Panel(
+                f"标记数据库版本为: [yellow]{revision}[/yellow]", border_style="yellow"
+            )
+        )
         alembic_cfg = self._get_alembic_cfg()
         try:
             command.stamp(alembic_cfg, revision)
@@ -226,7 +247,9 @@ class DbService:
     def rebuild_database(self) -> None:
         """[危险] 删除并重建数据库。"""
         if self.is_prod:
-            console.print("[bold red]❌ 操作被阻止: 禁止在生产环境中重建数据库。[/bold red]")
+            console.print(
+                "[bold red]❌ 操作被阻止: 禁止在生产环境中重建数据库。[/bold red]"
+            )
             return
 
         console.print(Panel(f"重建数据库: {self.app_db_name}", border_style="red"))
@@ -234,7 +257,9 @@ class DbService:
         try:
             with engine.connect() as conn:
                 console.print(f"  - 正在终止到 '{self.app_db_name}' 的所有连接...")
-                conn.execute(text(f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)'))
+                conn.execute(
+                    text(f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)')
+                )
                 console.print(f"  - 正在创建数据库 '{self.app_db_name}'...")
                 conn.execute(text(f'CREATE DATABASE "{self.app_db_name}"'))
             console.print("[bold green]✅ 数据库重建成功。[/bold green]")
@@ -247,7 +272,9 @@ class DbService:
     def clear_database(self) -> None:
         """[危险] 清空数据库中的所有数据。"""
         if self.is_prod:
-            console.print("[bold red]❌ 操作被阻止: 禁止在生产环境中清空数据。[/bold red]")
+            console.print(
+                "[bold red]❌ 操作被阻止: 禁止在生产环境中清空数据。[/bold red]"
+            )
             return
 
         console.print(Panel(f"清空数据库: {self.app_db_name}", border_style="red"))
@@ -257,7 +284,11 @@ class DbService:
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
                 console.print("  - 正在清空所有表...")
                 for table in reversed(Base.metadata.sorted_tables):
-                    conn.execute(text(f'TRUNCATE TABLE "{table.schema}"."{table.name}" RESTART IDENTITY CASCADE;'))
+                    conn.execute(
+                        text(
+                            f'TRUNCATE TABLE "{table.schema}"."{table.name}" RESTART IDENTITY CASCADE;'
+                        )
+                    )
             console.print("[bold green]✅ 数据库已清空。[/bold green]")
         except Exception as e:
             console.print(f"[bold red]❌ 清空失败: {e}[/bold red]")
@@ -267,7 +298,9 @@ class DbService:
     def run_interactive_doctor(self) -> None:
         """启动交互式医生菜单。"""
         if questionary is None:
-            console.print("[bold red]错误: 'questionary' 未安装。请运行 'poetry install --with dev'。[/bold red]")
+            console.print(
+                "[bold red]错误: 'questionary' 未安装。请运行 'poetry install --with dev'。[/bold red]"
+            )
             return
 
         while True:
@@ -276,7 +309,7 @@ class DbService:
                 choices=[
                     "🩺 健康检查 (Check Status)",
                     "🚀 运行迁移 (Upgrade to Head)",
-                    "🪪 标记版本 (Stamp Version)", # [新增] 交互式菜单中加入 stamp
+                    "🪪 标记版本 (Stamp Version)",  # [新增] 交互式菜单中加入 stamp
                     "💥 [危险] 重建数据库 (Rebuild Database)",
                     "🗑️ [危险] 清空数据 (Clear Data)",
                     "🚪 退出 (Exit)",
@@ -289,15 +322,21 @@ class DbService:
                 self.check_status()
             elif choice.startswith("🚀"):
                 self.run_migrations()
-            elif choice.startswith("🪪"): # [新增] 交互式菜单中调用 stamp
-                rev_to_stamp = questionary.text("请输入要标记的版本号 (通常是 'head'):", default="head").ask()
+            elif choice.startswith("🪪"):  # [新增] 交互式菜单中调用 stamp
+                rev_to_stamp = questionary.text(
+                    "请输入要标记的版本号 (通常是 'head'):", default="head"
+                ).ask()
                 if rev_to_stamp:
                     self.stamp_version(rev_to_stamp)
             elif choice.startswith("💥"):
-                if questionary.confirm(f"确定要永久删除并重建 '{self.app_db_name}' 吗?", default=False).ask():
+                if questionary.confirm(
+                    f"确定要永久删除并重建 '{self.app_db_name}' 吗?", default=False
+                ).ask():
                     self.rebuild_database()
             elif choice.startswith("🗑️"):
-                if questionary.confirm(f"确定要清空 '{self.app_db_name}' 的所有数据吗?", default=False).ask():
+                if questionary.confirm(
+                    f"确定要清空 '{self.app_db_name}' 的所有数据吗?", default=False
+                ).ask():
                     self.clear_database()
             console.print("\n")
 
@@ -309,9 +348,14 @@ class DbService:
 
         with Session() as session:
             console.print(
-                Panel(f"🔍 正在检查数据库: [yellow]{self.sync_app_url.render_as_string(hide_password=True)}[/yellow]", border_style="blue")
+                Panel(
+                    f"🔍 正在检查数据库: [yellow]{self.sync_app_url.render_as_string(hide_password=True)}[/yellow]",
+                    border_style="blue",
+                )
             )
-            content_items = session.query(ThContent).order_by(ThContent.created_at).all()
+            content_items = (
+                session.query(ThContent).order_by(ThContent.created_at).all()
+            )
             if not content_items:
                 console.print("[yellow]数据库中没有内容条目。[/yellow]")
                 return
@@ -321,7 +365,10 @@ class DbService:
     def _render_content_panel(self, session, content: ThContent) -> None:
         """渲染单个内容条目及其所有关联信息。"""
         uida_table = Table(
-            box=None, show_header=False, padding=(0, 1), title="[bold]UIDA & Source[/bold]"
+            box=None,
+            show_header=False,
+            padding=(0, 1),
+            title="[bold]UIDA & Source[/bold]",
         )
         uida_table.add_column(style="dim cyan", width=12)
         uida_table.add_column()
@@ -330,7 +377,9 @@ class DbService:
         uida_table.add_row(
             "Source:",
             Syntax(
-                json.dumps(content.source_payload_json, indent=2, ensure_ascii=False), "json", theme="monokai"
+                json.dumps(content.source_payload_json, indent=2, ensure_ascii=False),
+                "json",
+                theme="monokai",
             ),
         )
         # Assuming keys_json is available on content object, if not, would need to re-evaluate
