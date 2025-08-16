@@ -15,6 +15,7 @@ from rich.logging import RichHandler
 from trans_hub.application.coordinator import Coordinator
 from trans_hub.bootstrap import create_app_config
 from trans_hub.management.db_service import DbService
+from trans_hub.management.utils import find_alembic_ini  # [修改] 从共享模块导入
 
 # --- 日志配置 (保持不变) ---
 # ... (structlog 配置保持不变) ...
@@ -24,14 +25,6 @@ logger.setLevel("INFO")
 logger.addHandler(handler)
 
 
-def _find_alembic_ini() -> Path:
-    """自下而上查找 alembic.ini，与 CLI 工具保持一致。"""
-    start = Path(__file__).resolve().parent
-    for p in [*start.parents, start, Path.cwd(), *Path.cwd().parents]:
-        cand = p / "alembic.ini"
-        if cand.is_file():
-            return cand
-    raise FileNotFoundError("未找到 Alembic 配置文件 'alembic.ini'。")
 
 
 @asynccontextmanager
@@ -65,7 +58,7 @@ async def example_runner(
         # 临时设置维护URL，以便DbService工作
         config.maintenance_database_url = sync_db_url
         
-        service = DbService(config, str(_find_alembic_ini()))
+        service = DbService(config, str(find_alembic_ini()))  # [修改] 使用导入的函数
         service.run_migrations()
         logger.info("Alembic 迁移已应用到示例数据库。")
     except Exception as e:

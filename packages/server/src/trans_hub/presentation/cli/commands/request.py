@@ -11,6 +11,12 @@ from rich.console import Console
 
 from .._utils import get_coordinator
 from .._state import CLISharedState  # [REFACTOR] 显式从 _state 导入以保持清晰
+from .._shared_options import (
+    PROJECT_ID_OPTION,
+    NAMESPACE_OPTION,
+    KEYS_JSON_OPTION,
+    ACTOR_OPTION,
+)  # [修改] 导入共享选项
 
 app = typer.Typer(help="提交和管理翻译请求。")
 console = Console()
@@ -19,17 +25,9 @@ console = Console()
 @app.command("new")
 async def request_new(
     ctx: typer.Context,
-    project_id: Annotated[
-        str, typer.Option("--project-id", "-p", help="项目/租户的唯一标识符。")
-    ],
-    namespace: Annotated[
-        str,
-        typer.Option("--namespace", "-n", help="内容的命名空间，如 'ui.buttons.v1'。"),
-    ],
-    keys_json: Annotated[
-        str,
-        typer.Option("--keys", "-k", help="定位内容的最小上下文键集 (JSON 字符串)。"),
-    ],
+    project_id: PROJECT_ID_OPTION,
+    namespace: NAMESPACE_OPTION,
+    keys_json: KEYS_JSON_OPTION,
     source_payload_json: Annotated[
         str, typer.Option("--payload", "-d", help="要翻译的源内容 (JSON 字符串)。")
     ],
@@ -44,7 +42,7 @@ async def request_new(
     variant_key: Annotated[
         str, typer.Option("--variant", "-v", help="语言内变体 (可选)。")
     ] = "-",
-    actor: Annotated[str, typer.Option("--actor", help="操作者身份。")] = "cli_user",
+    actor: ACTOR_OPTION = "cli_user",  # [修改] 使用共享选项
 ) -> None:
     """
     向 Trans-Hub 提交一个新的 UIDA 翻译请求。

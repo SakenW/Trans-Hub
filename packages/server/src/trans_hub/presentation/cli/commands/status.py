@@ -14,6 +14,12 @@ from rich.table import Table
 
 from .._utils import get_coordinator
 from .._state import CLISharedState
+from .._shared_options import (
+    PROJECT_ID_OPTION,
+    NAMESPACE_OPTION,
+    KEYS_JSON_OPTION,
+    ACTOR_OPTION,
+)  # [修改] 导入共享选项
 
 app = typer.Typer(help="查询和管理翻译记录的状态与评论。")
 console = Console()
@@ -22,9 +28,9 @@ console = Console()
 @app.command("get")
 async def get_translation(
     ctx: typer.Context,
-    project_id: Annotated[str, typer.Option("-p", help="项目 ID。")],
-    namespace: Annotated[str, typer.Option("-n", help="命名空间。")],
-    keys_json: Annotated[str, typer.Option("-k", help="Keys JSON。")],
+    project_id: PROJECT_ID_OPTION,
+    namespace: NAMESPACE_OPTION,
+    keys_json: KEYS_JSON_OPTION,
     target_lang: Annotated[str, typer.Option("-t", help="目标语言。")],
     variant_key: Annotated[str, typer.Option("-v", help="变体键。")] = "-",
 ):
@@ -68,7 +74,7 @@ async def publish(
     revision_id: Annotated[
         str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")
     ],
-    actor: Annotated[str, typer.Option("--actor", help="操作者身份。")] = "cli_user",
+    actor: ACTOR_OPTION = "cli_user",  # [修改] 使用共享选项
 ):
     """将一条 'reviewed' 状态的翻译修订发布为最新版本。"""
     state: CLISharedState = ctx.obj
