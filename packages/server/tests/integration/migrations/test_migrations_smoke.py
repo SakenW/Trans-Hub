@@ -77,7 +77,9 @@ def _resolve_maint_dsn() -> str:
     raw = os.getenv(ENV_KEY_MAINT_DSN, "").strip()
     if not raw:
         pytest.skip(f"缺少 {ENV_KEY_MAINT_DSN}，跳过迁移冒烟测试")
-    if not (raw.startswith("postgresql+psycopg://") or raw.startswith("postgresql+psycopg:")):
+    if not (
+        raw.startswith("postgresql+psycopg://") or raw.startswith("postgresql+psycopg:")
+    ):
         pytest.skip(f"{ENV_KEY_MAINT_DSN} 必须为 psycopg3 驱动：{raw!r}")
 
     url = make_url(raw)
@@ -159,10 +161,12 @@ def _drop_db_if_exists(maint_real_dsn: str, dbname: str) -> None:
 
 def _create_db(maint_real_dsn: str, dbname: str) -> None:
     try:
-        _ddl_autocommit(maint_real_dsn, f'CREATE DATABASE "{dbname}" ENCODING \'UTF8\'')
+        _ddl_autocommit(maint_real_dsn, f"CREATE DATABASE \"{dbname}\" ENCODING 'UTF8'")
     except Exception as e:
         if InsufficientPrivilege and isinstance(e, InsufficientPrivilege):
-            pytest.skip("维护账号缺少 CREATEDB 权限，跳过迁移冒烟测试（请为该角色授予 CREATEDB）")
+            pytest.skip(
+                "维护账号缺少 CREATEDB 权限，跳过迁移冒烟测试（请为该角色授予 CREATEDB）"
+            )
         raise
 
 

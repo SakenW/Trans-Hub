@@ -1,14 +1,12 @@
 # packages/server/alembic/versions/3f8b9e6a0c2c_initial_schema.py
 """
-TRANS-HUB 初始架构 (v3.0.0 · 最终权威版 · Alembic 实现)
+TRANS-HUB 初始架构 (v2.5.14 · 最终权威版 · Alembic 实现)
 
-本迁移脚本实现《TRANS-HUB 统一数据与命名白皮书 v3.0.0》的完整数据库结构。
-它是一次性的、原子化的最优实现，包含了所有必要的约束、函数和性能优化。
+本迁移脚本实现《TRANS-HUB 统一数据与命名白皮书 v2.5.14》的完整数据库结构。
 
 实现要点 (PostgreSQL 优先):
 - `th` 专用 schema。
 - 权威函数与类型: `is_bcp47`, `variant_normalize`, `set_updated_at`, `translation_status` ENUM。
-- [新增] `forbid_uida_update`: 确保 UIDA 字段不可变的触发器。
 - 核心表结构:
   - th.projects: 项目注册表。
   - th.content: 基于 UIDA 的内容表。
@@ -16,12 +14,10 @@ TRANS-HUB 初始架构 (v3.0.0 · 最终权威版 · Alembic 实现)
   - th.trans_head: 按 project_id HASH 分区的双指针表，含 DEFERRABLE 外键。
   - th.resolve_cache: 零二次查询解析缓存，增加到 content 的级联删除外键。
 - 扩展表: `th.events`, `th.comments`, `th.tm_units`, `th.tm_links`, `th.locales_fallbacks`。
-- [新增] 分区子表性能优化: 自动设置 `fillfactor=90` 等参数。
 - 搜索策略: 基于 `th.search_rev` 物化视图的全文检索和 `pg_trgm` 的模糊搜索。
-- [修正] 行级安全 (RLS): 基于 `th.allowed_projects()` 的统一多租户隔离策略，且仅作用于包含 project_id 的真实业务表。
+- 行级安全 (RLS): 基于 `th.allowed_projects()` 的统一多租户隔离策略。
 - 触发器逻辑: 自动更新 updated_at, 规范化 variant_key, 发布时精准缓存失效。
 - 兼容视图: 在 public schema 中创建核心表的只读视图。
-- [修正] `downgrade()`: 实现更安全的降级逻辑，不影响 public schema。
 
 非 PostgreSQL 方言 (如 SQLite):
 - 创建等价表与基础约束/索引，省略高级特性。
@@ -29,7 +25,6 @@ TRANS-HUB 初始架构 (v3.0.0 · 最终权威版 · Alembic 实现)
 
 from __future__ import annotations
 
-from typing import Any
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
@@ -79,44 +74,19 @@ def upgrade() -> None:
         op.execute(
             """
             CREATE OR REPLACE FUNCTION th.is_bcp47(lang TEXT) RETURNS BOOLEAN LANGUAGE plpgsql IMMUTABLE AS $$
-            BEGIN
-              RETURN lang IS NOT NULL
-                     AND (
-                          lang ~ '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$'
-                          OR lang ~ '^x-[A-Za-z0-9-]+$'
-                     );
-            END;
+            BEGIN RETURN lang IS NOT NULL AND (lang ~ '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$' OR lang ~ '^x-[A-Za-z0-9-]+$'); END;
             $$;
 
             CREATE OR REPLACE FUNCTION th.variant_normalize() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-            BEGIN
-              NEW.variant_key := lower(coalesce(NEW.variant_key, '-'));
-              IF NEW.variant_key = '' THEN NEW.variant_key := '-'; END IF;
-              RETURN NEW;
-            END;
+            BEGIN NEW.variant_key := lower(coalesce(NEW.variant_key, '-')); IF NEW.variant_key = '' THEN NEW.variant_key := '-'; END IF; RETURN NEW; END;
             $$;
 
             CREATE OR REPLACE FUNCTION th.set_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-            BEGIN
-              NEW.updated_at := CURRENT_TIMESTAMP;
-              RETURN NEW;
-            END;
+            BEGIN NEW.updated_at := CURRENT_TIMESTAMP; RETURN NEW; END;
             $$;
 
             CREATE OR REPLACE FUNCTION th.extract_text(j JSONB) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
-              SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(j, '{}'::jsonb));
-            $$;
-
-            CREATE OR REPLACE FUNCTION th.forbid_uida_update() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-            BEGIN
-              IF (NEW.project_id, NEW.namespace, NEW.keys_sha256_bytes)
-                   IS DISTINCT FROM
-                 (OLD.project_id, OLD.namespace, OLD.keys_sha256_bytes)
-              THEN
-                RAISE EXCEPTION 'UIDA fields (project_id, namespace, keys_sha256_bytes) are immutable and cannot be changed.';
-              END IF;
-              RETURN NEW;
-            END;
+            SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(j, '{}'::jsonb));
             $$;
             """
         )
@@ -148,7 +118,6 @@ def upgrade() -> None:
             comment="创建时间",
         ),
         schema="th",
-        comment="项目主表，作为多租户边界",
     )
 
     op.create_table(
@@ -173,7 +142,6 @@ def upgrade() -> None:
             comment="规范化 keys JSON 的 SHA-256",
         ),
         sa.Column("source_lang", sa.Text(), nullable=False, comment="源语言（BCP-47）"),
-        # 修复默认值拼写：'{}'::jsonb
         sa.Column(
             "source_payload_json",
             json_type,
@@ -215,9 +183,10 @@ def upgrade() -> None:
             else None,
         ),
         schema="th",
-        comment="以 Canonical JSON→SHA-256 形成的唯一内容键（UIDA）实体化",
     )
-    # 不再需要 ix_content_project 索引（被 uq_content_uida 覆盖）
+    op.create_index(
+        "ix_content_project", "content", ["project_id"], unique=False, schema="th"
+    )
 
     # =====================================================================================
     # 2. 修订与指针表 (th.trans_rev, th.trans_head)
@@ -268,26 +237,18 @@ def upgrade() -> None:
         )
         op.execute(
             """
-            DO $$
-            DECLARE i INT; r RECORD;
-            BEGIN
+            DO $$ DECLARE i INT; r RECORD; BEGIN
               FOR i IN 0..7 LOOP
                 EXECUTE format('CREATE TABLE IF NOT EXISTS th.trans_rev_p%1$s PARTITION OF th.trans_rev FOR VALUES WITH (MODULUS 8, REMAINDER %1$s)', i);
                 EXECUTE format('CREATE TABLE IF NOT EXISTS th.trans_head_p%1$s PARTITION OF th.trans_head FOR VALUES WITH (MODULUS 8, REMAINDER %1$s)', i);
               END LOOP;
-
-              FOR r IN
-                SELECT inhrelid::regclass AS child
-                FROM pg_inherits
-                WHERE inhparent IN ('th.trans_rev'::regclass, 'th.trans_head'::regclass)
-              LOOP
+              FOR r IN SELECT inhrelid::regclass AS child FROM pg_inherits WHERE inhparent IN ('th.trans_rev'::regclass, 'th.trans_head'::regclass) LOOP
                 EXECUTE format('ALTER TABLE %s SET (fillfactor=90, autovacuum_vacuum_scale_factor=0.1)', r.child);
               END LOOP;
             END $$;
             """
         )
     else:
-        # Fallback for non-PostgreSQL databases (e.g., SQLite)
         status_enum_type = sa.Enum(
             "draft", "reviewed", "published", "rejected", name="translation_status"
         )
@@ -504,45 +465,6 @@ def upgrade() -> None:
         "ix_comments_head", "comments", ["project_id", "head_id"], schema="th"
     )
 
-    # 为 events/comments.id 显式开启 Identity（PG10+ 幂等）
-    if dialect == "postgresql":
-        op.execute("""
-        DO $$
-        DECLARE
-        seq regclass;
-        BEGIN
-        -- th.events.id → IDENTITY（若已是 SERIAL/有默认 nextval，则先卸载）
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema='th' AND table_name='events'
-            AND column_name='id' AND is_identity='YES'
-        ) THEN
-            SELECT pg_get_serial_sequence('th.events','id')::regclass INTO seq;
-            IF seq IS NOT NULL THEN
-            EXECUTE 'ALTER TABLE th.events ALTER COLUMN id DROP DEFAULT';
-            EXECUTE format('ALTER SEQUENCE %s OWNED BY NONE', seq);
-            EXECUTE format('DROP SEQUENCE IF EXISTS %s', seq);
-            END IF;
-            EXECUTE 'ALTER TABLE th.events ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY';
-        END IF;
-
-        -- th.comments.id → IDENTITY
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema='th' AND table_name='comments'
-            AND column_name='id' AND is_identity='YES'
-        ) THEN
-            SELECT pg_get_serial_sequence('th.comments','id')::regclass INTO seq;
-            IF seq IS NOT NULL THEN
-            EXECUTE 'ALTER TABLE th.comments ALTER COLUMN id DROP DEFAULT';
-            EXECUTE format('ALTER SEQUENCE %s OWNED BY NONE', seq);
-            EXECUTE format('DROP SEQUENCE IF EXISTS %s', seq);
-            END IF;
-            EXECUTE 'ALTER TABLE th.comments ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY';
-        END IF;
-        END $$;
-        """)
-
     op.create_table(
         "tm_units",
         sa.Column("id", sa.Text(), primary_key=True),
@@ -583,14 +505,6 @@ def upgrade() -> None:
             name="uq_tm_units_dim",
         ),
         *_compact_args(
-            # 32 字节长度校验
-            sa.CheckConstraint(
-                "octet_length(src_hash)=32", name="ck_tm_units_src_hash_len"
-            )
-            if dialect == "postgresql"
-            else sa.CheckConstraint(
-                "length(src_hash)=32", name="ck_tm_units_src_hash_len"
-            ),
             sa.CheckConstraint("th.is_bcp47(src_lang)", name="ck_tm_src_lang_bcp47")
             if dialect == "postgresql"
             else None,
@@ -667,25 +581,13 @@ def upgrade() -> None:
         op.execute(
             """
             CREATE MATERIALIZED VIEW th.search_rev AS
-            SELECT
-              r.project_id,
-              r.content_id,
-              r.target_lang,
-              r.variant_key,
-              r.id AS rev_id,
-              to_tsvector('simple', th.extract_text(r.translated_payload_json)) AS tsv,
-              r.updated_at
+            SELECT r.project_id, r.content_id, r.target_lang, r.variant_key, r.id AS rev_id, to_tsvector('simple', th.extract_text(r.translated_payload_json)) AS tsv, r.updated_at
             FROM th.trans_rev r
             WHERE r.status IN ('reviewed','published');
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_search_rev_ident
-              ON th.search_rev (project_id, content_id, target_lang, variant_key, rev_id);
-
-            CREATE INDEX IF NOT EXISTS ix_search_rev_tsv
-              ON th.search_rev USING GIN (tsv);
-
-            CREATE INDEX IF NOT EXISTS ix_trans_rev_trgm
-              ON th.trans_rev USING GIN ((translated_payload_json::text) gin_trgm_ops);
+            CREATE UNIQUE INDEX ux_search_rev_ident ON th.search_rev (project_id, content_id, target_lang, variant_key, rev_id);
+            CREATE INDEX ix_search_rev_tsv ON th.search_rev USING GIN (tsv);
+            CREATE INDEX ix_trans_rev_trgm ON th.trans_rev USING GIN ((translated_payload_json::text) gin_trgm_ops);
             """
         )
 
@@ -693,94 +595,40 @@ def upgrade() -> None:
     # 5. 函数与触发器 (仅限 PostgreSQL)
     # =====================================================================================
     if dialect == "postgresql":
-        # 修正：updated_at 仅在 UPDATE 时触发；variant_normalize 在 INSERT/UPDATE 触发；UIDA 不可变
         op.execute(
             """
-            DO $$
-            DECLARE t_name TEXT;
-            BEGIN
-              -- updated_at：仅更新时写入
-              FOR t_name IN
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema='th'
-                  AND table_name IN ('content','trans_rev','trans_head','resolve_cache','tm_units','locales_fallbacks')
-              LOOP
-                EXECUTE format(
-                  'DROP TRIGGER IF EXISTS trg_%1$s_updated_at ON th.%1$s;',
-                  t_name
-                );
-                EXECUTE format(
-                  'CREATE TRIGGER trg_%1$s_updated_at
-                   BEFORE UPDATE ON th.%1$s
-                   FOR EACH ROW EXECUTE FUNCTION th.set_updated_at();',
-                  t_name
-                );
+            DO $$ DECLARE t_name TEXT; BEGIN
+              FOR t_name IN SELECT table_name FROM information_schema.tables WHERE table_schema='th' AND table_name IN ('content', 'trans_rev', 'trans_head', 'resolve_cache', 'tm_units', 'locales_fallbacks') LOOP
+                EXECUTE format('CREATE TRIGGER trg_%1$s_updated_at BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.set_updated_at();', t_name);
               END LOOP;
-
-              -- variant_key 规范化：插入/更新均处理
-              FOR t_name IN
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema='th'
-                  AND table_name IN ('trans_rev','trans_head','resolve_cache')
-              LOOP
-                EXECUTE format(
-                  'CREATE OR REPLACE TRIGGER trg_%1$s_variant_norm
-                   BEFORE INSERT OR UPDATE ON th.%1$s
-                   FOR EACH ROW EXECUTE FUNCTION th.variant_normalize();',
-                  t_name
-                );
+              FOR t_name IN SELECT table_name FROM information_schema.tables WHERE table_schema='th' AND table_name IN ('trans_rev', 'trans_head', 'resolve_cache') LOOP
+                 EXECUTE format('CREATE TRIGGER trg_%1$s_variant_norm BEFORE INSERT OR UPDATE ON th.%1$s FOR EACH ROW EXECUTE FUNCTION th.variant_normalize();', t_name);
               END LOOP;
-
-              -- UIDA 不可变
-              EXECUTE 'CREATE OR REPLACE TRIGGER trg_forbid_content_uida_update
-                       BEFORE UPDATE ON th.content
-                       FOR EACH ROW EXECUTE FUNCTION th.forbid_uida_update();';
-            END $$;
+            END; $$;
             """
         )
-
-        # 发布/下架事件与缓存失效
         op.execute(
             """
-            CREATE OR REPLACE FUNCTION th.emit_event(
-              p_project_id TEXT, p_head_id TEXT, p_event TEXT,
-              p_payload JSONB DEFAULT '{}'::jsonb, p_actor TEXT DEFAULT 'system'
-            ) RETURNS VOID LANGUAGE sql AS $$
-              INSERT INTO th.events(project_id, head_id, event_type, payload, actor)
-              VALUES (p_project_id, p_head_id, p_event, coalesce(p_payload,'{}'::jsonb), p_actor);
+            CREATE OR REPLACE FUNCTION th.emit_event(p_project_id TEXT, p_head_id TEXT, p_event TEXT, p_payload JSONB DEFAULT '{}'::jsonb, p_actor TEXT DEFAULT 'system') RETURNS VOID LANGUAGE sql AS $$
+            INSERT INTO th.events(project_id, head_id, event_type, payload, actor) VALUES (p_project_id, p_head_id, p_event, coalesce(p_payload,'{}'::jsonb), p_actor);
             $$;
 
-            CREATE OR REPLACE FUNCTION th.invalidate_resolve_cache_for_head(
-              p_project_id TEXT, p_content_id TEXT, p_target_lang TEXT, p_variant_key TEXT
-            ) RETURNS INTEGER LANGUAGE plpgsql AS $$
-            DECLARE v_count INTEGER;
-            BEGIN
-              DELETE FROM th.resolve_cache
-               WHERE project_id=p_project_id
-                 AND content_id=p_content_id
-                 AND target_lang=p_target_lang
-                 AND variant_key=p_variant_key;
-              GET DIAGNOSTICS v_count = ROW_COUNT;
-              RETURN v_count;
-            END;
+            CREATE OR REPLACE FUNCTION th.invalidate_resolve_cache_for_head(p_project_id TEXT, p_content_id TEXT, p_target_lang TEXT, p_variant_key TEXT) RETURNS INTEGER LANGUAGE plpgsql AS $$
+            DECLARE v_count INTEGER; BEGIN DELETE FROM th.resolve_cache WHERE project_id = p_project_id AND content_id = p_content_id AND target_lang = p_target_lang AND variant_key = p_variant_key; GET DIAGNOSTICS v_count = ROW_COUNT; RETURN v_count; END;
             $$;
 
             CREATE OR REPLACE FUNCTION th.on_head_publish_unpublish() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-            DECLARE v_event TEXT; v_deleted INTEGER;
-            BEGIN
-              IF TG_OP='UPDATE' AND OLD.published_rev_id IS DISTINCT FROM NEW.published_rev_id THEN
+            DECLARE v_event TEXT; v_deleted INTEGER; BEGIN
+              IF TG_OP = 'UPDATE' AND OLD.published_rev_id IS DISTINCT FROM NEW.published_rev_id THEN
                 v_event := CASE WHEN NEW.published_rev_id IS NULL THEN 'unpublished' ELSE 'published' END;
-                PERFORM th.emit_event(
-                  NEW.project_id, NEW.id, v_event,
-                  jsonb_build_object('old_rev', OLD.published_rev_id, 'new_rev', NEW.published_rev_id, 'content_id', NEW.content_id)
-                );
+                PERFORM th.emit_event(NEW.project_id, NEW.id, v_event, jsonb_build_object('old_rev', OLD.published_rev_id, 'new_rev', NEW.published_rev_id, 'content_id', NEW.content_id));
                 v_deleted := th.invalidate_resolve_cache_for_head(NEW.project_id, NEW.content_id, NEW.target_lang, NEW.variant_key);
                 PERFORM pg_notify('th_search_mv_refresh', json_build_object('event', v_event, 'content_id', NEW.content_id, 'deleted_cache', v_deleted)::text);
               END IF;
               RETURN NEW;
             END; $$;
 
-            CREATE OR REPLACE TRIGGER trg_head_publish_unpublish
+            CREATE TRIGGER trg_head_publish_unpublish
               AFTER UPDATE OF published_rev_id ON th.trans_head
               FOR EACH ROW WHEN (OLD.published_rev_id IS DISTINCT FROM NEW.published_rev_id)
               EXECUTE FUNCTION th.on_head_publish_unpublish();
@@ -794,43 +642,21 @@ def upgrade() -> None:
         op.execute(
             """
             CREATE OR REPLACE FUNCTION th.allowed_projects() RETURNS TEXT[] LANGUAGE plpgsql STABLE AS $$
-            DECLARE v TEXT := current_setting('th.allowed_projects', true);
-            BEGIN
-              IF v IS NULL OR v = '' THEN
-                RETURN ARRAY[]::TEXT[];
-              END IF;
-              RETURN string_to_array(regexp_replace(v, '\\s+', '', 'g'), ',');
-            END;
+            DECLARE v TEXT := current_setting('th.allowed_projects', true); BEGIN IF v IS NULL OR v = '' THEN RETURN ARRAY[]::TEXT[]; END IF; RETURN string_to_array(regexp_replace(v, '\\s+', '', 'g'), ','); END;
             $$;
             """
         )
         op.execute(
             """
-            DO $$
-            DECLARE t_name TEXT;
-            BEGIN
-              FOR t_name IN
-                SELECT t.tablename
-                FROM pg_tables t
-                JOIN information_schema.columns c
-                  ON c.table_schema = t.schemaname
-                 AND c.table_name   = t.tablename
-               WHERE t.schemaname = 'th'
-                 AND c.column_name = 'project_id'
-                 AND t.tablename <> 'search_rev'
-              LOOP
+            DO $$ DECLARE t_name TEXT; BEGIN
+              FOR t_name IN SELECT tablename FROM pg_tables WHERE schemaname = 'th' AND tablename <> 'search_rev' LOOP
                 EXECUTE format('ALTER TABLE th.%I ENABLE ROW LEVEL SECURITY;', t_name);
-                EXECUTE format('DROP POLICY IF EXISTS p_%1$s_rls ON th.%1$s;', t_name);
                 EXECUTE format(
-                  'CREATE POLICY p_%1$s_rls ON th.%1$s
-                   FOR ALL TO PUBLIC
-                   USING (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects()))
-                   WITH CHECK (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects()));',
+                  'CREATE POLICY p_%1$s_rls ON th.%1$s FOR ALL TO PUBLIC USING (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects())) WITH CHECK (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects()));',
                   t_name
                 );
-                EXECUTE format('ALTER TABLE th.%I FORCE ROW LEVEL SECURITY;', t_name);
               END LOOP;
-            END $$;
+            END; $$;
             """
         )
 
@@ -840,19 +666,16 @@ def upgrade() -> None:
     if dialect == "postgresql":
         op.execute(
             """
-            DO $$
-            BEGIN
-              CREATE OR REPLACE VIEW public.th_projects           AS SELECT * FROM th.projects;
-              CREATE OR REPLACE VIEW public.th_content            AS SELECT * FROM th.content;
-              CREATE OR REPLACE VIEW public.th_trans_rev          AS SELECT * FROM th.trans_rev;
-              CREATE OR REPLACE VIEW public.th_trans_head         AS SELECT * FROM th.trans_head;
-              CREATE OR REPLACE VIEW public.th_resolve_cache      AS SELECT * FROM th.resolve_cache;
-              CREATE OR REPLACE VIEW public.th_events             AS SELECT * FROM th.events;
-              CREATE OR REPLACE VIEW public.th_comments           AS SELECT * FROM th.comments;
-              CREATE OR REPLACE VIEW public.th_tm_units           AS SELECT * FROM th.tm_units;
-              CREATE OR REPLACE VIEW public.th_tm_links           AS SELECT * FROM th.tm_links;
-              CREATE OR REPLACE VIEW public.th_locales_fallbacks  AS SELECT * FROM th.locales_fallbacks;
-            END $$;
+            CREATE OR REPLACE VIEW public.th_projects      AS SELECT * FROM th.projects;
+            CREATE OR REPLACE VIEW public.th_content       AS SELECT * FROM th.content;
+            CREATE OR REPLACE VIEW public.th_trans_rev     AS SELECT * FROM th.trans_rev;
+            CREATE OR REPLACE VIEW public.th_trans_head    AS SELECT * FROM th.trans_head;
+            CREATE OR REPLACE VIEW public.th_resolve_cache AS SELECT * FROM th.resolve_cache;
+            CREATE OR REPLACE VIEW public.th_events        AS SELECT * FROM th.events;
+            CREATE OR REPLACE VIEW public.th_comments      AS SELECT * FROM th.comments;
+            CREATE OR REPLACE VIEW public.th_tm_units      AS SELECT * FROM th.tm_units;
+            CREATE OR REPLACE VIEW public.th_tm_links      AS SELECT * FROM th.tm_links;
+            CREATE OR REPLACE VIEW public.th_locales_fallbacks AS SELECT * FROM th.locales_fallbacks;
             """
         )
 
@@ -861,26 +684,13 @@ def downgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect == "postgresql":
-        # 安全降级：仅清理 public 中的 th_* 视图，然后移除类型与 th schema
+        op.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
         op.execute(
-            """
-            DO $$
-            DECLARE r RECORD;
-            BEGIN
-              FOR r IN (
-                SELECT viewname FROM pg_views
-                WHERE schemaname='public' AND viewname LIKE 'th_%'
-              ) LOOP
-                EXECUTE 'DROP VIEW IF EXISTS public.'||quote_ident(r.viewname)||' CASCADE;';
-              END LOOP;
-            END $$;
-            """
+            "GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;"
         )
-        # 先删类型，再删 schema（更稳妥；CASCADE 避免依赖残留）
-        op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;")
         op.execute("DROP SCHEMA IF EXISTS th CASCADE;")
+        op.execute("DROP TYPE IF EXISTS th.translation_status CASCADE;")
     else:
-        # For SQLite, drop tables in reverse order of creation
         tables_to_drop = [
             "locales_fallbacks",
             "tm_links",
