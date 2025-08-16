@@ -1,30 +1,26 @@
 # packages/server/tests/conftest.py
 """
-Pytest 共享夹具 (最终权威版)
+Pytest 共享夹具 (v3.0.0 重构版)
 
-- engine fixture:
-  - 自动在会话开始时重建测试数据库。
-  - 使用 `Base.metadata.create_all` 创建与 ORM 模型完全一致的 Schema。
-  - 通过在独立的事务中创建 schema，解决了 `UndefinedTableError`。
-- 确保测试环境的数据库准备是简单、快速且可靠的。
+- 复用 tests.helpers.db_manager 中的工具函数来创建和销毁主测试数据库。
+- 确保测试环境的准备逻辑与迁移测试的逻辑共享相同的底层实现。
 """
-
 from __future__ import annotations
 
 import pytest_asyncio
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from trans_hub.bootstrap import create_app_config  # [修改] 导入新的工厂函数
+from trans_hub.application.coordinator import Coordinator
+from trans_hub.bootstrap import create_app_config
 from trans_hub.infrastructure.db import (
     create_async_db_engine,
     create_async_sessionmaker,
     dispose_engine,
 )
 from trans_hub.infrastructure.db._schema import Base
-from trans_hub.application.coordinator import Coordinator
+from tests.helpers.db_manager import create_db, drop_db, resolve_maint_dsn
 
 
 @pytest.fixture(scope="session")
@@ -36,42 +32,32 @@ def anyio_backend() -> str:
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def engine() -> AsyncEngine:
     """
-    会话级共享引擎, 自动在会话开始时重建测试数据库。
+    会话级共享引擎, 自动在会话开始时重建主测试数据库。
     """
-    # [修改] 使用新的引导程序加载测试配置
+    # 1. 加载测试配置以获取数据库名
     cfg = create_app_config(env_mode="test")
+    app_db_name = cfg.database.url.split("/")[-1]
+    assert app_db_name.startswith("transhub_test"), "测试数据库名必须以 'transhub_test' 开头"
 
-    # --- 1. 同步操作：重建数据库 ---
-    maint_url_str = cfg.maintenance_database_url
-    assert maint_url_str, "TRANSHUB_MAINTENANCE_DATABASE_URL is required for tests"
+    # 2. 复用 db_manager 的工具来获取维护库 DSN
+    maint_url = resolve_maint_dsn()
 
-    app_url = make_url(cfg.database.url)
-    app_db_name = app_url.database
-    app_db_user = app_url.username
+    # 3. 复用 db_manager 的工具来销毁和创建数据库
+    drop_db(maint_url, app_db_name)
+    create_db(maint_url, app_db_name)
 
-    maint_url = make_url(maint_url_str).set(drivername="postgresql+psycopg")
-    sync_maint_engine = create_engine(maint_url, isolation_level="AUTOCOMMIT")
-    try:
-        with sync_maint_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{app_db_name}" WITH (FORCE)'))
-            conn.execute(text(f'CREATE DATABASE "{app_db_name}" OWNER {app_db_user}'))
-    finally:
-        sync_maint_engine.dispose()
-
-    # --- 2. 异步操作：创建 schema 和所有表 ---
+    # 4. 异步操作：创建 schema 和所有表
     eng = create_async_db_engine(cfg)
     async with eng.begin() as conn:
-        # [CRITICAL FIX] 先创建 schema 并提交，再创建表
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-
     async with eng.begin() as conn:
-        # 现在 schema 肯定存在，可以安全地创建所有表
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("SELECT 1"))
 
     yield eng
 
     await dispose_engine(eng)
+    # 会话结束后，可以选择保留或删除主测试库，这里选择保留以方便调试
+    # drop_db(maint_url, app_db_name)
 
 
 @pytest.fixture(scope="session")
@@ -83,7 +69,6 @@ def sessionmaker(engine: AsyncEngine):
 @pytest_asyncio.fixture
 async def coordinator(engine: AsyncEngine, sessionmaker) -> Coordinator:
     """提供一个函数级的、已初始化的 Coordinator 实例。"""
-    # [修改] 使用新的引导程序加载测试配置
     cfg = create_app_config(env_mode="test")
     coord = Coordinator(cfg)
 
