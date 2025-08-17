@@ -89,13 +89,24 @@ DECLARE v TEXT := current_setting('th.allowed_projects', true);
 BEGIN IF v IS NULL OR v = '' THEN RETURN ARRAY[]::TEXT[]; END IF; RETURN string_to_array(regexp_replace(v, '\\s+', '', 'g'), ','); END;
 $$;
 DO $$
-DECLARE t_name TEXT;
+DECLARE
+  tables_with_rls TEXT[] := ARRAY[
+    'projects', 'content', 'trans_rev', 'trans_head', 'resolve_cache',
+    'events', 'comments', 'locales_fallbacks', 'tm_units', 'tm_links'
+  ];
+  t_name TEXT;
 BEGIN
-  FOR t_name IN SELECT t.tablename FROM pg_tables t JOIN information_schema.columns c ON c.table_schema=t.schemaname AND c.table_name=t.tablename WHERE t.schemaname = 'th' AND c.column_name = 'project_id' AND t.tablename <> 'search_rev' LOOP
+  FOREACH t_name IN ARRAY tables_with_rls
+  LOOP
     EXECUTE format('ALTER TABLE th.%I ENABLE ROW LEVEL SECURITY;', t_name);
-    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_rls ON th.%1$s;', t_name);
-    EXECUTE format('CREATE POLICY p_%1$s_rls ON th.%1$s FOR ALL TO PUBLIC USING (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects())) WITH CHECK (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects()));', t_name);
     EXECUTE format('ALTER TABLE th.%I FORCE ROW LEVEL SECURITY;', t_name);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_rls ON th.%1$s;', t_name);
+    EXECUTE format(
+      'CREATE POLICY p_%1$s_rls ON th.%1$s FOR ALL TO PUBLIC ' ||
+      'USING (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects())) ' ||
+      'WITH CHECK (cardinality(th.allowed_projects()) = 0 OR project_id = ANY(th.allowed_projects()));',
+      t_name
+    );
   END LOOP;
 END; $$;
 
@@ -111,6 +122,7 @@ CREATE OR REPLACE VIEW public.th_tm_units AS SELECT * FROM th.tm_units;
 CREATE OR REPLACE VIEW public.th_tm_links AS SELECT * FROM th.tm_links;
 CREATE OR REPLACE VIEW public.th_locales_fallbacks AS SELECT * FROM th.locales_fallbacks;
 """
+
 SQL_DOWN = """
 -- 按相反顺序、安全地清理对象
 DROP VIEW IF EXISTS public.th_locales_fallbacks;
@@ -132,7 +144,11 @@ DROP FUNCTION IF EXISTS th.emit_event(TEXT, TEXT, TEXT, JSONB, TEXT) CASCADE;
 """
 
 def upgrade() -> None:
-    op.execute(SQL_UP)
+    bind = op.get_bind()
+    if bind.dialect.name == 'postgresql':
+        op.execute(SQL_UP)
 
 def downgrade() -> None:
-    op.execute(SQL_DOWN)
+    bind = op.get_bind()
+    if bind.dialect.name == 'postgresql':
+        op.execute(SQL_DOWN)

@@ -6,11 +6,12 @@
 import pytest
 from trans_hub.application.coordinator import Coordinator
 from trans_hub_core.types import TranslationStatus
+
 from tests.helpers.factories import create_request_data
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.db, pytest.mark.integration]
 
-
+@pytest.mark.asyncio
 async def test_full_request_publish_get_flow(coordinator: Coordinator):
     """测试从请求 -> (模拟处理) -> 发布 -> 获取的完整快乐路径。"""
     req_data = create_request_data(target_langs=["de"])
@@ -52,8 +53,8 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
     assert result["text"] == "Hallo Welt"
 
 
+@pytest.mark.asyncio
 async def test_language_fallback_flow(coordinator: Coordinator):
-    """[新增] 测试语言回退链是否按预期工作。"""
     # 1. 准备数据：一个英语原文，并发布一个德语译文
     req_data = create_request_data(target_langs=["de"], keys={"id": "fallback_test"})
     content_id = await coordinator.request_translation(**req_data)
@@ -104,7 +105,7 @@ async def test_language_fallback_flow(coordinator: Coordinator):
     )
     assert result_fr is None
 
-
+@pytest.mark.asyncio
 async def test_commenting_flow(coordinator: Coordinator):
     """测试添加和获取评论的端到端流程。"""
     req_data = create_request_data()

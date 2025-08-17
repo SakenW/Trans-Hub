@@ -1,0 +1,3 @@
+# Trans-Hub Server Tests
+
+This directory contains all tests for the `trans-hub-server` package...

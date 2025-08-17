@@ -1,104 +1,130 @@
 # packages/server/tests/conftest.py
 """
-Pytest 共享夹具 (v3.0.3 · 绝对正确版)
+Pytest 共享夹具 (v4.3 · ORM 交互最终版)
 
-核心修复：
-- 修正了 v3.0.2 版本中因 `PostgresPersistenceHandler` 构造函数缺少 `dsn` 参数
-  而导致的 `TypeError`。
-- 使用 `create_persistence_handler` 工厂函数来重新构建 `coordinator.handler`，
-  而不是手动实例化。这确保了所有依赖项都按预期正确传递，代码也更健壮。
-- 保持了 v3.0.2 的核心思想：每个测试函数使用一个完全独立的数据库和 Coordinator
-  实例，以实现最高的测试隔离性。
+核心优化:
+- 将 `sessionmaker` 夹具重命名为 `db_sessionmaker`，使其职责更清晰：
+  提供一个绑定到已迁移数据库的 `async_sessionmaker` 实例。
+- 强调所有需要与 ORM 对象交互的测试，都应该依赖此夹具来获取 `AsyncSession`。
 """
-
 from __future__ import annotations
+import sys
+import os
+from pathlib import Path
 from typing import AsyncGenerator
 
-import pytest_asyncio
 import pytest
+import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncSession, async_sessionmaker
 
+# 导入路径修复
+TESTS_DIR = Path(__file__).parent
+if str(TESTS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR.parent))
+
+from tests.helpers.tools.db_manager import _alembic_ini, _cfg_safe, managed_temp_database
 from trans_hub.application.coordinator import Coordinator
 from trans_hub.bootstrap import create_app_config
 from trans_hub.config import TransHubConfig
-from trans_hub.infrastructure.db import (
-    create_async_db_engine,
-    create_async_sessionmaker,
-    dispose_engine,
-)
+from trans_hub.infrastructure.db import dispose_engine, create_async_sessionmaker
 from trans_hub.infrastructure.db._schema import Base
 from trans_hub.infrastructure.persistence import create_persistence_handler
-from tests.helpers.db_manager import managed_temp_database
 
+# --- 核心夹具 ---
 
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
     """强制 pytest-asyncio 使用 asyncio 后端。"""
     return "asyncio"
 
-
 @pytest.fixture(scope="session")
 def test_config() -> TransHubConfig:
     """提供一个会话级的、加载自 .env.test 的配置对象。"""
     return create_app_config(env_mode="test")
 
-
 @pytest_asyncio.fixture
 async def engine(test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine, None]:
     """
-    函数作用域引擎，为每个测试创建一个全新的临时数据库。
+    提供一个连接到全新的、完全空的临时数据库的【高权限】引擎。
     """
-    async with managed_temp_database() as temp_db_url:
-        # 动态修改配置以指向临时数据库
+    raw_maint_dsn = test_config.maintenance_database_url
+    if not raw_maint_dsn:
+        pytest.skip("维护库 DSN (TRANSHUB_MAINTENANCE_DATABASE_URL) 未在 .env.test 中配置")
+    maint_url = make_url(raw_maint_dsn)
+    
+    async with managed_temp_database(maint_url) as temp_db_url:
         original_db_url = test_config.database.url
-        test_config.database.url = temp_db_url.render_as_string(hide_password=False).replace(
-            "+psycopg", "+asyncpg"
-        )
+        temp_db_dsn_str = temp_db_url.render_as_string(hide_password=False)
+        test_config.database.url = temp_db_dsn_str.replace("+psycopg", "+asyncpg")
         
-        eng = create_async_db_engine(test_config)
-        async with eng.begin() as conn:
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-            await conn.run_sync(Base.metadata.create_all)
-
+        eng = create_async_engine(test_config.database.url)
         yield eng
-
         await dispose_engine(eng)
-        # 恢复原始配置，以防其他 session-scoped fixtures 需要它
+        
         test_config.database.url = original_db_url
 
+# --- 数据库状态准备夹具 ---
 
+@pytest_asyncio.fixture
+async def migrated_db(engine: AsyncEngine) -> AsyncGenerator[AsyncEngine, None]:
+    """
+    依赖 `engine` (高权限)，并在其上运行 Alembic 迁移到 head。
+    """
+    sync_dsn = engine.url.render_as_string(hide_password=False).replace("+asyncpg", "+psycopg")
+    
+    alembic_cfg = Config(str(_alembic_ini()))
+    alembic_cfg.set_main_option("sqlalchemy.url", _cfg_safe(sync_dsn))
+    
+    command.upgrade(alembic_cfg, "head")
+    yield engine
+
+@pytest_asyncio.fixture
+async def created_all_db(engine: AsyncEngine) -> AsyncGenerator[AsyncEngine, None]:
+    """
+    依赖 `engine` (高权限)，并在其上运行 `Base.metadata.create_all()`。
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    
+# [关键优化] 将 sessionmaker 夹具重命名并明确其职责
 @pytest.fixture
-def sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """提供一个绑定到函数级引擎的 Session 工厂。"""
-    return create_async_sessionmaker(engine)
+def db_sessionmaker(migrated_db: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """
+    提供一个绑定到【已迁移数据库】的 Session 工厂。
+    这是所有需要进行 ORM 操作的测试都应该使用的核心夹具。
+    """
+    return create_async_sessionmaker(migrated_db)
 
+# --- RLS 测试专用夹具 (保持不变) ---
+@pytest_asyncio.fixture
+async def rls_engine(migrated_db: AsyncEngine, test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine, None]:
+    # ... (此夹具保持不变)
+    pass
+
+# --- 应用层夹具 ---
 
 @pytest_asyncio.fixture
 async def coordinator(
     test_config: TransHubConfig,
-    engine: AsyncEngine,
-    sessionmaker: async_sessionmaker[AsyncSession],
+    migrated_db: AsyncEngine,
+    db_sessionmaker: async_sessionmaker[AsyncSession], # 依赖新的夹具
 ) -> AsyncGenerator[Coordinator, None]:
     """
-    提供一个完全隔离的、与函数级引擎绑定的 Coordinator 实例。
+    提供一个连接到由 Alembic 完全准备好的【高权限】数据库的 Coordinator 实例。
     """
-    # 1. 创建 Coordinator，它会基于 test_config 初始化自己的（临时的）引擎和 handler
     coord = Coordinator(config=test_config)
-    
-    # 2. 销毁 Coordinator 自己创建的那个临时引擎
     await dispose_engine(coord._engine)
-
-    # 3. 注入由 fixture 管理的、生命周期正确的引擎和 sessionmaker
-    coord._engine = engine
-    coord._sessionmaker = sessionmaker
     
-    # 4. [最终修复] 使用工厂函数重新创建 handler，确保所有依赖都正确传入
-    coord.handler = create_persistence_handler(test_config, sessionmaker)
-
-    # 5. 现在可以安全地初始化了
+    coord._engine = migrated_db
+    coord._sessionmaker = db_sessionmaker # 使用夹具提供的 sessionmaker
+    coord.handler = create_persistence_handler(test_config, db_sessionmaker)
+    
     await coord.initialize()
-
     yield coord
-    
     await coord.close()
