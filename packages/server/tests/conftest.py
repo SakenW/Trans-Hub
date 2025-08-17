@@ -101,11 +101,32 @@ def db_sessionmaker(migrated_db: AsyncEngine) -> async_sessionmaker[AsyncSession
     """
     return create_async_sessionmaker(migrated_db)
 
-# --- RLS 测试专用夹具 (保持不变) ---
+# --- RLS 测试专用夹具 ---
+
 @pytest_asyncio.fixture
-async def rls_engine(migrated_db: AsyncEngine, test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine, None]:
-    # ... (此夹具保持不变)
-    pass
+async def rls_engine(
+    migrated_db: AsyncEngine,
+    test_config: TransHubConfig,
+) -> AsyncGenerator[AsyncEngine, None]:
+    """
+    提供一个使用【低权限】测试用户连接到已迁移数据库的引擎。
+    """
+    low_privilege_dsn_base = os.getenv("TRANSHUB_TEST_USER_DATABASE__URL")
+    if not low_privilege_dsn_base:
+        pytest.skip("缺少低权限用户 DSN (TRANSHUB_TEST_USER_DATABASE__URL)，跳过 RLS 测试")
+
+    db_name = migrated_db.url.database
+    low_privilege_dsn = f"{low_privilege_dsn_base}{db_name}"
+    
+    async with migrated_db.begin() as conn:
+        await conn.execute(text(f"GRANT CONNECT ON DATABASE {db_name} TO transhub_tester;"))
+        await conn.execute(text(f"GRANT USAGE ON SCHEMA th TO transhub_tester;"))
+        await conn.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA th TO transhub_tester;"))
+        await conn.execute(text(f"ALTER DEFAULT PRIVILEGES IN SCHEMA th GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO transhub_tester;"))
+
+    eng = create_async_engine(low_privilege_dsn)
+    yield eng
+    await dispose_engine(eng)
 
 # --- 应用层夹具 ---
 

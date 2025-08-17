@@ -1,63 +1,40 @@
-# packages/server/tests/integration/migrations/test_migrations_smoke.py
-"""
-迁移冒烟测试 (v3.0.0 重构版)
-
-本测试利用 `managed_temp_database` 上下文管理器来确保测试环境的
-绝对纯净和零残留。核心逻辑只关注 Alembic 命令本身的正确性。
-"""
-
+# packages/server/tests/integration/infrastructure/db/migrations/test_migrations_cycle.py
 from __future__ import annotations
-
-from pathlib import Path
-
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.engine import make_url
 
-from tests.helpers.db_manager import managed_temp_database
+# [最终修复] 更新导入路径
+from tests.helpers.tools.db_manager import managed_temp_database, _alembic_ini, _cfg_safe
+# [最终修复] 导入 bootstrap 以获取配置
+from trans_hub.bootstrap import create_app_config
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.db, pytest.mark.migrations, pytest.mark.slow]
 
-
-def _alembic_ini() -> Path:
-    """定位 alembic.ini 文件。"""
-    # ... (此函数保持不变) ...
-    # 本文件: packages/server/tests/integration/migrations/test_migrations_smoke.py
-    # .parents[3] 导航到 packages/server
-    server_root = Path(__file__).resolve().parents[3]
-    ini = server_root / "alembic.ini"
-    if not ini.exists():
-        pytest.fail(f"未找到 alembic.ini 在预期的位置: {ini}")
-    return ini
-
-
-def _cfg_safe(value: str) -> str:
-    """为 configparser 安全地转义 '%' 符号。"""
-    return value.replace("%", "%%")
-
-
+@pytest.mark.asyncio
 async def test_upgrade_downgrade_cycle_on_temp_db() -> None:
     """
     在一个由上下文管理器保证生命周期的临时数据库上，
     执行升级→降级→再升级的完整闭环测试。
     """
-    async with managed_temp_database(prefix="th_migrate_") as temp_db_url:
-        # 1. 加载 Alembic 配置
+    # 1. 获取维护 DSN
+    test_config = create_app_config(env_mode="test")
+    raw_maint_dsn = test_config.maintenance_database_url
+    if not raw_maint_dsn:
+        pytest.skip("维护库 DSN 未配置")
+    maint_url = make_url(raw_maint_dsn)
+
+    async with managed_temp_database(maint_url) as temp_db_url:
+        # 2. 加载 Alembic 配置
         alembic_ini_path = _alembic_ini()
         cfg = Config(str(alembic_ini_path))
-
-        # 2. 将临时数据库的 DSN 注入 Alembic 配置
-        # DSN 必须是同步的，由 db_manager 提供
+        
+        # 3. 注入临时库 DSN
         tenant_real_dsn = temp_db_url.render_as_string(hide_password=False)
         cfg.set_main_option("sqlalchemy.url", _cfg_safe(tenant_real_dsn))
 
-        print(
-            f"Running migration cycle on: {temp_db_url.render_as_string(hide_password=True)}"
-        )
-
-        # 3. 执行升级 -> 降级 -> 升级的完整循环
+        # 4. 执行测试循环
         command.upgrade(cfg, "head")
         command.downgrade(cfg, "base")
         command.upgrade(cfg, "head")
-
-        # 上下文管理器退出时，将自动、可靠地删除临时数据库
