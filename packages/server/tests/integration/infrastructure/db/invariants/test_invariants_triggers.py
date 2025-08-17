@@ -118,3 +118,59 @@ async def test_trigger_publish_flow(db_sessionmaker: async_sessionmaker, setup_t
 
         cache_after_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
         assert cache_after_result.first() is None, "缓存条目应该已被触发器删除"
+
+@pytest.mark.asyncio
+async def test_trigger_unpublish_flow(db_sessionmaker: async_sessionmaker, setup_trigger_base_data: dict):
+    """
+    [新增] 验证撤回发布 (`published_rev_id` 从 ID -> NULL) 时的触发器行为：
+    1. 创建 'unpublished' 事件。
+    2. 删除对应的 `resolve_cache` 条目。
+    """
+    p_id = setup_trigger_base_data["project_id"]
+    c_id = setup_trigger_base_data["content_id"]
+    h_id = setup_trigger_base_data["head_id"]
+    r1_id = setup_trigger_base_data["rev1_id"]
+    
+    async with db_sessionmaker.begin() as session:
+        # 1. 准备：
+        # 1a. 先将 head 设置为已发布状态
+        await session.execute(
+            update(ThTransHead)
+            .where(ThTransHead.id == h_id, ThTransHead.project_id == p_id)
+            .values(published_rev_id=r1_id)
+        )
+        
+        # 1b. 在缓存中放入一条数据
+        await session.execute(
+            pg_insert(ThResolveCache).values(
+                project_id=p_id, content_id=c_id, target_lang="de", variant_key="-",
+                resolved_rev_id=r1_id, resolved_payload={"text": "published"},
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+            ).on_conflict_do_update(
+                index_elements=['project_id', 'content_id', 'target_lang', 'variant_key'],
+                set_={'resolved_rev_id': r1_id}
+            )
+        )
+        
+        # 验证前提条件
+        cache_exists_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
+        assert cache_exists_result.first() is not None, "前提条件失败：缓存条目未能插入"
+
+        # 2. 核心操作：执行撤回发布 (UPDATE trans_head)
+        await session.execute(
+            update(ThTransHead)
+            .where(ThTransHead.id == h_id, ThTransHead.project_id == p_id)
+            .values(published_rev_id=None) # <-- 撤回发布
+        )
+
+        # 3. 验证事件
+        event_stmt = select(ThEvents).where(ThEvents.head_id == h_id, ThEvents.event_type == 'unpublished')
+        event_result = await session.execute(event_stmt)
+        event = event_result.scalars().one_or_none()
+        
+        assert event is not None, "应该创建一条 'unpublished' 事件"
+        assert event.payload['old_rev'] == r1_id, "事件的 payload 应包含正确的 old_rev"
+
+        # 4. 验证缓存失效
+        cache_after_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
+        assert cache_after_result.first() is None, "缓存条目应该已被触发器删除"
