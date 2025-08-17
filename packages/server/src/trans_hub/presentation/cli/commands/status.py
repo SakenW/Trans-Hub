@@ -71,24 +71,31 @@ async def get_translation(
 @app.command("publish")
 async def publish(
     ctx: typer.Context,
-    revision_id: Annotated[
-        str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")
-    ],
-    actor: ACTOR_OPTION = "cli_user",  # [修改] 使用共享选项
+    revision_id: Annotated[str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")],
+    actor: ACTOR_OPTION = "cli_user",
 ):
-    """将一条 'reviewed' 状态的翻译修订发布为最新版本。"""
     state: CLISharedState = ctx.obj
     async with get_coordinator(state) as coordinator:
         success = await coordinator.publish_translation(revision_id, actor=actor)
         if success:
-            console.print(
-                f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]"
-            )
+            console.print(f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]")
         else:
-            console.print(
-                "[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]"
-            )
+            console.print("[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]")
 
+@app.command("unpublish")
+async def unpublish(
+    ctx: typer.Context,
+    revision_id: Annotated[str, typer.Argument(help="要撤回发布的 'published' 状态的翻译修订 ID。")],
+    actor: ACTOR_OPTION = "cli_user",
+):
+    """将一条 'published' 状态的翻译修订撤回，使其状态变回 'reviewed'。"""
+    state: CLISharedState = ctx.obj
+    async with get_coordinator(state) as coordinator:
+        success = await coordinator.unpublish_translation(revision_id, actor=actor)
+        if success:
+            console.print(f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功撤回发布！[/green]")
+        else:
+            console.print("[red]❌ 撤回发布失败。请检查修订 ID 是否正确，且其状态为 'published'。[/red]")
 
 @app.command("comments")
 async def get_comments(

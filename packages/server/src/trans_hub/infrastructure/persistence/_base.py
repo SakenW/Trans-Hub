@@ -353,6 +353,38 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         except NoResultFound: return False
         except SQLAlchemyError as e: raise DatabaseError(f"发布修订失败: {e}") from e
 
+    async def unpublish_revision(self, revision_id: str) -> bool:
+        """
+        撤回一个 'published' 状态的修订。
+        - 将 revision 的状态改回 'reviewed'。
+        - 将 head 的 published 指针清空。
+        """
+        try:
+            async with self._sessionmaker.begin() as session:
+                rev_stmt = select(ThTransRev).where(ThTransRev.id == revision_id)
+                rev = (await session.execute(rev_stmt)).scalar_one_or_none()
+
+                if not rev or rev.status != TranslationStatus.PUBLISHED.value:
+                    logger.warning("撤回发布失败: 修订不存在或状态不是 'published'", rev_id=revision_id, status=getattr(rev, "status", None))
+                    return False
+                
+                head_stmt = select(ThTransHead).where(ThTransHead.project_id == rev.project_id, ThTransHead.published_rev_id == rev.id)
+                head = (await session.execute(head_stmt)).scalar_one_or_none()
+
+                if not head:
+                    logger.warning("撤回发布失败: 未找到引用该修订作为 published_rev_id 的 Head 记录", rev_id=revision_id)
+                    return False
+                
+                rev.status = TranslationStatus.REVIEWED.value
+                head.published_rev_id = None
+                head.published_no = None
+                head.published_at = None
+                head.current_status = TranslationStatus.REVIEWED.value
+
+                return True
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"撤回发布修订失败: {e}") from e
+
     async def reject_revision(self, revision_id: str) -> bool:
         """将一个修订的状态标记为 'rejected'。"""
         try:

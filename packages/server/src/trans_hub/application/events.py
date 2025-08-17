@@ -44,3 +44,8 @@ class CommentAdded(Event):
 
     event_type: str = "translation.comment_added"
     payload: dict[str, str]  # e.g., {"comment_id": "..."}
+
+class TranslationUnpublished(Event):
+    """当一个翻译修订被撤回发布时触发。"""
+    event_type: str = "translation.unpublished"
+    payload: dict[str, str] # e.g., {"revision_id": "..."}

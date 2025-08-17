@@ -127,3 +127,50 @@ async def test_commenting_flow(coordinator: Coordinator):
     assert len(comments) == 1
     assert comments[0].body == comment_body
     assert comments[0].author == "reviewer-1"
+
+@pytest.mark.asyncio
+async def test_unpublish_flow(coordinator: Coordinator):
+    """
+    测试 "Request -> Publish -> Unpublish -> Get" 的完整流程。
+    """
+    # 1. 准备：创建一个已发布的翻译
+    req_data = create_request_data(target_langs=["es"], keys={"id": "unpublish-test"})
+    content_id = await coordinator.request_translation(**req_data)
+    
+    head_info = await coordinator.handler.get_translation_head_by_uida(
+        project_id=req_data["project_id"], namespace=req_data["namespace"],
+        keys=req_data["keys"], target_lang="es", variant_key="-"
+    )
+    assert head_info is not None
+
+    rev_id = await coordinator.handler.create_new_translation_revision(
+        head_id=head_info.id, project_id=head_info.project_id, content_id=content_id,
+        target_lang="es", variant_key="-", status=TranslationStatus.REVIEWED,
+        revision_no=1, translated_payload_json={"text": "Hola Mundo"}
+    )
+    await coordinator.publish_translation(rev_id)
+
+    # 验证发布成功
+    published_head = await coordinator.handler.get_head_by_id(head_info.id)
+    assert published_head is not None
+    assert published_head.published_rev_id == rev_id
+
+    # 2. 行动：执行撤回发布
+    # (这行代码现在会失败，因为 unpublish_translation 方法还不存在)
+    success = await coordinator.unpublish_translation(rev_id, actor="test-admin")
+    assert success is True
+
+    # 3. 验证：
+    # 3a. 验证 head 状态
+    unpublished_head = await coordinator.handler.get_head_by_id(head_info.id)
+    assert unpublished_head is not None
+    assert unpublished_head.published_rev_id is None, "发布指针应该被清空"
+    # 根据白皮书，撤回后状态应变回 reviewed
+    assert unpublished_head.current_status == TranslationStatus.REVIEWED 
+
+    # 3b. 验证 get_translation 现在获取不到内容
+    result = await coordinator.get_translation(
+        project_id=req_data["project_id"], namespace=req_data["namespace"],
+        keys=req_data["keys"], target_lang="es"
+    )
+    assert result is None, "撤回发布后，get_translation 应该返回 None"

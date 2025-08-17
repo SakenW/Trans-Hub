@@ -277,6 +277,31 @@ class Coordinator:
             )
         return success
 
+    async def unpublish_translation(
+        self, revision_id: str, actor: str = "system"
+    ) -> bool:
+        """
+        [新增] 撤回一个已发布的修订。
+        """
+        head = await self.handler.get_head_by_revision(revision_id)
+        if not head:
+            logger.warning("撤回发布失败: 找不到修订所属的 Head", revision_id=revision_id)
+            return False
+
+        success = await self.handler.unpublish_revision(revision_id)
+        if success:
+            # 导入 TranslationUnpublished 事件
+            from .events import TranslationUnpublished 
+            await self._publish_event(
+                TranslationUnpublished(
+                    head_id=head.id,
+                    project_id=head.project_id,
+                    actor=actor,
+                    payload={"revision_id": revision_id},
+                )
+            )
+        return success
+
     async def add_comment(self, head_id: str, author: str, body: str) -> str:
         """为翻译头添加一条评论。"""
         head = await self.handler.get_head_by_id(head_id)
