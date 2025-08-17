@@ -1,15 +1,15 @@
 # packages/server/alembic/versions/0003_create_auxiliary_and_tm_tables.py
 """
-迁移 0003: 扩展功能表
+迁移 0003: 扩展功能表 (最终完整版)
 
 职责:
-- 创建所有辅助表和 TM 相关表:
+- 创建所有辅助表和 TM 相关表，并包含所有数据完整性 CHECK 约束。
   - th.resolve_cache
-  - th.events (使用 sa.Identity() 正确创建主键)
-  - th.comments (使用 sa.Identity() 正确创建主键)
+  - th.events
+  - th.comments
   - th.locales_fallbacks
   - th.tm_units
-  - th.tm_links (修正：添加了 project_id 列)
+  - th.tm_links
 
 Revision ID: 0003
 Revises: 0002
@@ -41,10 +41,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['content_id'], ['th.content.id'], name=op.f('fk_resolve_cache_content_id_content'), ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['project_id', 'resolved_rev_id'], ['th.trans_rev.project_id', 'th.trans_rev.id'], name=op.f('fk_resolve_cache_rev_id_trans_rev'), ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('project_id', 'content_id', 'target_lang', 'variant_key', name=op.f('pk_resolve_cache')),
+        # [补丁] 添加 CHECK 约束
+        sa.CheckConstraint('th.is_bcp47(target_lang)', name='ck_cache_target_lang_bcp47'),
+        sa.CheckConstraint("origin_lang IS NULL OR th.is_bcp47(origin_lang)", name='ck_cache_origin_lang_bcp47'),
         schema='th'
     )
 
-    # === th.events ===
+    # === th.events (无变化) ===
     op.create_table('events',
         sa.Column('id', sa.BigInteger(), sa.Identity(), nullable=False, primary_key=True),
         sa.Column('project_id', sa.Text(), nullable=False),
@@ -57,7 +60,7 @@ def upgrade() -> None:
         schema='th'
     )
 
-    # === th.comments ===
+    # === th.comments (无变化) ===
     op.create_table('comments',
         sa.Column('id', sa.BigInteger(), sa.Identity(), nullable=False, primary_key=True),
         sa.Column('project_id', sa.Text(), nullable=False),
@@ -77,6 +80,8 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['project_id'], ['th.projects.project_id'], name=op.f('fk_locales_fallbacks_project_id_projects'), ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('project_id', 'locale', name=op.f('pk_locales_fallbacks')),
+        # [补丁] 添加 CHECK 约束
+        sa.CheckConstraint('th.is_bcp47(locale)', name='ck_locales_fallbacks_bcp47'),
         schema='th'
     )
 
@@ -96,10 +101,14 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['project_id'], ['th.projects.project_id'], name=op.f('fk_tm_units_project_id_projects'), ondelete='CASCADE'),
         sa.UniqueConstraint('project_id', 'namespace', 'src_hash', 'tgt_lang', 'variant_key', name='uq_tm_units_dim'),
+        # [补丁] 添加 CHECK 约束
+        sa.CheckConstraint('octet_length(src_hash) = 32', name='ck_tm_units_src_hash_len'),
+        sa.CheckConstraint('th.is_bcp47(src_lang)', name='ck_tm_src_lang_bcp47'),
+        sa.CheckConstraint('th.is_bcp47(tgt_lang)', name='ck_tm_tgt_lang_bcp47'),
         schema='th'
     )
 
-    # === th.tm_links ===
+    # === th.tm_links (无变化) ===
     op.create_table('tm_links',
         sa.Column('id', sa.Text(), nullable=False, primary_key=True),
         sa.Column('project_id', sa.Text(), nullable=False),
