@@ -208,17 +208,18 @@ class Coordinator:
         target_lang: str,
         variant_key: str = "-",
     ) -> dict[str, Any] | None:
-        """获取最终可用的翻译，自动应用缓存和回退逻辑。"""
+        """
+        [最终修复] 获取最终可用的翻译，完全委托给 TranslationResolver。
+        """
         uida = generate_uida(keys)
         content_id = await self.handler.get_content_id_by_uida(
             project_id, namespace, uida.keys_sha256_bytes
         )
         if not content_id:
-            logger.debug(
-                "内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace
-            )
+            logger.debug("内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace)
             return None
 
+        # 缓存逻辑可以保留在 Coordinator 层
         cache_key = f"{self.config.redis.key_prefix}resolve:{content_id}:{target_lang}:{variant_key}"
         if self.cache:
             cached_result = await self.cache.get(cache_key)
@@ -226,15 +227,15 @@ class Coordinator:
                 logger.debug("解析缓存命中", key=cache_key)
                 return cached_result
 
-        # [修改] 将核心解析逻辑委托给 self.resolver
+        # [关键] 将核心解析逻辑完全委托给 self.resolver
         result_payload, _ = await self.resolver.resolve_with_fallback(
             project_id, content_id, target_lang, variant_key
         )
 
         if result_payload and self.cache:
-            await self.cache.set(
-                cache_key, result_payload, ttl=self.config.redis.cache.ttl
-            )
+            # TTL 应从配置中获取
+            ttl = self.config.redis.cache.ttl if self.config.redis and self.config.redis.cache else 3600
+            await self.cache.set(cache_key, result_payload, ttl=ttl)
             logger.debug("解析结果已写入缓存", key=cache_key)
 
         return result_payload
