@@ -2,10 +2,13 @@
 """
 对 Coordinator 驱动的核心业务流程进行集成测试。
 """
+import uuid # [最终修复]
 import pytest
-from sqlalchemy import select  # [最终修复] 补全导入
+from sqlalchemy import select
 from trans_hub.application.coordinator import Coordinator
-from trans_hub.infrastructure.db._schema import ThTransRev # [最终修复] 补全导入
+# [最终修复] 补全所有需要的 ORM 模型和领域模块的导入
+from trans_hub.domain import tm as tm_domain
+from trans_hub.infrastructure.db._schema import ThProjects, ThTransRev, ThTmUnits, ThTmLinks
 from trans_hub_core.types import TranslationStatus
 from tests.helpers.factories import create_request_data
 
@@ -152,3 +155,67 @@ async def test_reject_flow(coordinator: Coordinator):
             select(ThTransRev).where(ThTransRev.id == reviewed_rev_id)
         )).scalar_one()
         assert rev.status == TranslationStatus.REJECTED
+
+@pytest.mark.asyncio
+async def test_tm_hit_flow(coordinator: Coordinator):
+    """
+    [新增] 验证当 TM 命中时，系统是否直接创建 'reviewed' 修订。
+    """
+    # 1. 准备：手动创建一个 TM 条目
+    project_id = "tm-hit-proj"
+    namespace = "tm.test"
+    source_lang = "en"
+    target_lang = "de"
+    source_payload = {"text": "Hello TM World"}
+    translated_payload = {"text": "Hallo TM-Welt"}
+    keys = {"id": "tm-hit-key"}
+
+    # 计算 TM 复用键
+    source_fields = {"text": tm_domain.normalize_text_for_tm(source_payload["text"])}
+    reuse_sha = tm_domain.build_reuse_key(namespace=namespace, reduced_keys={}, source_fields=source_fields)
+
+    async with coordinator._sessionmaker.begin() as session:
+        # 确保项目存在
+        session.add(ThProjects(project_id=project_id, display_name="TM Hit Test"))
+        # 创建 TM 条目
+        session.add(ThTmUnits(
+            id=str(uuid.uuid4()), project_id=project_id, namespace=namespace,
+            src_lang=source_lang, tgt_lang=target_lang, src_hash=reuse_sha,
+            src_payload=source_payload, tgt_payload=translated_payload
+        ))
+
+    # 2. 行动：提交一个与 TM 条目匹配的翻译请求
+    req_data = create_request_data(
+        project_id=project_id, namespace=namespace, keys=keys,
+        source_payload=source_payload, target_langs=[target_lang]
+    )
+    await coordinator.request_translation(**req_data)
+
+    # 3. 验证
+    head = await coordinator.handler.get_translation_head_by_uida(
+        project_id=project_id, namespace=namespace, keys=keys,
+        target_lang=target_lang, variant_key="-"
+    )
+    assert head is not None
+    
+    # 3a. [核心断言] Head 的当前状态应该是 'reviewed'，而不是 'draft'
+    assert head.current_status == TranslationStatus.REVIEWED, \
+        "TM 命中时，应该直接创建 reviewed 状态的修订"
+    
+    # 3b. [核心断言] 修订号应该是 1 (初始的 draft(0) 被跳过，直接创建了 reviewed(1))
+    # *Self-Correction*: 我们的 get_or_create 总是会先创建一个 rev_no=0 的 draft。
+    # TM 命中后，会立刻创建一个 rev_no=1 的 reviewed。所以 current_no 应该是 1。
+    assert head.current_no == 1, "TM 命中后，Head 应指向 revision_no=1"
+
+    async with coordinator._sessionmaker() as session:
+        # 3c. 验证新修订的内容
+        new_rev = (await session.get(ThTransRev, (project_id, head.current_rev_id)))
+        assert new_rev is not None
+        assert new_rev.translated_payload_json["text"] == "Hallo TM-Welt"
+        assert new_rev.origin_lang == "tm", "修订的来源应标记为 'tm'"
+
+        # 3d. 验证溯源链接已创建
+        link = (await session.execute(
+            select(ThTmLinks).where(ThTmLinks.translation_rev_id == new_rev.id)
+        )).scalar_one_or_none()
+        assert link is not None, "应该为 TM 命中创建溯源链接"
