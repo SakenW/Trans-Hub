@@ -1,0 +1,39 @@
+# packages/server/src/trans_hub/infrastructure/persistence/repositories/_outbox_repo.py
+"""事务性发件箱仓库的 SQLAlchemy 实现。"""
+
+from __future__ import annotations
+from typing import Any
+import uuid
+
+from sqlalchemy import select, update, func
+
+from trans_hub.infrastructure.db._schema import ThOutboxEvents
+from trans_hub_core.uow import IOutboxRepository
+from ._base_repo import BaseRepository
+
+
+class SqlAlchemyOutboxRepository(BaseRepository, IOutboxRepository):
+    """发件箱仓库实现。"""
+
+    async def add(self, topic: str, payload: dict[str, Any]) -> None:
+        event = ThOutboxEvents(id=uuid.uuid4(), topic=topic, payload=payload)
+        self._session.add(event)
+
+    async def pull_pending(self, batch_size: int) -> list[ThOutboxEvents]:
+        stmt = (
+            select(ThOutboxEvents)
+            .where(ThOutboxEvents.status == "pending")
+            .order_by(ThOutboxEvents.created_at)
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_as_published(self, event_ids: list[uuid.UUID]) -> None:
+        stmt = (
+            update(ThOutboxEvents)
+            .where(ThOutboxEvents.id.in_(event_ids))
+            .values(status="published", published_at=func.now())
+        )
+        await self._session.execute(stmt)

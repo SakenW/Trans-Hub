@@ -6,11 +6,17 @@ from alembic.config import Config
 from sqlalchemy.engine import make_url
 
 # [最终修复] 更新导入路径
-from tests.helpers.tools.db_manager import managed_temp_database, _alembic_ini, _cfg_safe
+from tests.helpers.tools.db_manager import (
+    managed_temp_database,
+    _alembic_ini,
+    _cfg_safe,
+)
+
 # [最终修复] 导入 bootstrap 以获取配置
 from trans_hub.bootstrap import create_app_config
 
 pytestmark = [pytest.mark.db, pytest.mark.migrations, pytest.mark.slow]
+
 
 @pytest.mark.asyncio
 async def test_upgrade_downgrade_cycle_on_temp_db() -> None:
@@ -29,7 +35,7 @@ async def test_upgrade_downgrade_cycle_on_temp_db() -> None:
         # 2. 加载 Alembic 配置
         alembic_ini_path = _alembic_ini()
         cfg = Config(str(alembic_ini_path))
-        
+
         # 3. 注入临时库 DSN
         tenant_real_dsn = temp_db_url.render_as_string(hide_password=False)
         cfg.set_main_option("sqlalchemy.url", _cfg_safe(tenant_real_dsn))

@@ -11,13 +11,14 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2025-08-17 16:03:00.000000
 """
-from alembic import op
-import sqlalchemy as sa
 
-revision = '0004'
-down_revision = '0003'
+from alembic import op
+
+revision = "0004"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
+
 
 def upgrade() -> None:
     """应用此迁移。"""
@@ -41,17 +42,39 @@ def upgrade() -> None:
     """)
 
     # --- 2. 创建索引 ---
-    op.create_index(op.f('ix_resolve_expires'), 'resolve_cache', ['expires_at'], unique=False, schema='th')
-    op.create_index(op.f('ix_events_head'), 'events', ['project_id', 'head_id'], unique=False, schema='th')
-    op.create_index(op.f('ix_comments_head'), 'comments', ['project_id', 'head_id'], unique=False, schema='th')
-    op.create_index(op.f('ix_tm_links_tm_id'), 'tm_links', ['tm_id'], unique=False, schema='th')
+    op.create_index(
+        op.f("ix_resolve_expires"),
+        "resolve_cache",
+        ["expires_at"],
+        unique=False,
+        schema="th",
+    )
+    op.create_index(
+        op.f("ix_events_head"),
+        "events",
+        ["project_id", "head_id"],
+        unique=False,
+        schema="th",
+    )
+    op.create_index(
+        op.f("ix_comments_head"),
+        "comments",
+        ["project_id", "head_id"],
+        unique=False,
+        schema="th",
+    )
+    op.create_index(
+        op.f("ix_tm_links_tm_id"), "tm_links", ["tm_id"], unique=False, schema="th"
+    )
 
     # [最终修复] 移除对不存在的 'payload' 列的索引。
     # op.create_index("ix_trans_rev_payload_gin", "trans_rev", ["payload"], ...)
-    
+
     # [最终修复] 替换为《白皮书》要求的、正确的 trigram 索引。
-    op.execute('CREATE INDEX ix_trans_rev_trgm ON th.trans_rev USING gin ((translated_payload_json::text) gin_trgm_ops);')
-    
+    op.execute(
+        "CREATE INDEX ix_trans_rev_trgm ON th.trans_rev USING gin ((translated_payload_json::text) gin_trgm_ops);"
+    )
+
     # --- 3. 创建搜索物化视图及其索引 ---
     op.execute("""
     CREATE MATERIALIZED VIEW th.search_rev AS
@@ -66,19 +89,32 @@ def upgrade() -> None:
     FROM th.trans_rev r
     WHERE r.status IN ('reviewed','published');
     """)
-    op.create_index(op.f('ux_search_rev_ident'), 'search_rev', ['project_id', 'content_id', 'target_lang', 'variant_key', 'rev_id'], unique=True, schema='th')
-    op.create_index(op.f('ix_search_rev_tsv'), 'search_rev', ['tsv'], unique=False, schema='th', postgresql_using='gin')
+    op.create_index(
+        op.f("ux_search_rev_ident"),
+        "search_rev",
+        ["project_id", "content_id", "target_lang", "variant_key", "rev_id"],
+        unique=True,
+        schema="th",
+    )
+    op.create_index(
+        op.f("ix_search_rev_tsv"),
+        "search_rev",
+        ["tsv"],
+        unique=False,
+        schema="th",
+        postgresql_using="gin",
+    )
 
 
 def downgrade() -> None:
     """回滚此迁移。"""
     op.execute("DROP MATERIALIZED VIEW IF EXISTS th.search_rev CASCADE;")
-    
-    op.drop_index(op.f('ix_trans_rev_trgm'), table_name='trans_rev', schema='th')
-    op.drop_index(op.f('ix_tm_links_tm_id'), table_name='tm_links', schema='th')
-    op.drop_index(op.f('ix_comments_head'), table_name='comments', schema='th')
-    op.drop_index(op.f('ix_events_head'), table_name='events', schema='th')
-    op.drop_index(op.f('ix_resolve_expires'), table_name='resolve_cache', schema='th')
+
+    op.drop_index(op.f("ix_trans_rev_trgm"), table_name="trans_rev", schema="th")
+    op.drop_index(op.f("ix_tm_links_tm_id"), table_name="tm_links", schema="th")
+    op.drop_index(op.f("ix_comments_head"), table_name="comments", schema="th")
+    op.drop_index(op.f("ix_events_head"), table_name="events", schema="th")
+    op.drop_index(op.f("ix_resolve_expires"), table_name="resolve_cache", schema="th")
 
     # 清理分区子表
     for i in range(8):

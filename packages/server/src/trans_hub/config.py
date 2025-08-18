@@ -3,7 +3,7 @@
 Trans-Hub Server 配置（Pydantic v2，最终简洁版）
 
 特性:
-- 恢复使用 `default_factory`，代码更简洁，因为它信赖加载器 (bootstrap.py) 
+- 恢复使用 `default_factory`，代码更简洁，因为它信赖加载器 (bootstrap.py)
   已经保证了环境的正确性。
 - 保持纯粹数据模型的职责。
 """
@@ -19,8 +19,10 @@ from sqlalchemy.engine.url import make_url
 
 # ===================== 子模型 =====================
 
+
 class DatabaseSettings(BaseModel):
     """主库（运行期异步驱动）"""
+
     url: str = Field(
         default="sqlite+aiosqlite:///transhub.db",
         description="异步 DSN（sqlite+aiosqlite / postgresql+asyncpg / mysql+aiomysql）",
@@ -36,19 +38,25 @@ class DatabaseSettings(BaseModel):
         except Exception as e:
             raise ValueError(f"非法数据库 URL：{v!r}（{e}）") from e
         if drv not in allowed:
-            raise ValueError(f"不支持的运行期数据库驱动：{drv!r}，仅允许 {', '.join(allowed)}")
+            raise ValueError(
+                f"不支持的运行期数据库驱动：{drv!r}，仅允许 {', '.join(allowed)}"
+            )
         return v
+
 
 class RedisClusterSettings(BaseModel):
     nodes: Optional[str] = Field(default=None)
+
 
 class RedisSentinelSettings(BaseModel):
     nodes: Optional[str] = Field(default=None)
     master: Optional[str] = Field(default=None)
 
+
 class CacheSettings(BaseModel):
     ttl: int = Field(default=3600, ge=1)
     maxsize: int = Field(default=1000, ge=1)
+
 
 class RedisSettings(BaseModel):
     url: Optional[str] = Field(default=None)
@@ -57,23 +65,28 @@ class RedisSettings(BaseModel):
     sentinel: RedisSentinelSettings = Field(default_factory=RedisSentinelSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
 
+
 class WorkerSettings(BaseModel):
     event_stream_name: str = Field(default="th_events")
     poll_interval: float = Field(default=2.0, gt=0)
 
+
 class LoggingSettings(BaseModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
     format: Literal["console", "json"] = Field(default="console")
+
 
 class RetryPolicySettings(BaseModel):
     max_attempts: int = Field(default=2, ge=0)
     initial_backoff: float = Field(default=1.0, gt=0)
     max_backoff: float = Field(default=60.0, gt=0)
 
+
 class QueueSettings(BaseModel):
     kind: Literal["redis", "db"] = Field(default="db")
     prefix: str = Field(default="th:queue:")
     streams_prefix: str = Field(default="th:streams:")
+
 
 class OpenAISettings(BaseModel):
     api_key: Optional[str] = Field(default=None)
@@ -84,22 +97,27 @@ class OpenAISettings(BaseModel):
     connect_timeout: float = Field(default=5.0, gt=0)
     max_retries: int = Field(default=2, ge=0)
 
+
 class TranslatorsSettings(BaseModel):
     provider: Optional[str] = Field(default=None)
+
 
 class DebugEngineSettings(BaseModel):
     mode: Literal["SUCCESS", "FAIL"] = Field(default="SUCCESS")
     fail_on_text: Optional[str] = Field(default=None)
     fail_is_retryable: bool = Field(default=True)
 
+
 class ObservabilitySettings(BaseModel):
     otel_exporter: Optional[str] = Field(default=None)
+
 
 # ===================== 顶层配置 =====================
 class TransHubConfig(BaseSettings):
     """
     Trans-Hub 核心配置模型。
     """
+
     # --- 服务器通用 ---
     debug: bool = True
     host: str = "0.0.0.0"
@@ -153,14 +171,19 @@ class TransHubConfig(BaseSettings):
             except Exception as e:
                 raise ValueError(f"非法维护库 DSN：{v!r}（{e}）") from e
             if drv != "postgresql+psycopg":
-                raise ValueError(f"维护库驱动需为 'postgresql+psycopg'，实际为：{drv!r}")
+                raise ValueError(
+                    f"维护库驱动需为 'postgresql+psycopg'，实际为：{drv!r}"
+                )
             return v
         data = getattr(info, "data", {}) or {}
         db = data.get("database")
         dsn = getattr(db, "url", None) if db is not None else None
-        if not isinstance(dsn, str): return v
-        try: url = make_url(dsn)
-        except Exception: return v
+        if not isinstance(dsn, str):
+            return v
+        try:
+            url = make_url(dsn)
+        except Exception:
+            return v
         if url.get_backend_name().startswith("postgresql"):
             return str(url.set(drivername="postgresql+psycopg", database="postgres"))
         return v

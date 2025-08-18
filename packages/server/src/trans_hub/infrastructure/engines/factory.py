@@ -5,6 +5,7 @@
 本模块负责根据应用配置，动态地发现、加载和实例化具体的翻译引擎。
 这是实现引擎热插拔和解耦的核心。
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
@@ -46,8 +47,10 @@ def create_engine_instance(
         )
 
     # [关键修复] 构造正确的配置属性名，例如 'openai' -> 'openai'，'debug' -> 'debug_engine'
-    config_attr_name = f"{engine_name}_engine" if engine_name == "debug" else engine_name
-    
+    config_attr_name = (
+        f"{engine_name}_engine" if engine_name == "debug" else engine_name
+    )
+
     # 从主配置中提取特定于该引擎的配置部分
     engine_config_data = getattr(config, config_attr_name, None)
     if engine_config_data is None:

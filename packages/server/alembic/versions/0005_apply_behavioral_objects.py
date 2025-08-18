@@ -12,10 +12,11 @@ Revision ID: 0005
 Revises: 0004
 Create Date: 2025-08-17 16:04:00.000000
 """
+
 from alembic import op
 
-revision = '0005'
-down_revision = '0004'
+revision = "0005"
+down_revision = "0004"
 branch_labels = None
 depends_on = None
 
@@ -143,12 +144,14 @@ DROP FUNCTION IF EXISTS th.invalidate_resolve_cache_for_head(TEXT, TEXT, TEXT, T
 DROP FUNCTION IF EXISTS th.emit_event(TEXT, TEXT, TEXT, JSONB, TEXT) CASCADE;
 """
 
+
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == 'postgresql':
+    if bind.dialect.name == "postgresql":
         op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == 'postgresql':
+    if bind.dialect.name == "postgresql":
         op.execute(SQL_DOWN)

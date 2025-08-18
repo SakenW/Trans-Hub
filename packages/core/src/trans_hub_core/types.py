@@ -15,12 +15,12 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from .interfaces import PersistenceHandler
+    from .uow import UowFactory # [修正] Coordinator 不再依赖 Handler
     from trans_hub.config import TransHubConfig
 
 
 class TranslationStatus(str, Enum):
     """表示翻译记录在其生命周期中的不同状态。"""
-
     DRAFT = "draft"
     REVIEWED = "reviewed"
     PUBLISHED = "published"
@@ -82,6 +82,7 @@ class TranslationHead(BaseModel):
 
 class TranslationRevision(BaseModel):
     """翻译修订记录的DTO。"""
+    # [修复] 补全 ORM 模式配置
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -89,10 +90,19 @@ class TranslationRevision(BaseModel):
     content_id: str
     status: TranslationStatus
     revision_no: int
-    # 增加白皮书中定义的字段
     translated_payload_json: dict[str, Any] | None = None
     engine_name: str | None = None
     engine_version: str | None = None
+    # [新增] 补全 origin_lang 以匹配 ORM 模型，避免验证错误
+    origin_lang: str | None = None
+
+    @classmethod
+    def from_orm_model(cls, orm_obj: Any) -> "TranslationRevision":
+        """
+        [修复] 补全 from_orm_model 类方法
+        [防腐层] 从 SQLAlchemy ORM 实例安全地创建 DTO。
+        """
+        return cls.model_validate(orm_obj, from_attributes=True)
 
 
 class Comment(BaseModel):
@@ -115,18 +125,13 @@ class Comment(BaseModel):
         领域 DTO (id: str) 之间的类型不匹配。
         """
         if orm_obj is None:
-            # Pydantic v2.7+ model_validate 会处理 None，但为了清晰和兼容性，显式处理
             raise ValueError("orm_obj cannot be None")
 
-        # 1. 提取原始数据
-        # SQLAlchemy ORM 对象可以像字典一样访问其列属性
         data = {c.name: getattr(orm_obj, c.name) for c in orm_obj.__table__.columns}
         
-        # 2. 预处理数据：在验证前进行必要的类型转换
         if 'id' in data and data['id'] is not None:
             data['id'] = str(data['id'])
             
-        # 3. 使用预处理过的、类型正确的字典进行验证
         return cls.model_validate(data)
 
 class Event(BaseModel):
@@ -134,7 +139,6 @@ class Event(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str | None = None
-    # 按照白皮书，事件应与 head 关联
     head_id: str
     project_id: str
     actor: str
@@ -146,6 +150,5 @@ class Event(BaseModel):
 @dataclass(frozen=True)
 class ProcessingContext:
     """一个“工具箱”对象，封装了处理策略执行时所需的所有依赖项。"""
-
     config: "TransHubConfig"
-    handler: "PersistenceHandler"
+    uow_factory: "UowFactory" # [修正] 使用 UoW 工厂

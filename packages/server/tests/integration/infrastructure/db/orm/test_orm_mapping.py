@@ -1,10 +1,8 @@
-# packages/server/tests/integration/infrastructure/db/orm/test_orm_mapping.py
+# tests/integration/infrastructure/db/orm/test_orm_mapping.py
 """
-测试数据库架构中的 ORM 映射
+测试数据库架构中的 ORM 映射 (UoW 重构版)
+"""
 
-这些测试验证 SQLAlchemy 的 ORM 模型 (`_schema.py`) 是否与由 Alembic
-迁移脚本创建的物理数据库表的结构（列名、类型、约束）完全一致。
-"""
 from __future__ import annotations
 
 import uuid
@@ -12,7 +10,6 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from trans_hub.infrastructure.db._schema import (
     ThContent,
@@ -20,28 +17,29 @@ from trans_hub.infrastructure.db._schema import (
     ThTransHead,
     ThTransRev,
 )
+from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.types import TranslationStatus
 
 pytestmark = [pytest.mark.db, pytest.mark.integration]
 
 
 @pytest.mark.asyncio
-async def test_orm_mapping_core_tables(db_sessionmaker: async_sessionmaker):
+async def test_orm_mapping_core_tables(uow_factory: UowFactory):
     """
-    通过插入和立即取回一个包含所有字段的复杂对象，来验证核心表的 ORM 映射。
+    通过在 UoW 中插入和立即取回一个复杂对象图，来验证核心表的 ORM 映射。
     """
     project_id = f"orm-proj-{uuid.uuid4().hex[:6]}"
     content_id = f"orm-content-{uuid.uuid4().hex[:6]}"
     rev_id = f"orm-rev-{uuid.uuid4().hex[:6]}"
     head_id = f"orm-head-{uuid.uuid4().hex[:6]}"
-    
-    # 准备一个包含所有非空字段的对象图
+
+    # 准备 ORM 对象
     project = ThProjects(project_id=project_id, display_name="ORM Mapping Test")
     content = ThContent(
         id=content_id,
         project_id=project_id,
         namespace="orm.test",
-        keys_sha256_bytes=b'\xAB' * 32,
+        keys_sha256_bytes=b"\xab" * 32,
         source_lang="en-US",
         source_payload_json={"title": "Hello"},
     )
@@ -73,25 +71,20 @@ async def test_orm_mapping_core_tables(db_sessionmaker: async_sessionmaker):
         published_at=datetime.now(timezone.utc),
     )
 
-    # 1. 插入对象图
-    async with db_sessionmaker.begin() as session:
-        session.add_all([project, content, revision, head])
+    # 1. 在 UoW 中插入对象图
+    async with uow_factory() as uow:
+        uow.session.add_all([project, content, revision, head])
 
-    # 2. 在一个新的会话中取回并验证
-    async with db_sessionmaker() as session:
-        retrieved_head = (
-            await session.execute(select(ThTransHead).where(ThTransHead.id == head_id))
-        ).scalar_one()
+    # 2. 在一个新的 UoW 中取回并验证
+    async with uow_factory() as uow:
+        retrieved_head_stmt = select(ThTransHead).where(ThTransHead.id == head_id)
+        retrieved_head = (await uow.session.execute(retrieved_head_stmt)).scalar_one()
 
-        # 断言几个关键字段以确认映射正确
         assert retrieved_head.id == head_id
         assert retrieved_head.project_id == project_id
         assert retrieved_head.published_rev_id == rev_id
         assert retrieved_head.current_status == TranslationStatus.REVIEWED
 
-        # 验证关联对象是否也能被正确加载（如果配置了 relationship）
-        # 或者直接查询
-        retrieved_rev = (
-            await session.execute(select(ThTransRev).where(ThTransRev.id == rev_id))
-        ).scalar_one()
+        retrieved_rev_stmt = select(ThTransRev).where(ThTransRev.id == rev_id)
+        retrieved_rev = (await uow.session.execute(retrieved_rev_stmt)).scalar_one()
         assert retrieved_rev.engine_name == "test-engine"

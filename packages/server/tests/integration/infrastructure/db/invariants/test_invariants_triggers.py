@@ -1,176 +1,259 @@
-# packages/server/tests/integration/infrastructure/db/invariants/test_invariants_triggers.py
+# tests/integration/infrastructure/db/invariants/test_invariants_triggers.py
+"""
+测试数据库架构中的不变式 (Invariants) - 触发器 (UoW 重构版)
+"""
+
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import datetime, timezone, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy import select, update, insert
 
 from trans_hub.infrastructure.db._schema import (
     ThContent,
     ThEvents,
-    ThProjects,
     ThResolveCache,
     ThTransHead,
     ThTransRev,
 )
+from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.types import TranslationStatus
 
 pytestmark = [pytest.mark.db, pytest.mark.invariants]
 
 # --- 夹具 ---
 
+
 @pytest_asyncio.fixture
-async def setup_trigger_base_data(db_sessionmaker: async_sessionmaker) -> dict:
+async def setup_trigger_base_data(uow_factory: UowFactory) -> dict:
+    """
+    (函数级) 使用 uow_factory 准备所有触发器测试所需的基础数据。
+    """
     project_id = "trigger_proj"
     content_id = "content_for_trigger"
     rev1_id = "rev1_for_trigger"
     rev2_id = "rev2_for_trigger"
     head_id = "head_for_trigger"
 
-    # [最终修复] 使用正确的参数名 db_sessionmaker
-    async with db_sessionmaker.begin() as session:
-        await session.execute(pg_insert(ThProjects).values(project_id=project_id, display_name="Trigger Test Project").on_conflict_do_nothing(index_elements=['project_id']))
-        await session.execute(pg_insert(ThContent).values(id=content_id, project_id=project_id, namespace="triggers", keys_sha256_bytes=b'\x10' * 32, source_lang="en").on_conflict_do_nothing(index_elements=['id']))
-        await session.execute(pg_insert(ThTransRev).values([
-            {"project_id": project_id, "id": rev1_id, "content_id": content_id, "target_lang": "de", "revision_no": 1, "status": TranslationStatus.REVIEWED, "src_payload_json": {}},
-            {"project_id": project_id, "id": rev2_id, "content_id": content_id, "target_lang": "de", "revision_no": 2, "status": TranslationStatus.REVIEWED, "src_payload_json": {}},
-        ]).on_conflict_do_nothing(index_elements=['project_id', 'id']))
-        await session.execute(pg_insert(ThTransHead).values(project_id=project_id, id=head_id, content_id=content_id, target_lang="de", current_rev_id=rev2_id, current_status=TranslationStatus.REVIEWED, current_no=2).on_conflict_do_nothing(index_elements=['project_id', 'id']))
-    
-    return {"project_id": project_id, "content_id": content_id, "rev1_id": rev1_id, "head_id": head_id}
+    async with uow_factory() as uow:
+        # 使用仓库方法或原生 SQL 创建基础数据
+        await uow.misc.add_project_if_not_exists(project_id, "Trigger Test Project")
+        await uow.content.add(
+            id=content_id,
+            project_id=project_id,
+            namespace="triggers",
+            keys_sha256_bytes=b"\x10" * 32,
+            source_lang="en",
+            source_payload_json={},
+        )
+
+        # 无法直接使用仓库，因为需要指定 ID，所以用原生 insert
+        await uow.session.execute(
+            insert(ThTransRev).values(
+                [
+                    {
+                        "project_id": project_id,
+                        "id": rev1_id,
+                        "content_id": content_id,
+                        "target_lang": "de",
+                        "revision_no": 1,
+                        "status": TranslationStatus.REVIEWED,
+                        "src_payload_json": {},
+                    },
+                    {
+                        "project_id": project_id,
+                        "id": rev2_id,
+                        "content_id": content_id,
+                        "target_lang": "de",
+                        "revision_no": 2,
+                        "status": TranslationStatus.REVIEWED,
+                        "src_payload_json": {},
+                    },
+                ]
+            )
+        )
+        await uow.session.execute(
+            insert(ThTransHead).values(
+                project_id=project_id,
+                id=head_id,
+                content_id=content_id,
+                target_lang="de",
+                current_rev_id=rev2_id,
+                current_status=TranslationStatus.REVIEWED,
+                current_no=2,
+            )
+        )
+
+    return {
+        "project_id": project_id,
+        "content_id": content_id,
+        "rev1_id": rev1_id,
+        "rev2_id": rev2_id,
+        "head_id": head_id,
+    }
+
 
 # --- 测试用例 ---
 
+
 @pytest.mark.asyncio
-async def test_trigger_set_updated_at(db_sessionmaker: async_sessionmaker, setup_trigger_base_data: dict):
+async def test_trigger_set_updated_at(
+    uow_factory: UowFactory, setup_trigger_base_data: dict
+):
     content_id = setup_trigger_base_data["content_id"]
-    
-    # [最终修复] 使用显式的顶级事务块
-    async with db_sessionmaker.begin() as session:
+
+    async with uow_factory() as uow:
         select_stmt = select(ThContent.updated_at).where(ThContent.id == content_id)
-        initial_updated_at = (await session.execute(select_stmt)).scalar_one()
-        
-        # 在同一个事务中，我们不需要 `asyncio.sleep`，因为 now() 会变化
-        # 但保留它以确保时间差异足够大
-        await asyncio.sleep(0.01)
-        
-        update_stmt = update(ThContent).where(ThContent.id == content_id).values(namespace="updated_namespace")
-        await session.execute(update_stmt)
-        
-        # session.begin() 会在退出时自动 commit
-    
-    # 在一个新的会话/事务中验证结果，以确保数据已持久化
-    async with db_sessionmaker() as session:
-        final_updated_at = (await session.execute(select_stmt)).scalar_one()
+        initial_updated_at = (await uow.session.execute(select_stmt)).scalar_one()
+
+        await asyncio.sleep(0.01)  # 确保时间戳有足够差异
+
+        update_stmt = (
+            update(ThContent)
+            .where(ThContent.id == content_id)
+            .values(namespace="updated_namespace")
+        )
+        await uow.session.execute(update_stmt)
+
+        # 在同一个事务中再次查询，以验证 onupdate 行为
+        final_updated_at = (await uow.session.execute(select_stmt)).scalar_one()
         assert final_updated_at > initial_updated_at
 
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("input_variant, expected_variant", [
-    ("Dark-Mode", "dark-mode"), ("  ", "-"), (None, "-"), ("normal", "normal"),
-])
-async def test_trigger_variant_normalize(db_sessionmaker: async_sessionmaker, setup_trigger_base_data: dict, input_variant: str | None, expected_variant: str):
+@pytest.mark.parametrize(
+    "input_variant, expected_variant",
+    [
+        ("Dark-Mode", "dark-mode"),
+        ("  ", "-"),
+        (None, "-"),
+        ("normal", "normal"),
+    ],
+)
+async def test_trigger_variant_normalize(
+    uow_factory: UowFactory,
+    setup_trigger_base_data: dict,
+    input_variant: str | None,
+    expected_variant: str,
+):
     head_id = setup_trigger_base_data["head_id"]
     project_id = setup_trigger_base_data["project_id"]
-    
-    # [最终修复] 使用正确的参数名 db_sessionmaker
-    async with db_sessionmaker.begin() as session:
-        await session.execute(update(ThTransHead).where(ThTransHead.id == head_id, ThTransHead.project_id == project_id).values(variant_key=input_variant))
-        
-        select_stmt = select(ThTransHead.variant_key).where(ThTransHead.id == head_id, ThTransHead.project_id == project_id)
-        normalized_variant = (await session.execute(select_stmt)).scalar_one()
+
+    async with uow_factory() as uow:
+        await uow.session.execute(
+            update(ThTransHead)
+            .where(ThTransHead.id == head_id, ThTransHead.project_id == project_id)
+            .values(variant_key=input_variant)
+        )
+
+        select_stmt = select(ThTransHead.variant_key).where(
+            ThTransHead.id == head_id, ThTransHead.project_id == project_id
+        )
+        normalized_variant = (await uow.session.execute(select_stmt)).scalar_one()
         assert normalized_variant == expected_variant
 
+
 @pytest.mark.asyncio
-async def test_trigger_publish_flow(db_sessionmaker: async_sessionmaker, setup_trigger_base_data: dict):
+async def test_trigger_publish_flow(
+    uow_factory: UowFactory, setup_trigger_base_data: dict
+):
     p_id = setup_trigger_base_data["project_id"]
     c_id = setup_trigger_base_data["content_id"]
     h_id = setup_trigger_base_data["head_id"]
     r1_id = setup_trigger_base_data["rev1_id"]
-    
-    # [最终修复] 使用正确的参数名 db_sessionmaker
-    async with db_sessionmaker.begin() as session:
-        await session.execute(pg_insert(ThResolveCache).values(
-            project_id=p_id, content_id=c_id, target_lang="de", variant_key="-",
-            resolved_rev_id=r1_id, resolved_payload={"text": "stale"},
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
-        ).on_conflict_do_update(index_elements=['project_id', 'content_id', 'target_lang', 'variant_key'], set_={'resolved_rev_id': r1_id}))
-        
-        cache_exists_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
-        assert cache_exists_result.first() is not None
 
-        await session.execute(update(ThTransHead).where(ThTransHead.id == h_id, ThTransHead.project_id == p_id).values(published_rev_id=r1_id))
-        
-        event_stmt = select(ThEvents).where(ThEvents.head_id == h_id, ThEvents.event_type == 'published')
-        
-        event_result = await session.execute(event_stmt)
-        row = event_result.first()
-        event = row[0] if row else None
-        
-        assert event is not None, "应该创建一条 'published' 事件"
-        assert isinstance(event, ThEvents), f"变量 'event' 应该是 ThEvents 对象, 但却是 {type(event)}"
-        assert event.payload['new_rev'] == r1_id, "事件的 payload 应包含正确的 rev_id"
+    async with uow_factory() as uow:
+        # 准备：在缓存中放一条数据
+        await uow.session.execute(
+            insert(ThResolveCache).values(
+                project_id=p_id,
+                content_id=c_id,
+                target_lang="de",
+                variant_key="-",
+                resolved_rev_id=r1_id,
+                resolved_payload={"text": "stale"},
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+        assert (await uow.session.execute(select(ThResolveCache))).first() is not None
 
-        cache_after_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
-        assert cache_after_result.first() is None, "缓存条目应该已被触发器删除"
-
-@pytest.mark.asyncio
-async def test_trigger_unpublish_flow(db_sessionmaker: async_sessionmaker, setup_trigger_base_data: dict):
-    """
-    [新增] 验证撤回发布 (`published_rev_id` 从 ID -> NULL) 时的触发器行为：
-    1. 创建 'unpublished' 事件。
-    2. 删除对应的 `resolve_cache` 条目。
-    """
-    p_id = setup_trigger_base_data["project_id"]
-    c_id = setup_trigger_base_data["content_id"]
-    h_id = setup_trigger_base_data["head_id"]
-    r1_id = setup_trigger_base_data["rev1_id"]
-    
-    async with db_sessionmaker.begin() as session:
-        # 1. 准备：
-        # 1a. 先将 head 设置为已发布状态
-        await session.execute(
+        # 核心操作：执行发布
+        await uow.session.execute(
             update(ThTransHead)
             .where(ThTransHead.id == h_id, ThTransHead.project_id == p_id)
             .values(published_rev_id=r1_id)
         )
-        
-        # 1b. 在缓存中放入一条数据
-        await session.execute(
-            pg_insert(ThResolveCache).values(
-                project_id=p_id, content_id=c_id, target_lang="de", variant_key="-",
-                resolved_rev_id=r1_id, resolved_payload={"text": "published"},
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
-            ).on_conflict_do_update(
-                index_elements=['project_id', 'content_id', 'target_lang', 'variant_key'],
-                set_={'resolved_rev_id': r1_id}
-            )
-        )
-        
-        # 验证前提条件
-        cache_exists_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
-        assert cache_exists_result.first() is not None, "前提条件失败：缓存条目未能插入"
 
-        # 2. 核心操作：执行撤回发布 (UPDATE trans_head)
-        await session.execute(
+        # 验证事件
+        event = (
+            await uow.session.execute(
+                select(ThEvents).where(
+                    ThEvents.head_id == h_id, ThEvents.event_type == "published"
+                )
+            )
+        ).scalar_one_or_none()
+
+        assert event is not None, "应该创建一条 'published' 事件"
+        assert event.payload["new_rev"] == r1_id, "事件的 payload 应包含正确的 rev_id"
+
+        # 验证缓存失效
+        cache_after = (await uow.session.execute(select(ThResolveCache))).first()
+        assert cache_after is None, "缓存条目应该已被触发器删除"
+
+
+@pytest.mark.asyncio
+async def test_trigger_unpublish_flow(
+    uow_factory: UowFactory, setup_trigger_base_data: dict
+):
+    """验证撤回发布时的触发器行为：创建 'unpublished' 事件 + 删除缓存。"""
+    p_id = setup_trigger_base_data["project_id"]
+    c_id = setup_trigger_base_data["content_id"]
+    h_id = setup_trigger_base_data["head_id"]
+    r1_id = setup_trigger_base_data["rev1_id"]
+
+    async with uow_factory() as uow:
+        # 准备：
+        # 1a. 先将 head 设置为已发布状态
+        await uow.session.execute(
             update(ThTransHead)
             .where(ThTransHead.id == h_id, ThTransHead.project_id == p_id)
-            .values(published_rev_id=None) # <-- 撤回发布
+            .values(published_rev_id=r1_id)
+        )
+        # 1b. 在缓存中放入一条数据
+        await uow.session.execute(
+            insert(ThResolveCache).values(
+                project_id=p_id,
+                content_id=c_id,
+                target_lang="de",
+                variant_key="-",
+                resolved_rev_id=r1_id,
+                resolved_payload={"text": "published"},
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
         )
 
-        # 3. 验证事件
-        event_stmt = select(ThEvents).where(ThEvents.head_id == h_id, ThEvents.event_type == 'unpublished')
-        event_result = await session.execute(event_stmt)
-        event = event_result.scalars().one_or_none()
-        
-        assert event is not None, "应该创建一条 'unpublished' 事件"
-        assert event.payload['old_rev'] == r1_id, "事件的 payload 应包含正确的 old_rev"
+        # 核心操作：执行撤回发布
+        await uow.session.execute(
+            update(ThTransHead)
+            .where(ThTransHead.id == h_id, ThTransHead.project_id == p_id)
+            .values(published_rev_id=None)  # <-- 撤回发布
+        )
 
-        # 4. 验证缓存失效
-        cache_after_result = await session.execute(select(ThResolveCache).where(ThResolveCache.content_id == c_id))
-        assert cache_after_result.first() is None, "缓存条目应该已被触发器删除"
+        # 验证事件
+        event = (
+            await uow.session.execute(
+                select(ThEvents).where(
+                    ThEvents.head_id == h_id, ThEvents.event_type == "unpublished"
+                )
+            )
+        ).scalar_one_or_none()
+
+        assert event is not None, "应该创建一条 'unpublished' 事件"
+        assert event.payload["old_rev"] == r1_id, "事件的 payload 应包含正确的 old_rev"
+
+        # 验证缓存失效
+        cache_after = (await uow.session.execute(select(ThResolveCache))).first()
+        assert cache_after is None, "缓存条目应该已被触发器删除"

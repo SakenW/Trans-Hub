@@ -6,6 +6,7 @@
 - 创建 schema/扩展/ENUM
 - 定义所有核心函数，包括缺失的 extract_text
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -104,10 +105,12 @@ END$$;
 DROP EXTENSION IF EXISTS pg_trgm;
 """
 
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     bind = op.get_bind()

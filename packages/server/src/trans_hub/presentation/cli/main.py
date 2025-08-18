@@ -38,18 +38,18 @@ def main(ctx: typer.Context):
         env_mode_str = os.getenv("TRANSHUB_ENV", "dev").lower()
         if env_mode_str not in ("prod", "dev", "test"):
             env_mode_str = "dev"
-        
-        env_mode: Literal["prod", "dev", "test"] = env_mode_str # type: ignore
+
+        env_mode: Literal["prod", "dev", "test"] = env_mode_str  # type: ignore
 
         config = create_app_config(env_mode=env_mode)
-        
+
         # CLI 使用的日志配置
         setup_logging(
             log_level=config.logging.level,
-            log_format=config.logging.format, # 尊重 .env 中的配置
-            service="trans-hub-cli"
+            log_format=config.logging.format,  # 尊重 .env 中的配置
+            service="trans-hub-cli",
         )
-        
+
         ctx.obj = CLISharedState(config=config)
     except Exception as e:
         console.print(f"[bold red]❌ 启动失败：无法加载配置: {e}[/bold red]")

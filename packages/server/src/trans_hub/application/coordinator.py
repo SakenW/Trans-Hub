@@ -1,127 +1,75 @@
 # packages/server/src/trans_hub/application/coordinator.py
 """
-Trans-Hub 应用服务总协调器。(v3.0.0 重构版)
+Trans-Hub 应用服务总协调器。(v3.2.2 仓库修复和逻辑加固版)
 """
 
 from __future__ import annotations
-
-import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
-
 import structlog
 
-from trans_hub.domain import tm as tm_domain
-from trans_hub.infrastructure.db import (
-    create_async_db_engine as create_db_engine,
-    create_async_sessionmaker as create_db_sessionmaker,
-    dispose_engine,
-)
+from sqlalchemy import update
+from trans_hub.infrastructure.db._schema import ThTransRev, ThTransHead
 
-from trans_hub.infrastructure.persistence import create_persistence_handler
-from trans_hub.application.resolvers import TranslationResolver  # [新增] 导入新的解析器
+from trans_hub.domain import tm as tm_domain
+from trans_hub.application.resolvers import TranslationResolver
 from trans_hub_core.types import Comment, Event, TranslationStatus
 from trans_hub_uida import generate_uida
-
 from .events import (
     CommentAdded,
     TMApplied,
     TranslationPublished,
     TranslationRejected,
+    TranslationUnpublished,
     TranslationSubmitted,
 )
 
 if TYPE_CHECKING:
-    from trans_hub.application.processors import TranslationProcessor
+    from trans_hub.infrastructure.uow import UowFactory
     from trans_hub.config import TransHubConfig
-    from trans_hub_core.interfaces import (
-        CacheHandler,
-        PersistenceHandler,
-        StreamProducer,
-    )
-
+    from trans_hub_core.interfaces import CacheHandler, StreamProducer
+    from trans_hub_core.uow import IUnitOfWork
 
 logger = structlog.get_logger(__name__)
 
 
 class Coordinator:
-    """
-    异步主协调器，是 Trans-Hub 功能的中心枢纽。
-    """
+    """异步主协调器，是 Trans-Hub 功能的中心枢纽。"""
 
-    def __init__(self, config: TransHubConfig):
-        """
-        初始化协调器。
-
-        注意：这是一个同步方法。所有需要 I/O 的初始化都应在 `initialize` 方法中完成。
-        """
+    def __init__(
+        self,
+        config: TransHubConfig,
+        uow_factory: UowFactory,
+        stream_producer: StreamProducer | None = None,
+        cache: CacheHandler | None = None,
+    ):
         self.config = config
-        self._engine = create_db_engine(config)
-        self._sessionmaker = create_db_sessionmaker(self._engine)
-        self.handler: PersistenceHandler = create_persistence_handler(
-            config, self._sessionmaker
-        )
-        # [新增] 初始化解析器，将持久化处理器注入其中
-        self.resolver = TranslationResolver(self.handler)
-
-        self.stream_producer: StreamProducer | None = None
-        self.cache: CacheHandler | None = None
-        self.processor: TranslationProcessor | None = None
+        self._uow_factory = uow_factory
+        self.stream_producer = stream_producer
+        self.cache = cache
+        self.resolver = TranslationResolver(uow_factory)
         self.initialized = False
 
     async def initialize(self) -> None:
-        """
-        异步初始化协调器及其所有依赖项。
-        包括数据库连接、Redis 连接和引擎初始化。
-        """
+        """异步初始化协调器。"""
         if self.initialized:
             return
         logger.info("协调器初始化开始...")
-
-        await self.handler.connect()
-
-        if self.config.redis.url:
-            from trans_hub.infrastructure.redis._client import get_redis_client
-            from trans_hub.infrastructure.redis.cache import RedisCacheHandler
-            from trans_hub.infrastructure.redis.streams import RedisStreamProducer
-
-            redis_client = await get_redis_client(self.config)
-            self.stream_producer = RedisStreamProducer(redis_client)
-            self.cache = RedisCacheHandler(redis_client, self.config.redis.key_prefix)
-            logger.info("Redis 基础设施已初始化 (Stream, Cache)。")
-
-        from .processors import TranslationProcessor
-
-        self.processor = TranslationProcessor(
-            self.handler, self.stream_producer, self.config.worker.event_stream_name
-        )
         self.initialized = True
         logger.info("协调器初始化完成。")
 
     async def close(self) -> None:
-        """优雅地关闭协调器及其所有依赖项。"""
+        """优雅地关闭协调器。"""
         if not self.initialized:
             return
-        logger.info("协调器开始优雅停机...")
-        await asyncio.gather(
-            self.handler.close(),
-            dispose_engine(self._engine),
-            return_exceptions=True,
-        )
-        if self.config.redis.url:
-            from trans_hub.infrastructure.redis._client import close_redis_client
-
-            await close_redis_client()
-        self.initialized = False
         logger.info("协调器优雅停机完成。")
 
-    async def _publish_event(self, event: Event) -> None:
-        """发布一个业务事件到事件流并持久化到数据库。"""
-        await self.handler.write_event(event)
-        if self.stream_producer:
-            await self.stream_producer.publish(
-                self.config.worker.event_stream_name,
-                event.model_dump(mode="json"),
-            )
+    async def _publish_event(self, uow: IUnitOfWork, event: Event) -> None:
+        """将事件写入事务性发件箱。"""
+        await uow.outbox.add(
+            topic=self.config.worker.event_stream_name,
+            payload=event.model_dump(mode="json"),
+        )
 
     async def request_translation(
         self,
@@ -135,68 +83,81 @@ class Coordinator:
         actor: str = "system",
         **kwargs: Any,
     ) -> str:
-        """提交一个新的翻译请求。"""
         final_source_lang = source_lang or self.config.default_source_lang
         if not final_source_lang:
             raise ValueError("源语言必须在请求或配置中提供。")
 
-        content_id = await self.handler.upsert_content(
-            project_id=project_id,
-            namespace=namespace,
-            keys=keys,
-            source_payload=source_payload,
-            source_lang=final_source_lang,
-            content_version=kwargs.get("content_version", 1),
-        )
+        uida = generate_uida(keys)
 
-        source_text_for_tm = source_payload.get("text", "")
-        source_fields = {"text": tm_domain.normalize_text_for_tm(source_text_for_tm)}
-        reuse_sha = tm_domain.build_reuse_key(
-            namespace=namespace, reduced_keys={}, source_fields=source_fields
-        )
+        async with self._uow_factory() as uow:
+            await uow.misc.add_project_if_not_exists(project_id, project_id)
 
-        for lang in target_langs:
-            variant_key = kwargs.get("variant_key", "-")
-            head_id, rev_no = await self.handler.get_or_create_translation_head(
-                project_id, content_id, lang, variant_key
+            content_id = await uow.content.get_id_by_uida(
+                project_id, namespace, uida.keys_sha256_bytes
             )
-            await self._publish_event(
-                TranslationSubmitted(
-                    head_id=head_id, project_id=project_id, actor=actor
-                )
-            )
-
-            tm_hit = await self.handler.find_tm_entry(
-                project_id=project_id,
-                namespace=namespace,
-                reuse_sha=reuse_sha,
-                src_lang=final_source_lang,
-                tgt_lang=lang,
-                variant_key=variant_key,
-            )
-
-            if tm_hit:
-                tm_id, translated_payload = tm_hit
-                rev_id = await self.handler.create_new_translation_revision(
-                    head_id=head_id,
+            if content_id:
+                await uow.content.update_payload(content_id, source_payload)
+            else:
+                content_id = await uow.content.add(
                     project_id=project_id,
-                    content_id=content_id,
-                    target_lang=lang,
-                    variant_key=variant_key,
-                    status=TranslationStatus.REVIEWED,
-                    revision_no=rev_no + 1,
-                    translated_payload_json=translated_payload,
-                    origin_lang="tm",
+                    namespace=namespace,
+                    keys_sha256_bytes=uida.keys_sha256_bytes,
+                    source_lang=final_source_lang,
+                    source_payload_json=source_payload,
                 )
-                await self.handler.link_translation_to_tm(rev_id, tm_id, project_id)
+
+            source_text_for_tm = source_payload.get("text", "")
+            source_fields = {
+                "text": tm_domain.normalize_text_for_tm(source_text_for_tm)
+            }
+            reuse_sha = tm_domain.build_reuse_key(
+                namespace=namespace, reduced_keys={}, source_fields=source_fields
+            )
+
+            for lang in target_langs:
+                variant_key = kwargs.get("variant_key", "-")
+                head_id, rev_no = await uow.translations.get_or_create_head(
+                    project_id, content_id, lang, variant_key
+                )
                 await self._publish_event(
-                    TMApplied(
+                    uow,
+                    TranslationSubmitted(
+                        head_id=head_id, project_id=project_id, actor=actor
+                    ),
+                )
+
+                tm_hit = await uow.tm.find_entry(
+                    project_id=project_id,
+                    namespace=namespace,
+                    reuse_sha=reuse_sha,
+                    src_lang=final_source_lang,
+                    tgt_lang=lang,
+                    variant_key=variant_key,
+                )
+
+                if tm_hit:
+                    tm_id, translated_payload = tm_hit
+                    rev_id = await uow.translations.create_revision(
                         head_id=head_id,
                         project_id=project_id,
-                        actor="system",
-                        payload={"tm_id": tm_id},
+                        content_id=content_id,
+                        target_lang=lang,
+                        variant_key=variant_key,
+                        status=TranslationStatus.REVIEWED,
+                        revision_no=rev_no + 1,
+                        translated_payload_json=translated_payload,
+                        origin_lang="tm",
                     )
-                )
+                    await uow.tm.link_revision_to_tm(rev_id, tm_id, project_id)
+                    await self._publish_event(
+                        uow,
+                        TMApplied(
+                            head_id=head_id,
+                            project_id=project_id,
+                            actor="system",
+                            payload={"tm_id": tm_id},
+                        ),
+                    )
         return content_id
 
     async def get_translation(
@@ -208,18 +169,18 @@ class Coordinator:
         target_lang: str,
         variant_key: str = "-",
     ) -> dict[str, Any] | None:
-        """
-        [最终修复] 获取最终可用的翻译，完全委托给 TranslationResolver。
-        """
         uida = generate_uida(keys)
-        content_id = await self.handler.get_content_id_by_uida(
-            project_id, namespace, uida.keys_sha256_bytes
-        )
-        if not content_id:
-            logger.debug("内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace)
-            return None
 
-        # 缓存逻辑可以保留在 Coordinator 层
+        async with self._uow_factory() as uow:
+            content_id = await uow.content.get_id_by_uida(
+                project_id, namespace, uida.keys_sha256_bytes
+            )
+            if not content_id:
+                logger.debug(
+                    "内容未找到 (UIDA miss)", project_id=project_id, namespace=namespace
+                )
+                return None
+
         cache_key = f"{self.config.redis.key_prefix}resolve:{content_id}:{target_lang}:{variant_key}"
         if self.cache:
             cached_result = await self.cache.get(cache_key)
@@ -227,14 +188,16 @@ class Coordinator:
                 logger.debug("解析缓存命中", key=cache_key)
                 return cached_result
 
-        # [关键] 将核心解析逻辑完全委托给 self.resolver
         result_payload, _ = await self.resolver.resolve_with_fallback(
             project_id, content_id, target_lang, variant_key
         )
 
         if result_payload and self.cache:
-            # TTL 应从配置中获取
-            ttl = self.config.redis.cache.ttl if self.config.redis and self.config.redis.cache else 3600
+            ttl = (
+                self.config.redis.cache.ttl
+                if self.config.redis and self.config.redis.cache
+                else 3600
+            )
             await self.cache.set(cache_key, result_payload, ttl=ttl)
             logger.debug("解析结果已写入缓存", key=cache_key)
 
@@ -243,87 +206,140 @@ class Coordinator:
     async def publish_translation(
         self, revision_id: str, actor: str = "system"
     ) -> bool:
-        """发布一个 'reviewed' 状态的修订。"""
-        head = await self.handler.get_head_by_revision(revision_id)
-        if not head:
-            return False
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj or rev_obj.status != TranslationStatus.REVIEWED:
+                return False
 
-        success = await self.handler.publish_revision(revision_id)
-        if success:
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if not head_obj:
+                return False
+
+            await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.PUBLISHED.value)
+            )
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.id == head_obj.id)
+                .values(
+                    published_rev_id=revision_id,
+                    published_no=rev_obj.revision_no,
+                    published_at=datetime.now(timezone.utc),
+                    current_rev_id=revision_id,
+                    current_status=TranslationStatus.PUBLISHED.value,
+                    current_no=rev_obj.revision_no,
+                )
+            )
+
             await self._publish_event(
+                uow,
                 TranslationPublished(
-                    head_id=head.id,
-                    project_id=head.project_id,
+                    head_id=head_obj.id,
+                    project_id=head_obj.project_id,
                     actor=actor,
                     payload={"revision_id": revision_id},
-                )
+                ),
             )
-        return success
-
-    async def reject_translation(self, revision_id: str, actor: str = "system") -> bool:
-        """拒绝一个修订。"""
-        head = await self.handler.get_head_by_revision(revision_id)
-        if not head:
-            return False
-
-        success = await self.handler.reject_revision(revision_id)
-        if success:
-            await self._publish_event(
-                TranslationRejected(
-                    head_id=head.id,
-                    project_id=head.project_id,
-                    actor=actor,
-                    payload={"revision_id": revision_id},
-                )
-            )
-        return success
+        return True
 
     async def unpublish_translation(
         self, revision_id: str, actor: str = "system"
     ) -> bool:
-        """
-        [新增] 撤回一个已发布的修订。
-        """
-        head = await self.handler.get_head_by_revision(revision_id)
-        if not head:
-            logger.warning("撤回发布失败: 找不到修订所属的 Head", revision_id=revision_id)
-            return False
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj or rev_obj.status != TranslationStatus.PUBLISHED:
+                return False
 
-        success = await self.handler.unpublish_revision(revision_id)
-        if success:
-            # 导入 TranslationUnpublished 事件
-            from .events import TranslationUnpublished 
-            await self._publish_event(
-                TranslationUnpublished(
-                    head_id=head.id,
-                    project_id=head.project_id,
-                    actor=actor,
-                    payload={"revision_id": revision_id},
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if not head_obj or head_obj.published_rev_id != revision_id:
+                return False
+
+            await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.REVIEWED.value)
+            )
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.id == head_obj.id)
+                .values(
+                    published_rev_id=None,
+                    published_no=None,
+                    published_at=None,
+                    current_status=TranslationStatus.REVIEWED.value,
                 )
             )
-        return success
+
+            await self._publish_event(
+                uow,
+                TranslationUnpublished(
+                    head_id=head_obj.id,
+                    project_id=head_obj.project_id,
+                    actor=actor,
+                    payload={"revision_id": revision_id},
+                ),
+            )
+        return True
+
+    async def reject_translation(self, revision_id: str, actor: str = "system") -> bool:
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj:
+                return False
+
+            result = await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.REJECTED.value)
+            )
+            if result.rowcount == 0:
+                return False
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.current_rev_id == revision_id)
+                .values(current_status=TranslationStatus.REJECTED.value)
+            )
+
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if head_obj:
+                await self._publish_event(
+                    uow,
+                    TranslationRejected(
+                        head_id=head_obj.id,
+                        project_id=head_obj.project_id,
+                        actor=actor,
+                        payload={"revision_id": revision_id},
+                    ),
+                )
+        return True
 
     async def add_comment(self, head_id: str, author: str, body: str) -> str:
-        """为翻译头添加一条评论。"""
-        head = await self.handler.get_head_by_id(head_id)
-        if not head:
-            raise ValueError(f"翻译头 ID '{head_id}' 不存在。")
+        async with self._uow_factory() as uow:
+            head = await uow.translations.get_head_by_id(head_id)
+            if not head:
+                raise ValueError(f"翻译头 ID '{head_id}' 不存在。")
 
-        comment = Comment(
-            head_id=head_id, project_id=head.project_id, author=author, body=body
-        )
-        comment_id = await self.handler.add_comment(comment)
-
-        await self._publish_event(
-            CommentAdded(
-                head_id=head_id,
-                project_id=head.project_id,
-                actor=author,
-                payload={"comment_id": comment_id},
+            comment = Comment(
+                head_id=head_id, project_id=head.project_id, author=author, body=body
             )
-        )
+            comment_id = await uow.misc.add_comment(comment)
+
+            await self._publish_event(
+                uow,
+                CommentAdded(
+                    head_id=head_id,
+                    project_id=head.project_id,
+                    actor=author,
+                    payload={"comment_id": comment_id},
+                ),
+            )
         return comment_id
 
     async def get_comments(self, head_id: str) -> list[Comment]:
-        """获取指定翻译头的所有评论。"""
-        return await self.handler.get_comments(head_id)
+        async with self._uow_factory() as uow:
+            return await uow.misc.get_comments(head_id)

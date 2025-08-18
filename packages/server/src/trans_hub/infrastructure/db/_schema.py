@@ -1,7 +1,7 @@
 # packages/server/src/trans_hub/infrastructure/db/_schema.py
 """
 定义了与数据库 `3f8b9e6a0c2c` Schema 完全对应的 SQLAlchemy ORM 模型。
-(v2.5.14 最终权威版 · 与 Alembic 最优化迁移一致)
+(v3.2.0 Outbox 模式改造版)
 """
 
 from __future__ import annotations
@@ -23,9 +23,11 @@ from sqlalchemy import (
     UniqueConstraint,
     BigInteger,
     Index,
+    text,
+    UUID,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 # 优先使用 PostgreSQL 的 JSONB；非 PG 时回退为通用 JSON
@@ -110,10 +112,9 @@ class ThTransRev(Base):
     translated_payload_json: Mapped[dict[str, Any] | None] = mapped_column(
         json_type, nullable=True
     )
-    # [新增] 添加用于存储引擎信息的字段
     engine_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     engine_version: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -157,6 +158,9 @@ class ThTransHead(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    # [修复] 定义 ORM 关系，让 selectinload 可以工作
+    content: Mapped["ThContent"] = relationship(back_populates=None)
 
     __table_args__ = (
         UniqueConstraint(
@@ -214,11 +218,6 @@ class ThResolveCache(Base):
     )
 
 
-# =========================
-# TM 与扩展表
-# =========================
-
-
 class ThTmUnits(Base):
     __tablename__ = "tm_units"
 
@@ -229,8 +228,8 @@ class ThTmUnits(Base):
         ForeignKey("th.projects.project_id", ondelete="CASCADE")
     )
     namespace: Mapped[str] = mapped_column(Text)
-    src_lang: Mapped[str] = mapped_column(Text) # [修复] 补全字段
-    tgt_lang: Mapped[str] = mapped_column(Text) # [修复] 补全字段
+    src_lang: Mapped[str] = mapped_column(Text)
+    tgt_lang: Mapped[str] = mapped_column(Text)
     src_hash: Mapped[bytes] = mapped_column(LargeBinary(32))
     src_payload: Mapped[dict[str, Any]] = mapped_column(json_type)
     tgt_payload: Mapped[dict[str, Any]] = mapped_column(json_type)
@@ -346,4 +345,26 @@ class ThComments(Base):
             ondelete="CASCADE",
         ),
         {"schema": "th"},
+    )
+
+
+class ThOutboxEvents(Base):
+    """事务性发件箱表，用于确保事件的原子性发布。"""
+
+    __tablename__ = "outbox_events"
+
+    # 使用 UUID 作为主键以避免序列问题并提高分布式友好性
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    topic: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(json_type, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, server_default="pending", index=True, nullable=False
+    )  # pending, published
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

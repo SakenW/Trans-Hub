@@ -53,18 +53,27 @@ async def get_translation(
         if result:
             console.print(
                 Panel(
-                    Syntax(json.dumps(result, indent=2, ensure_ascii=False), "json", theme="monokai"),
-                    title="[green]✅ 已解析的翻译内容[/green]", border_style="green",
+                    Syntax(
+                        json.dumps(result, indent=2, ensure_ascii=False),
+                        "json",
+                        theme="monokai",
+                    ),
+                    title="[green]✅ 已解析的翻译内容[/green]",
+                    border_style="green",
                 )
             )
         else:
-            console.print("[yellow]⚠️ 未找到该 UIDA 对应的已发布翻译（或其回退版本）。[/yellow]")
+            console.print(
+                "[yellow]⚠️ 未找到该 UIDA 对应的已发布翻译（或其回退版本）。[/yellow]"
+            )
 
 
 @app.command("publish")
 async def publish(
     ctx: typer.Context,
-    revision_id: Annotated[str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")],
+    revision_id: Annotated[
+        str, typer.Argument(help="要发布的 'reviewed' 状态的翻译修订 ID。")
+    ],
     actor: ACTOR_OPTION = "cli_user",
 ):
     """将一条 'reviewed' 状态的翻译修订发布为最新版本。"""
@@ -72,15 +81,21 @@ async def publish(
     async with get_coordinator(state) as coordinator:
         success = await coordinator.publish_translation(revision_id, actor=actor)
         if success:
-            console.print(f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]")
+            console.print(
+                f"[green]✅ 修订 [bold]{revision_id}[/bold] 已成功发布！[/green]"
+            )
         else:
-            console.print("[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]")
+            console.print(
+                "[red]❌ 发布失败。请检查修订 ID 是否正确，且其状态为 'reviewed'。[/red]"
+            )
 
 
 @app.command("unpublish")
 async def unpublish(
     ctx: typer.Context,
-    revision_id: Annotated[str, typer.Argument(help="要撤回发布的 'published' 状态的翻译修订 ID。")],
+    revision_id: Annotated[
+        str, typer.Argument(help="要撤回发布的 'published' 状态的翻译修订 ID。")
+    ],
     actor: ACTOR_OPTION = "cli_admin",
 ):
     """[新增] 撤回一个已发布的修订，使其状态回退到 'reviewed'。"""
@@ -88,9 +103,13 @@ async def unpublish(
     async with get_coordinator(state) as coordinator:
         success = await coordinator.unpublish_translation(revision_id, actor=actor)
         if success:
-            console.print(f"[yellow]✅ 修订 [bold]{revision_id}[/bold] 的发布已被撤回。[/yellow]")
+            console.print(
+                f"[yellow]✅ 修订 [bold]{revision_id}[/bold] 的发布已被撤回。[/yellow]"
+            )
         else:
-            console.print("[red]❌ 撤回失败。请检查修订 ID 是否正确，且其状态为 'published'。[/red]")
+            console.print(
+                "[red]❌ 撤回失败。请检查修订 ID 是否正确，且其状态为 'published'。[/red]"
+            )
 
 
 @app.command("reject")
@@ -104,7 +123,9 @@ async def reject(
     async with get_coordinator(state) as coordinator:
         success = await coordinator.reject_translation(revision_id, actor=actor)
         if success:
-            console.print(f"[yellow]✅ 修订 [bold]{revision_id}[/bold] 已被标记为 'rejected'。[/yellow]")
+            console.print(
+                f"[yellow]✅ 修订 [bold]{revision_id}[/bold] 已被标记为 'rejected'。[/yellow]"
+            )
         else:
             console.print("[red]❌ 拒绝失败。请检查修订 ID 是否正确。[/red]")
 
@@ -121,12 +142,20 @@ async def get_comments(
         if not comments:
             console.print(f"[yellow]Head ID [bold]{head_id}[/bold] 尚无评论。[/yellow]")
             return
-        table = Table(title=f"Comments for Head ID: {head_id}", show_header=True, header_style="bold magenta")
+        table = Table(
+            title=f"Comments for Head ID: {head_id}",
+            show_header=True,
+            header_style="bold magenta",
+        )
         table.add_column("Author", style="cyan", width=20)
         table.add_column("Comment")
         table.add_column("Timestamp", style="dim", width=22)
         for c in comments:
-            timestamp_str = str(c.created_at.strftime("%Y-%m-%d %H:%M:%S %Z")) if c.created_at else "N/A"
+            timestamp_str = (
+                str(c.created_at.strftime("%Y-%m-%d %H:%M:%S %Z"))
+                if c.created_at
+                else "N/A"
+            )
             table.add_row(c.author, c.body, timestamp_str)
         console.print(table)
 

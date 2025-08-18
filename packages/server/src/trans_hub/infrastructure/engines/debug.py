@@ -2,6 +2,7 @@
 """
 提供一个用于开发和测试的调试翻译引擎。
 """
+
 import asyncio  # [修复] 导入 asyncio
 
 from trans_hub.config import DebugEngineSettings
@@ -41,7 +42,7 @@ class DebugEngine(BaseTranslationEngine[DebugEngineSettings]):
                     )
                 )
                 continue
-            
+
             results.append(
                 EngineSuccess(translated_text=f"Translated({text}) to {target_lang}")
             )

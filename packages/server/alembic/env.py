@@ -44,6 +44,7 @@ target_metadata = Base.metadata
 
 # --- Alembic 运行模式 ---
 
+
 def run_migrations_offline() -> None:
     """在“离线”模式下运行迁移。"""
     url = config.get_main_option("sqlalchemy.url")
@@ -70,7 +71,9 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         # 准备环境 (AUTOCOMMIT)
         # [最终权威修复] 正确的 API 调用方式
-        autocommit_connection = connection.execution_options(isolation_level="AUTOCOMMIT")
+        autocommit_connection = connection.execution_options(
+            isolation_level="AUTOCOMMIT"
+        )
         autocommit_connection.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
         autocommit_connection.execute(
             text(
@@ -96,6 +99,7 @@ def run_migrations_online() -> None:
         # 在事务中运行迁移脚本
         with context.begin_transaction():
             context.run_migrations()
+
 
 # --- 主逻辑 ---
 if context.is_offline_mode():

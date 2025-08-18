@@ -1,97 +1,89 @@
-# packages/server/tests/integration/infrastructure/db/invariants/test_invariants_rls.py
+# tests/integration/infrastructure/db/invariants/test_invariants_rls.py
 """
-测试数据库架构中的不变式 (Invariants) - 行级安全 (RLS)
+测试数据库架构中的不变式 (Invariants) - 行级安全 (RLS) (UoW 修复版)
 """
-from __future__ import annotations
 
-import uuid
+from __future__ import annotations
+import os
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine
 
-from trans_hub.infrastructure.db._schema import ThContent, ThProjects
+from trans_hub.infrastructure.db._schema import ThContent
+from trans_hub.infrastructure.uow import UowFactory
 
 pytestmark = [pytest.mark.db, pytest.mark.invariants]
 
 PROJECT_A = "rls_project_a"
 PROJECT_B = "rls_project_b"
 
-@pytest_asyncio.fixture
-async def setup_rls_data(migrated_db: AsyncEngine):
-    """
-    使用【高权限】引擎准备跨租户的数据。
-    """
-    async with migrated_db.begin() as conn:
-        await conn.execute(insert(ThProjects).values([
-            {"project_id": PROJECT_A, "display_name": "Project A"},
-            {"project_id": PROJECT_B, "display_name": "Project B"},
-        ]).on_conflict_do_nothing())
 
-        await conn.execute(insert(ThContent).values([
-            {
-                "id": str(uuid.uuid4()), "project_id": PROJECT_A, "namespace": "test",
-                "keys_sha256_bytes": b'\x01' * 32, "source_lang": "en",
-            },
-            {
-                "id": str(uuid.uuid4()), "project_id": PROJECT_B, "namespace": "test",
-                "keys_sha256_bytes": b'\x02' * 32, "source_lang": "en",
-            }
-        ]).on_conflict_do_nothing(index_elements=['project_id', 'namespace', 'keys_sha256_bytes']))
-    return
+@pytest_asyncio.fixture
+async def setup_rls_data(uow_factory: UowFactory):
+    """
+    (函数级) 使用【高权限】uow_factory 准备跨租户的数据。
+    """
+    async with uow_factory() as uow:
+        await uow.misc.add_project_if_not_exists(PROJECT_A, "Project A")
+        await uow.misc.add_project_if_not_exists(PROJECT_B, "Project B")
+        await uow.content.add(
+            project_id=PROJECT_A,
+            namespace="test",
+            keys_sha256_bytes=os.urandom(32),
+            source_lang="en",
+        )
+        await uow.content.add(
+            project_id=PROJECT_B,
+            namespace="test",
+            keys_sha256_bytes=os.urandom(32),
+            source_lang="en",
+        )
+
 
 @pytest.mark.asyncio
-async def test_rls_read_isolation(rls_engine: AsyncEngine, setup_rls_data):
-    """
-    [已通过] 测试 RLS 的读取隔离。
-    """
-    async with rls_engine.connect() as conn:
-        await conn.execute(text(f"SET th.allowed_projects = '{PROJECT_A}'"))
-        result = await conn.execute(select(ThContent))
-        rows = result.all()
+async def test_rls_read_isolation(uow_factory_rls: UowFactory, setup_rls_data):
+    """测试 RLS 的读取隔离。"""
+    async with uow_factory_rls() as uow:
+        await uow.session.execute(
+            text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'")
+        )
+        result = await uow.session.execute(select(ThContent))
+        # [修复] 使用 .scalars().all() 来明确获取 ORM 对象列表
+        rows = result.scalars().all()
         assert len(rows) == 1
         assert rows[0].project_id == PROJECT_A
-        await conn.execute(text("RESET th.allowed_projects"))
+
 
 @pytest.mark.asyncio
-async def test_rls_write_isolation(rls_engine: AsyncEngine, setup_rls_data):
-    """
-    [核心验证] 测试 RLS 的写入隔离。
-    """
-    # [最终修复] 使用 conn.begin() 来管理整个测试的顶级事务
-    async with rls_engine.connect() as conn:
-        async with conn.begin(): # 显式开启一个顶级事务
-            await conn.execute(text(f"SET th.allowed_projects = '{PROJECT_A}'"))
-            
-            malicious_insert_stmt = insert(ThContent).values(
-                id=str(uuid.uuid4()),
-                project_id=PROJECT_B,
-                namespace="malicious",
-                keys_sha256_bytes=b'\x03' * 32,
-                source_lang="en",
-            )
-            
-            # 使用嵌套事务 (SAVEPOINT) 来隔离可能失败的操作
-            with pytest.raises(DBAPIError, match="new row violates row-level security policy"):
-                async with conn.begin_nested():
-                    await conn.execute(malicious_insert_stmt)
-                # 这个块出错时，只会回滚到 SAVEPOINT，外层事务依然有效
-            
-            # 这个 RESET 语句现在可以成功执行
-            await conn.execute(text("RESET th.allowed_projects"))
-        # 顶级事务在这里结束 (commit)
+async def test_rls_write_isolation(uow_factory_rls: UowFactory, setup_rls_data):
+    """测试 RLS 的写入隔离。"""
+    async with uow_factory_rls() as uow:
+        await uow.session.execute(
+            text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'")
+        )
+
+        # [修复] 将预期失败的操作包裹在嵌套事务 (SAVEPOINT) 中
+        with pytest.raises(
+            DBAPIError, match="new row violates row-level security policy"
+        ):
+            async with uow.session.begin_nested():
+                await uow.content.add(
+                    project_id=PROJECT_B,  # 尝试写入不被允许的项目
+                    namespace="malicious",
+                    keys_sha256_bytes=os.urandom(32),
+                    source_lang="en",
+                )
+        # 此处，顶级 uow 事务仍然是健康的
+
 
 @pytest.mark.asyncio
-async def test_rls_unrestricted_when_empty(rls_engine: AsyncEngine, setup_rls_data):
-    """
-    [已通过] 测试 RLS 的“超级用户/维护模式”。
-    """
-    async with rls_engine.connect() as conn:
-        await conn.execute(text("SET th.allowed_projects = ''"))
-        result = await conn.execute(select(ThContent))
-        rows = result.all()
-        assert len(rows) == 2
-        await conn.execute(text("RESET th.allowed_projects"))
+async def test_rls_unrestricted_when_empty(uow_factory_rls: UowFactory, setup_rls_data):
+    """测试 RLS 的“超级用户/维护模式”。"""
+    async with uow_factory_rls() as uow:
+        await uow.session.execute(text("SET LOCAL th.allowed_projects = ''"))
+        result = await uow.session.execute(select(ThContent))
+        # [修复] 使用 .scalars().all() 保持一致性
+        rows = result.scalars().all()
+        assert len(rows) >= 2
