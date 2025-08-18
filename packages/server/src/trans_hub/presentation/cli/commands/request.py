@@ -10,13 +10,13 @@ import typer
 from rich.console import Console
 
 from .._utils import get_coordinator
-from .._state import CLISharedState  # [REFACTOR] 显式从 _state 导入以保持清晰
+from .._state import CLISharedState
 from .._shared_options import (
     PROJECT_ID_OPTION,
     NAMESPACE_OPTION,
     KEYS_JSON_OPTION,
     ACTOR_OPTION,
-)  # [修改] 导入共享选项
+)
 
 app = typer.Typer(help="提交和管理翻译请求。")
 console = Console()
@@ -42,7 +42,7 @@ async def request_new(
     variant_key: Annotated[
         str, typer.Option("--variant", "-v", help="语言内变体 (可选)。")
     ] = "-",
-    actor: ACTOR_OPTION = "cli_user",  # [修改] 使用共享选项
+    actor: ACTOR_OPTION = "cli_user",
 ) -> None:
     """
     向 Trans-Hub 提交一个新的 UIDA 翻译请求。
@@ -63,7 +63,8 @@ async def request_new(
     console.print("[cyan]正在提交翻译请求...[/cyan]")
 
     async with get_coordinator(state) as coordinator:
-        final_source_lang = source_lang or coordinator.config.default_source_lang
+        # [修复] 从 state 中获取配置，而不是从 coordinator
+        final_source_lang = source_lang or state.config.default_source_lang
         if not final_source_lang:
             console.print(
                 "[bold red]❌ 错误: 必须通过 --source 或在配置中提供源语言。[/bold red]"

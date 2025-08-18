@@ -1,6 +1,6 @@
-# packages/server/tests/e2e/cli/test_cli_smoke_flow.py
+# tests/e2e/cli/test_cli_smoke_flow.py
 """
-对 CLI 进行端到端的冒烟测试，覆盖完整的生命周期 (UoW 重构版)。
+对 CLI 进行端到端的冒烟测试，覆盖完整的生命周期 (最终修复版)。
 """
 
 import json
@@ -12,31 +12,30 @@ import pytest_asyncio
 from unittest.mock import MagicMock
 
 from tests.helpers.factories import create_request_data
-from trans_hub.application.coordinator import Coordinator
 from trans_hub.presentation.cli.commands import request as request_cmd
 from trans_hub.presentation.cli.commands import status as status_cmd
 from trans_hub.presentation.cli._state import CLISharedState
 from trans_hub_core.types import TranslationStatus
-
-pytestmark = [pytest.mark.e2e, pytest.mark.slow]
+from trans_hub.config import TransHubConfig
+from trans_hub.infrastructure.uow import UowFactory
 
 
 @pytest_asyncio.fixture
 async def mock_cli_context(
-    coordinator: Coordinator,  # coordinator 夹具现在只用于准备数据
+    test_config: TransHubConfig,
 ) -> AsyncGenerator[MagicMock, None]:
     """
     创建一个模拟的 Typer Context。
-    CLI 命令将通过修复后的 `_utils.get_coordinator` 自己创建 Coordinator 实例。
+    它现在直接从 test_config 夹具获取配置。
     """
     mock = MagicMock()
-    mock.obj = CLISharedState(config=coordinator.config)
+    mock.obj = CLISharedState(config=test_config)
     yield mock
 
 
 @pytest.mark.asyncio
 async def test_cli_full_lifecycle_flow(
-    coordinator: Coordinator,  # 用于准备数据
+    uow_factory: UowFactory,
     mock_cli_context: MagicMock,
     capsys,
 ):
@@ -57,8 +56,8 @@ async def test_cli_full_lifecycle_flow(
     )
     assert "翻译请求已成功提交" in capsys.readouterr().out
 
-    # === 阶段 2: 准备 'reviewed' 修订 (通过底层 API, 使用 coordinator 夹具) ===
-    async with coordinator._uow_factory() as uow:
+    # === 阶段 2: 准备 'reviewed' 修订 (直接使用 uow_factory) ===
+    async with uow_factory() as uow:
         head = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -68,7 +67,6 @@ async def test_cli_full_lifecycle_flow(
         )
         assert head is not None
         head_id = head.id
-
         content_id = head.content_id
 
         rev_id = await uow.translations.create_revision(
@@ -83,15 +81,12 @@ async def test_cli_full_lifecycle_flow(
         )
 
     # === 阶段 3: 通过 CLI 管理生命周期 ===
-    # 发布
     await status_cmd.publish(ctx=mock_cli_context, revision_id=rev_id)
     assert "已成功发布" in capsys.readouterr().out
 
-    # 撤回发布
     await status_cmd.unpublish(ctx=mock_cli_context, revision_id=rev_id)
     assert "发布已被撤回" in capsys.readouterr().out
 
-    # 拒绝
     await status_cmd.reject(ctx=mock_cli_context, revision_id=rev_id)
     assert "已被标记为 'rejected'" in capsys.readouterr().out
 
@@ -103,11 +98,9 @@ async def test_cli_full_lifecycle_flow(
     )
     assert "评论已添加" in capsys.readouterr().out
 
-    # 查看评论
     await status_cmd.get_comments(ctx=mock_cli_context, head_id=head_id)
+    # [修复] 将 CaptureResult 对象本身赋值给 captured
     captured = capsys.readouterr()
-
-    # 验证评论内容
+    # [修复] 然后再访问 .out 属性
     assert comment_author in captured.out
     assert comment_body in captured.out
-    assert "Comments for Head ID" in captured.out

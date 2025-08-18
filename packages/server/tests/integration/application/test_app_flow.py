@@ -1,11 +1,12 @@
-# packages/server/tests/integration/application/test_app_flow.py
+# tests/integration/application/test_app_flow.py
 """
-对 Coordinator 驱动的核心业务流程进行集成测试 (UoW 重构版)。
+对 Coordinator 驱动的核心业务流程进行集成测试 (最终修复版)。
 """
 
 import pytest
 from trans_hub.application.coordinator import Coordinator
 from trans_hub.domain import tm as tm_domain
+from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.types import TranslationStatus
 from tests.helpers.factories import create_request_data
 
@@ -13,7 +14,9 @@ pytestmark = [pytest.mark.db, pytest.mark.integration]
 
 
 @pytest.mark.asyncio
-async def test_full_request_publish_get_flow(coordinator: Coordinator):
+async def test_full_request_publish_get_flow(
+    coordinator: Coordinator, uow_factory: UowFactory
+):
     """
     测试从请求 -> (模拟处理) -> 发布 -> 获取的完整快乐路径。
     """
@@ -22,8 +25,8 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
     content_id = await coordinator.request_translation(**req_data)
 
     # 2. 准备 & 行动: 模拟 Worker 处理并创建 'reviewed' 修订
-    # 在 UoW 架构下，这部分逻辑在 coordinator 外部，可以直接调用仓库
-    async with coordinator._uow_factory() as uow:
+    # 数据准备直接使用 uow_factory，与 coordinator 实例解耦
+    async with uow_factory() as uow:
         head = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -60,14 +63,16 @@ async def test_full_request_publish_get_flow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_language_fallback_flow(coordinator: Coordinator):
+async def test_language_fallback_flow(
+    coordinator: Coordinator, uow_factory: UowFactory
+):
     """测试语言回退链是否按预期工作。"""
     # 1. 准备
     req_data = create_request_data(target_langs=["de"], keys={"id": "fallback_test"})
     content_id = await coordinator.request_translation(**req_data)
 
     # 1a. 发布一个德语版本
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head_de = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -89,7 +94,7 @@ async def test_language_fallback_flow(coordinator: Coordinator):
     await coordinator.publish_translation(rev_id_de)
 
     # 1b. 设置回退链
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         await uow.misc.set_fallback_order(
             project_id=req_data["project_id"],
             locale="de-CH",
@@ -110,13 +115,13 @@ async def test_language_fallback_flow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_commenting_flow(coordinator: Coordinator):
+async def test_commenting_flow(coordinator: Coordinator, uow_factory: UowFactory):
     """测试添加和获取评论的端到端流程。"""
     # 1. 准备: 提交一个请求以获取 head_id
     req_data = create_request_data(target_langs=["fr"], keys={"id": "comment_test"})
     await coordinator.request_translation(**req_data)
 
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -140,13 +145,13 @@ async def test_commenting_flow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_unpublish_flow(coordinator: Coordinator):
+async def test_unpublish_flow(coordinator: Coordinator, uow_factory: UowFactory):
     """测试 "Request -> Publish -> Unpublish -> Get" 的完整流程。"""
     # 1. 准备: 提交并发布一个翻译
     req_data = create_request_data(target_langs=["es"], keys={"id": "unpublish-test"})
     content_id = await coordinator.request_translation(**req_data)
 
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head_info = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -168,7 +173,7 @@ async def test_unpublish_flow(coordinator: Coordinator):
     await coordinator.publish_translation(rev_id)
 
     # 验证发布成功
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         published_head = await uow.translations.get_head_by_id(head_info.id)
         assert published_head and published_head.published_rev_id == rev_id
 
@@ -178,7 +183,7 @@ async def test_unpublish_flow(coordinator: Coordinator):
 
     # 3. 验证:
     # 3a. 检查 head 状态
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         unpublished_head = await uow.translations.get_head_by_id(head_info.id)
         assert unpublished_head and unpublished_head.published_rev_id is None
         assert unpublished_head.current_status == TranslationStatus.REVIEWED
@@ -194,13 +199,13 @@ async def test_unpublish_flow(coordinator: Coordinator):
 
 
 @pytest.mark.asyncio
-async def test_reject_flow(coordinator: Coordinator):
+async def test_reject_flow(coordinator: Coordinator, uow_factory: UowFactory):
     """测试 "Request -> (Review) -> Reject" 的流程。"""
     # 1. 准备: 提交并创建一个 'reviewed' 修订
     req_data = create_request_data(target_langs=["ja"], keys={"id": "reject-test"})
     content_id = await coordinator.request_translation(**req_data)
 
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head_info = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],
             namespace=req_data["namespace"],
@@ -232,20 +237,19 @@ async def test_reject_flow(coordinator: Coordinator):
     assert success is True
 
     # 3. 验证: 检查 head 和 revision 的状态
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head_after_reject = await uow.translations.get_head_by_id(head_info.id)
         assert (
             head_after_reject
             and head_after_reject.current_status == TranslationStatus.REJECTED
         )
 
-        # 假设仓库有一个 get_revision_by_id 方法
         rev = await uow.translations.get_revision_by_id(reviewed_rev_id)
         assert rev and rev.status == TranslationStatus.REJECTED
 
 
 @pytest.mark.asyncio
-async def test_tm_hit_flow(coordinator: Coordinator):
+async def test_tm_hit_flow(coordinator: Coordinator, uow_factory: UowFactory):
     """验证当 TM 命中时，系统是否直接创建 'reviewed' 修订。"""
     # 1. 准备：手动创建一个 TM 条目
     project_id = "tm-hit-proj"
@@ -259,7 +263,7 @@ async def test_tm_hit_flow(coordinator: Coordinator):
         namespace=namespace, reduced_keys={}, source_fields=source_fields
     )
 
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         await uow.misc.add_project_if_not_exists(project_id, "TM Hit Test")
         await uow.tm.upsert_entry(
             project_id=project_id,
@@ -282,7 +286,7 @@ async def test_tm_hit_flow(coordinator: Coordinator):
     await coordinator.request_translation(**req_data)
 
     # 3. 验证
-    async with coordinator._uow_factory() as uow:
+    async with uow_factory() as uow:
         head = await uow.translations.get_head_by_uida(
             project_id=project_id,
             namespace=namespace,
@@ -299,5 +303,5 @@ async def test_tm_hit_flow(coordinator: Coordinator):
         assert new_rev.translated_payload_json["text"] == "Hallo TM-Welt"
         assert new_rev.origin_lang == "tm"
 
-        link_exists = await uow.tm.check_link_exists(new_rev.id)  # 假设有此方法
-        assert link_exists
+        link_exists = await uow.tm.check_link_exists(new_rev.id)
+        assert link_exists is True

@@ -1,0 +1,140 @@
+# packages/server/src/trans_hub/application/services/_revision_lifecycle.py
+"""修订生命周期管理的应用服务。"""
+
+from __future__ import annotations
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+from sqlalchemy import update
+
+from trans_hub.infrastructure.db._schema import ThTransHead, ThTransRev
+from trans_hub_core.types import TranslationStatus
+from ..events import TranslationPublished, TranslationRejected, TranslationUnpublished
+
+if TYPE_CHECKING:
+    from trans_hub.config import TransHubConfig
+    from trans_hub.infrastructure.uow import UowFactory
+    from trans_hub_core.uow import IUnitOfWork
+
+
+class RevisionLifecycleService:
+    def __init__(self, uow_factory: UowFactory, config: TransHubConfig):
+        self._uow_factory = uow_factory
+        self._config = config
+
+    async def publish(self, revision_id: str, actor: str) -> bool:
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj or rev_obj.status != TranslationStatus.REVIEWED:
+                return False
+
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if not head_obj:
+                return False
+
+            await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.PUBLISHED.value)
+            )
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.id == head_obj.id)
+                .values(
+                    published_rev_id=revision_id,
+                    published_no=rev_obj.revision_no,
+                    published_at=datetime.now(timezone.utc),
+                    current_rev_id=revision_id,
+                    current_status=TranslationStatus.PUBLISHED.value,
+                    current_no=rev_obj.revision_no,
+                )
+            )
+
+            await self._publish_event(
+                uow,
+                TranslationPublished(
+                    head_id=head_obj.id,
+                    project_id=head_obj.project_id,
+                    actor=actor,
+                    payload={"revision_id": revision_id},
+                ),
+            )
+        return True
+
+    async def unpublish(self, revision_id: str, actor: str) -> bool:
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj or rev_obj.status != TranslationStatus.PUBLISHED:
+                return False
+
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if not head_obj or head_obj.published_rev_id != revision_id:
+                return False
+
+            await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.REVIEWED.value)
+            )
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.id == head_obj.id)
+                .values(
+                    published_rev_id=None,
+                    published_no=None,
+                    published_at=None,
+                    current_status=TranslationStatus.REVIEWED.value,
+                )
+            )
+
+            await self._publish_event(
+                uow,
+                TranslationUnpublished(
+                    head_id=head_obj.id,
+                    project_id=head_obj.project_id,
+                    actor=actor,
+                    payload={"revision_id": revision_id},
+                ),
+            )
+        return True
+
+    async def reject(self, revision_id: str, actor: str) -> bool:
+        async with self._uow_factory() as uow:
+            rev_obj = await uow.translations.get_revision_by_id(revision_id)
+            if not rev_obj:
+                return False
+
+            result = await uow.session.execute(
+                update(ThTransRev)
+                .where(ThTransRev.id == revision_id)
+                .values(status=TranslationStatus.REJECTED.value)
+            )
+            if result.rowcount == 0:
+                return False
+
+            await uow.session.execute(
+                update(ThTransHead)
+                .where(ThTransHead.current_rev_id == revision_id)
+                .values(current_status=TranslationStatus.REJECTED.value)
+            )
+
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if head_obj:
+                await self._publish_event(
+                    uow,
+                    TranslationRejected(
+                        head_id=head_obj.id,
+                        project_id=head_obj.project_id,
+                        actor=actor,
+                        payload={"revision_id": revision_id},
+                    ),
+                )
+        return True
+
+    async def _publish_event(self, uow: IUnitOfWork, event) -> None:
+        await uow.outbox.add(
+            topic=self._config.worker.event_stream_name,
+            payload=event.model_dump(mode="json"),
+        )

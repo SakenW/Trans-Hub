@@ -23,10 +23,11 @@ from sqlalchemy.orm import sessionmaker
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
-from alembic.util import CommandError  # [新增] 用于捕获 Alembic 自己的错误
+from alembic.util import CommandError
 
 from trans_hub.infrastructure.db._schema import Base, ThContent, ThTransHead, ThTransRev
 from trans_hub.config import TransHubConfig
+from trans_hub.management.config_utils import mask_db_url  # [新增] 导入工具函数
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import URL
@@ -69,34 +70,42 @@ class DbService:
     @staticmethod
     def _to_sync_url(url: URL) -> URL:
         if not url.drivername.startswith("postgresql"):
+            # 对于 SQLite 等其他数据库，这个逻辑需要调整
+            # 但目前 DbService 主要面向 PostgreSQL
+            if "sqlite" in url.drivername:
+                return url.set(drivername="sqlite")  # aiosqlite -> sqlite
             raise TypeError("数据库医生目前仅支持 PostgreSQL。")
         return url.set(drivername="postgresql+psycopg")
 
     @staticmethod
     def _create_sync_engine(url: URL) -> Engine:
         """创建带有统一 search_path 的同步引擎。"""
-        return create_engine(
-            url,
-            connect_args={"options": "-c search_path=th,public"},
-        )
+        if "postgresql" in url.drivername:
+            return create_engine(
+                url,
+                connect_args={"options": "-c search_path=th,public"},
+            )
+        return create_engine(url)
 
     @staticmethod
     def _create_sync_engine_autocommit(url: URL) -> Engine:
         """创建带有统一 search_path 且自动提交的同步引擎。"""
-        return create_engine(
-            url,
-            connect_args={"options": "-c search_path=th,public"},
-            isolation_level="AUTOCOMMIT",
-        )
+        if "postgresql" in url.drivername:
+            return create_engine(
+                url,
+                connect_args={"options": "-c search_path=th,public"},
+                isolation_level="AUTOCOMMIT",
+            )
+        return create_engine(url, isolation_level="AUTOCOMMIT")
 
     def _get_alembic_cfg(self) -> AlembicConfig:
         cfg = AlembicConfig(self.alembic_ini_path)
+        # 必须传递包含真实密码的 DSN
         real_url = self.sync_app_url.render_as_string(hide_password=False)
+        # 为 configparser 安全地转义 '%'
         safe_url = real_url.replace("%", "%%")
         cfg.set_main_option("sqlalchemy.url", safe_url)
         return cfg
-
-    # --- 医生 (Doctor) 功能 ---
 
     def _run_deep_structure_probe(self, engine: Engine, table: Table):
         """运行深度结构探测。"""
@@ -203,22 +212,26 @@ class DbService:
             engine = self._create_sync_engine(self.sync_app_url)
             with engine.begin() as conn:
                 console.print("  - 正在执行 `Base.metadata.create_all()`...")
-                conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+                if "postgresql" in engine.dialect.name:
+                    conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
                 Base.metadata.create_all(bind=conn)
                 console.print("  - ORM 表结构创建完成。")
 
                 head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
                 if head:
-                    conn.execute(text("DROP TABLE IF EXISTS th.alembic_version"))
+                    table_name = (
+                        "th.alembic_version"
+                        if "postgresql" in engine.dialect.name
+                        else "alembic_version"
+                    )
+                    conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
                     conn.execute(
                         text(
-                            "CREATE TABLE th.alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                            f"CREATE TABLE {table_name} (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
                         )
                     )
                     conn.execute(
-                        text(
-                            "INSERT INTO th.alembic_version (version_num) VALUES (:v)"
-                        ),
+                        text(f"INSERT INTO {table_name} (version_num) VALUES (:v)"),
                         {"v": head},
                     )
                     console.print(
@@ -281,14 +294,19 @@ class DbService:
         engine = self._create_sync_engine(self.sync_app_url)
         try:
             with engine.begin() as conn:
-                conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-                console.print("  - 正在清空所有表...")
-                for table in reversed(Base.metadata.sorted_tables):
-                    conn.execute(
-                        text(
-                            f'TRUNCATE TABLE "{table.schema}"."{table.name}" RESTART IDENTITY CASCADE;'
+                if "postgresql" in engine.dialect.name:
+                    conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+                    console.print("  - 正在清空所有表...")
+                    for table in reversed(Base.metadata.sorted_tables):
+                        conn.execute(
+                            text(
+                                f'TRUNCATE TABLE "{table.schema}"."{table.name}" RESTART IDENTITY CASCADE;'
+                            )
                         )
-                    )
+                else:  # SQLite case
+                    for table in reversed(Base.metadata.sorted_tables):
+                        conn.execute(text(f'DELETE FROM "{table.name}";'))
+
             console.print("[bold green]✅ 数据库已清空。[/bold green]")
         except Exception as e:
             console.print(f"[bold red]❌ 清空失败: {e}[/bold red]")
@@ -309,7 +327,7 @@ class DbService:
                 choices=[
                     "🩺 健康检查 (Check Status)",
                     "🚀 运行迁移 (Upgrade to Head)",
-                    "🪪 标记版本 (Stamp Version)",  # [新增] 交互式菜单中加入 stamp
+                    "🪪 标记版本 (Stamp Version)",
                     "💥 [危险] 重建数据库 (Rebuild Database)",
                     "🗑️ [危险] 清空数据 (Clear Data)",
                     "🚪 退出 (Exit)",
@@ -322,7 +340,7 @@ class DbService:
                 self.check_status()
             elif choice.startswith("🚀"):
                 self.run_migrations()
-            elif choice.startswith("🪪"):  # [新增] 交互式菜单中调用 stamp
+            elif choice.startswith("🪪"):
                 rev_to_stamp = questionary.text(
                     "请输入要标记的版本号 (通常是 'head'):", default="head"
                 ).ask()
@@ -340,7 +358,6 @@ class DbService:
                     self.clear_database()
             console.print("\n")
 
-    # --- 审查 (Inspect) 功能 ---
     def inspect_database(self) -> None:
         """以可读格式显示数据库中的核心内容。"""
         engine = self._create_sync_engine(self.sync_app_url)
@@ -349,7 +366,7 @@ class DbService:
         with Session() as session:
             console.print(
                 Panel(
-                    f"🔍 正在检查数据库: [yellow]{self.sync_app_url.render_as_string(hide_password=True)}[/yellow]",
+                    f"🔍 正在检查数据库: [yellow]{mask_db_url(self.sync_app_url)}[/yellow]",
                     border_style="blue",
                 )
             )
@@ -382,12 +399,6 @@ class DbService:
                 theme="monokai",
             ),
         )
-        # Assuming keys_json is available on content object, if not, would need to re-evaluate
-        # For now, it's not explicitly mapped in schema, so omitting this line to be safe.
-        # uida_table.add_row(
-        #     "Keys:",
-        #     Syntax(json.dumps(content.keys_json, indent=2, ensure_ascii=False), "json", theme="monokai"),
-        # )
 
         heads = (
             session.query(ThTransHead)
