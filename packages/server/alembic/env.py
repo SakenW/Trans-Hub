@@ -1,12 +1,11 @@
 # packages/server/alembic/env.py
 #
-# TRANS-HUB v3.x 权威 Alembic 环境配置 (最终权威版)
+# TRANS-HUB v3.x 权威 Alembic 环境配置 (最终方言感知修复版)
 #
 # 特性：
-# - [最终权威修复] 移除所有自引导配置加载逻辑。本脚本现在完全信任
-#   从 Alembic Config 对象传入的 `sqlalchemy.url`，恢复了动态配置能力。
-# - [最终权威修复] 使用正确的 SQLAlchemy API 在 `connection` 对象上执行 AUTOCOMMIT DDL。
-# - 在主迁移事务开始前，以 AUTOCOMMIT 模式创建 schema 和自定义 ENUM 类型。
+# - [关键修复] 增加方言检查，确保 CREATE SCHEMA/TYPE 等 PG 专属命令只在 PostgreSQL 环境下执行。
+# - 移除所有自引导配置加载逻辑，完全信任从 Alembic Config 传入的 `sqlalchemy.url`。
+# - 使用正确的 SQLAlchemy API 在 `connection` 对象上执行 AUTOCOMMIT DDL。
 # - `target_metadata` 在在线模式下设为 None，确保迁移脚本的纯粹执行。
 #
 from __future__ import annotations
@@ -40,7 +39,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# [关键修复] 对于 SQLite，SQLAlchemy 会自动处理 schema 前缀，这里保持 th
 target_metadata = Base.metadata
+
 
 # --- Alembic 运行模式 ---
 
@@ -52,7 +53,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_schemas=True,
+        # [关键修复] Alembic 在 SQLite 下会自动将 schema 作为表名前缀
         version_table_schema="th",
     )
     with context.begin_transaction():
@@ -68,26 +69,26 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        # 准备环境 (AUTOCOMMIT)
-        # [最终权威修复] 正确的 API 调用方式
-        autocommit_connection = connection.execution_options(isolation_level="AUTOCOMMIT")
-        autocommit_connection.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-        autocommit_connection.execute(
-            text(
-                """
-                DO $$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='translation_status' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'th')) THEN
-                        CREATE TYPE th.translation_status AS ENUM ('draft','reviewed','published','rejected');
-                    END IF;
-                END $$;
-                """
+        # [关键修复] 只有当数据库是 PostgreSQL 时，才执行 PG 专属的初始化命令
+        if connection.dialect.name == "postgresql":
+            autocommit_connection = connection.execution_options(isolation_level="AUTOCOMMIT")
+            autocommit_connection.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+            autocommit_connection.execute(
+                text(
+                    """
+                    DO $$ BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='translation_status' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'th')) THEN
+                            CREATE TYPE th.translation_status AS ENUM ('draft','reviewed','published','rejected');
+                        END IF;
+                    END $$;
+                    """
+                )
             )
-        )
 
         context.configure(
             connection=connection,
-            target_metadata=None,
-            include_schemas=True,
+            target_metadata=None, # 确保 Alembic 只执行迁移脚本
+            include_schemas=True, # 告诉 Alembic 要考虑 schema
             version_table_schema="th",
             compare_type=True,
             compare_server_default=True,

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from .types import Comment, ContentItem, Event, TranslationHead
+    from .types import Comment, ContentItem, Event, TranslationHead, TranslationRevision
 
 
 class PersistenceHandler(Protocol):
@@ -110,6 +110,16 @@ class PersistenceHandler(Protocol):
 
     async def get_head_by_revision(self, revision_id: str) -> TranslationHead | None:
         """根据 revision_id 查找其所属的 head。"""
+
+    # --- [新增] TUI 所需的数据访问方法 ---
+
+    async def get_all_translation_heads(self) -> list[TranslationHead]:
+        """获取系统中的所有翻译头记录 (通常用于概览视图)。"""
+        ...
+
+    async def get_revisions_by_head(self, head_id: str) -> list[TranslationRevision]:
+        """根据 Head ID 获取其下的所有修订记录。"""
+        ...
 
     def stream_draft_translations(
         self, batch_size: int

@@ -186,6 +186,7 @@ def setup_logging(
     *,
     log_level: str = "INFO",
     log_format: Literal["json", "console"] = "console",
+    tui_log_queue: asyncio.Queue[dict[str, Any]] | None = None, # [新增] TUI 队列
     show_timestamp: bool = True,
     show_logger_name: bool = True,
     kv_truncate_at: int = 256,
@@ -279,6 +280,13 @@ def setup_logging(
         root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel((root_level or "WARNING").upper())
+
+    # [新增] 如果提供了 TUI 队列，则添加 TuiLogHandler
+    if tui_log_queue:
+        from trans_hub.presentation.tui.logging import TuiLogHandler
+        tui_handler = TuiLogHandler(tui_log_queue)
+        tui_handler.setFormatter(formatter)
+        root_logger.addHandler(tui_handler)
 
     # 应用 logger：按入参设定
     app_logger = logging.getLogger("trans_hub")

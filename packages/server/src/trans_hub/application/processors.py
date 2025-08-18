@@ -111,7 +111,6 @@ class TranslationProcessor:
                 status=TranslationStatus.REVIEWED,
                 revision_no=item.current_no + 1,
                 translated_payload_json=translated_payload,
-                # [最终权威修复] 正确调用类方法，在后面加上 ()
                 engine_name=active_engine.name(),
                 engine_version=active_engine.VERSION,
             )

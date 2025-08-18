@@ -1,0 +1,72 @@
+/* packages/server/src/trans_hub/presentation/tui/app.css (v1.2 - 最终兼容版) */
+Screen {
+    layout: vertical;
+}
+
+#dashboard-container {
+    padding: 1;
+}
+
+#heads_table {
+    height: 1fr;
+    /* 修正: 使用 'heavy' 边框样式和明确的颜色 'darkblue' */
+    border: heavy darkblue; 
+}
+
+DetailsScreen {
+    padding: 1;
+}
+
+DetailsView {
+    layout: vertical;
+    height: 100%;
+}
+
+#details-header {
+    height: auto;
+    padding: 1;
+    border: round darkblue;
+    margin-bottom: 1;
+}
+
+#revisions-table {
+    height: 1fr;
+    /* 修正: 使用 'heavy' 边框和 'darkgreen' 颜色 */
+    border: heavy darkgreen;
+    margin-bottom: 1;
+}
+
+.section-title {
+    padding-left: 1;
+    text-style: bold;
+}
+
+.details-box {
+    border: round darkgoldenrod;
+    height: 1fr;
+    padding: 1;
+}
+
+#actions-container {
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+}
+
+#actions-container Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+#log_viewer_container {
+    display: block;
+    height: 30%;
+    dock: bottom;
+    /* 修正: 使用 Textual 的内置颜色 'surface' */
+    background: #1e1e1e; /* 使用一个具体的颜色值来替代 $surface，以兼容所有编辑器 */
+    border-top: heavy darkblue;
+}
+
+#log_viewer_container.hidden {
+    display: none;
+}

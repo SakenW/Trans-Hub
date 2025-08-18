@@ -35,6 +35,7 @@ from trans_hub_core.types import (
     ContentItem,
     Event,
     TranslationHead,
+    TranslationRevision,
     TranslationStatus,
 )
 from trans_hub_uida import generate_uida
@@ -46,6 +47,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     """持久化处理器的共享基类。"""
 
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]):
+        # [关键修复] 必须赋值给 `_sessionmaker` (带下划线)，以匹配类中其他方法的使用
         self._sessionmaker = sessionmaker
 
     @abstractmethod
@@ -477,6 +479,38 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 )).scalar_one_or_none()
                 return TranslationHead.from_orm_model(result) if result else None
         except SQLAlchemyError as e: raise DatabaseError(f"通过 Revision 获取 Head 失败: {e}") from e
+
+    async def get_all_translation_heads(self) -> list[TranslationHead]:
+        """[新增] 获取所有的翻译头记录。"""
+        try:
+            async with self._sessionmaker() as session:
+                stmt = select(ThTransHead).order_by(ThTransHead.updated_at.desc())
+                results = (await session.execute(stmt)).scalars().all()
+                return [TranslationHead.from_orm_model(r) for r in results]
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"获取所有翻译头失败: {e}") from e
+
+    async def get_revisions_by_head(self, head_id: str) -> list[TranslationRevision]:
+        """[新增 & 修正] 根据 Head ID 获取其下所有修订记录。"""
+        try:
+            async with self._sessionmaker() as session:
+                head_stmt = select(ThTransHead).where(ThTransHead.id == head_id)
+                head = (await session.execute(head_stmt)).scalar_one_or_none()
+                
+                if not head:
+                    return []
+                
+                rev_stmt = select(ThTransRev).where(
+                    ThTransRev.project_id == head.project_id,
+                    ThTransRev.content_id == head.content_id,
+                    ThTransRev.target_lang == head.target_lang,
+                    ThTransRev.variant_key == head.variant_key
+                ).order_by(ThTransRev.revision_no.desc())
+                
+                results = (await session.execute(rev_stmt)).scalars().all()
+                return [TranslationRevision.from_orm_model(r) for r in results]
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"通过 Head 获取修订列表失败: {e}") from e
 
     async def _build_content_items_from_orm(self, session: AsyncSession, head_results: list[ThTransHead]) -> list[ContentItem]:
         if not head_results: return []
