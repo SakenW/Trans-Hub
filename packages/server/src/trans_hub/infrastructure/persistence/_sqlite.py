@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 from sqlalchemy import select, text
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy import func
 
 from trans_hub_core.types import ContentItem, TranslationStatus
 
 from ._base import BasePersistenceHandler
+from ._statements import SQLiteStatementFactory
 from trans_hub.infrastructure.db._schema import ThTransHead
 
 if TYPE_CHECKING:
@@ -27,7 +26,7 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
     """SQLite 持久化处理器。"""
 
     def __init__(self, sessionmaker: Any):
-        super().__init__(sessionmaker)
+        super().__init__(sessionmaker, stmt_factory=SQLiteStatementFactory())
         logger.debug("SQLite 持久化处理器已初始化")
 
     async def connect(self) -> None:
@@ -40,38 +39,11 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
             logger.error("无法连接到 SQLite 数据库", error=str(e))
             raise
 
-    def _get_upsert_stmt(
-        self,
-        model: Any,
-        values: dict[str, Any],
-        index_elements: list[str],
-        update_cols: list[str],
-    ) -> Any:
-        """
-        为 SQLite 生成一个 `INSERT ... ON CONFLICT ... DO UPDATE` 语句。
-        """
-        stmt = sqlite_insert(model).values(**values)
-        if update_cols:
-            update_dict = {col: getattr(stmt.excluded, col) for col in update_cols}
-            # 确保 updated_at 总是被更新
-            if "updated_at" in [c.name for c in model.__table__.columns]:
-                update_dict["updated_at"] = func.now()
-
-            stmt = stmt.on_conflict_do_update(
-                index_elements=index_elements,
-                set_=update_dict,
-            )
-        else:
-            stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
-
-        return stmt
-
     async def stream_draft_translations(
         self, batch_size: int
     ) -> AsyncGenerator[list[ContentItem], None]:
         """
-        [代码一致性修复] 为 SQLite 实现与 PostgreSQL 修复后结构一致的流式获取方法。
-        虽然 SQLite 不支持行级锁，不存在死锁问题，但保持代码结构一致性有助于维护。
+        为 SQLite 实现流式获取方法。
         """
         offset = 0
         while True:
@@ -96,7 +68,6 @@ class SQLitePersistenceHandler(BasePersistenceHandler):
                 if not items_to_yield:
                     break
             
-            # 在会话结束后 yield
             yield items_to_yield
 
             if len(items_to_yield) < batch_size:

@@ -1,7 +1,7 @@
 # packages/server/src/trans_hub/infrastructure/persistence/_base.py
 """
 持久化处理器的基类，封装了使用 SQLAlchemy ORM 实现的、
-跨数据库方言共享的核心数据访问逻辑。(v3.0.0 原子性修复版)
+跨数据库方言共享的核心数据访问逻辑。(v3.0.1 语句工厂重构版)
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from typing import Any
 
 import structlog
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import NoResultFound, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,6 +37,7 @@ from trans_hub_core.types import (
     TranslationStatus,
 )
 from trans_hub_uida import generate_uida
+from ._statements import StatementFactory
 
 logger = structlog.get_logger(__name__)
 
@@ -45,8 +45,13 @@ logger = structlog.get_logger(__name__)
 class BasePersistenceHandler(PersistenceHandler, ABC):
     """持久化处理器的共享基类。"""
 
-    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]):
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        stmt_factory: StatementFactory,
+    ):
         self._sessionmaker = sessionmaker
+        self._stmt_factory = stmt_factory
 
     @abstractmethod
     async def connect(self) -> None:
@@ -59,17 +64,6 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         if engine:
             await engine.dispose()
         logger.info("持久化层引擎已关闭。")
-
-    @abstractmethod
-    def _get_upsert_stmt(
-        self,
-        model: Any,
-        values: dict[str, Any],
-        index_elements: list[str],
-        update_cols: list[str],
-    ) -> Any:
-        """[子类实现] 返回方言特定的原子化 upsert 语句。"""
-        raise NotImplementedError
 
     async def upsert_content(
         self,
@@ -85,7 +79,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker.begin() as session:
                 project_values = {"project_id": project_id, "display_name": project_id}
-                project_stmt = self._get_upsert_stmt(
+                project_stmt = self._stmt_factory.create_upsert_stmt(
                     ThProjects,
                     project_values,
                     index_elements=["project_id"],
@@ -148,33 +142,28 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         target_lang: str,
         variant_key: str,
     ) -> tuple[str, int]:
-        """
-        [最终原子性修复] 原子性地获取或创建一个翻译头记录。
-        采用 INSERT ... ON CONFLICT, then SELECT 的模式来避免竞争条件。
-        """
+        """原子性地获取或创建一个翻译头记录。"""
         try:
             async with self._sessionmaker.begin() as session:
-                # 预先查询 content 以获取 src_payload_json
                 content = await session.get(ThContent, content_id)
                 if not content:
                     raise ValueError(f"Content record not found: content_id={content_id}")
 
-                # 1. 原子性地创建 rev_no=0
-                # 我们必须使用特定方言的 insert 才能使用 on_conflict_do_nothing
-                initial_rev_stmt = pg_insert(ThTransRev).values(
-                    project_id=project_id,
-                    content_id=content_id,
-                    target_lang=target_lang,
-                    variant_key=variant_key,
-                    status=TranslationStatus.DRAFT,
-                    revision_no=0,
-                    src_payload_json=content.source_payload_json,
-                ).on_conflict_do_nothing(
-                    index_elements=['project_id', 'content_id', 'target_lang', 'variant_key', 'revision_no']
+                initial_rev_values = {
+                    "project_id": project_id,
+                    "content_id": content_id,
+                    "target_lang": target_lang,
+                    "variant_key": variant_key,
+                    "status": TranslationStatus.DRAFT,
+                    "revision_no": 0,
+                    "src_payload_json": content.source_payload_json,
+                }
+                initial_rev_stmt = self._stmt_factory.create_insert_on_conflict_nothing(
+                    ThTransRev, initial_rev_values, 
+                    ['project_id', 'content_id', 'target_lang', 'variant_key', 'revision_no']
                 )
                 await session.execute(initial_rev_stmt)
                 
-                # 2. 获取 rev_no=0 的 ID (现在它保证存在)
                 rev0_stmt = select(ThTransRev.id).where(
                     ThTransRev.project_id == project_id,
                     ThTransRev.content_id == content_id,
@@ -184,21 +173,21 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 )
                 rev0_id = (await session.execute(rev0_stmt)).scalar_one()
 
-                # 3. 原子性地创建 head，指向 rev_no=0
-                head_stmt = pg_insert(ThTransHead).values(
-                    project_id=project_id,
-                    content_id=content_id,
-                    target_lang=target_lang,
-                    variant_key=variant_key,
-                    current_rev_id=rev0_id,
-                    current_status=TranslationStatus.DRAFT,
-                    current_no=0,
-                ).on_conflict_do_nothing(
-                    index_elements=['project_id', 'content_id', 'target_lang', 'variant_key']
+                head_values = {
+                    "project_id": project_id,
+                    "content_id": content_id,
+                    "target_lang": target_lang,
+                    "variant_key": variant_key,
+                    "current_rev_id": rev0_id,
+                    "current_status": TranslationStatus.DRAFT,
+                    "current_no": 0,
+                }
+                head_stmt = self._stmt_factory.create_insert_on_conflict_nothing(
+                    ThTransHead, head_values,
+                    ['project_id', 'content_id', 'target_lang', 'variant_key']
                 )
                 await session.execute(head_stmt)
 
-                # 4. 获取 head 记录 (现在它保证存在)
                 final_head_stmt = select(ThTransHead).where(
                     ThTransHead.project_id == project_id,
                     ThTransHead.content_id == content_id,
@@ -208,11 +197,9 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
                 head = (await session.execute(final_head_stmt)).scalar_one()
                 
                 return head.id, head.current_no
-
         except SQLAlchemyError as e:
             logger.error("获取或创建翻译头记录失败", exc_info=True)
             raise DatabaseError(f"获取或创建翻译头记录失败: {e}") from e
-
 
     async def create_new_translation_revision(
         self, *, head_id: str, project_id: str, content_id: str, **kwargs: Any
@@ -291,7 +278,7 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
             async with self._sessionmaker.begin() as session:
                 values = {"project_id": project_id, **kwargs}
                 if "id" not in values: values["id"] = str(uuid.uuid4())
-                stmt = self._get_upsert_stmt(
+                stmt = self._stmt_factory.create_upsert_stmt(
                     ThTmUnits,
                     values,
                     index_elements=["project_id", "namespace", "src_hash", "tgt_lang", "variant_key"],
@@ -308,7 +295,10 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         try:
             async with self._sessionmaker.begin() as session:
                 values = {"id": str(uuid.uuid4()), "project_id": project_id, "translation_rev_id": translation_rev_id, "tm_id": tm_id}
-                stmt = self._get_upsert_stmt(ThTmLinks, values, index_elements=["project_id", "translation_rev_id", "tm_id"], update_cols=[])
+                stmt = self._stmt_factory.create_insert_on_conflict_nothing(
+                    ThTmLinks, values, 
+                    index_elements=["project_id", "translation_rev_id", "tm_id"]
+                )
                 await session.execute(stmt)
         except SQLAlchemyError as e:
             raise DatabaseError(f"链接 TM 失败: {e}") from e
@@ -354,33 +344,22 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         except SQLAlchemyError as e: raise DatabaseError(f"发布修订失败: {e}") from e
 
     async def unpublish_revision(self, revision_id: str) -> bool:
-        """
-        撤回一个 'published' 状态的修订。
-        - 将 revision 的状态改回 'reviewed'。
-        - 将 head 的 published 指针清空。
-        """
+        """撤回一个 'published' 状态的修订。"""
         try:
             async with self._sessionmaker.begin() as session:
                 rev_stmt = select(ThTransRev).where(ThTransRev.id == revision_id)
                 rev = (await session.execute(rev_stmt)).scalar_one_or_none()
-
                 if not rev or rev.status != TranslationStatus.PUBLISHED.value:
                     logger.warning("撤回发布失败: 修订不存在或状态不是 'published'", rev_id=revision_id, status=getattr(rev, "status", None))
                     return False
-                
                 head_stmt = select(ThTransHead).where(ThTransHead.project_id == rev.project_id, ThTransHead.published_rev_id == rev.id)
                 head = (await session.execute(head_stmt)).scalar_one_or_none()
-
                 if not head:
                     logger.warning("撤回发布失败: 未找到引用该修订作为 published_rev_id 的 Head 记录", rev_id=revision_id)
                     return False
-                
                 rev.status = TranslationStatus.REVIEWED.value
-                head.published_rev_id = None
-                head.published_no = None
-                head.published_at = None
+                head.published_rev_id = None; head.published_no = None; head.published_at = None
                 head.current_status = TranslationStatus.REVIEWED.value
-
                 return True
         except SQLAlchemyError as e:
             raise DatabaseError(f"撤回发布修订失败: {e}") from e
@@ -433,10 +412,12 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
     async def set_fallback_order(self, project_id: str, locale: str, fallback_order: list[str]) -> None:
         try:
             async with self._sessionmaker.begin() as session:
-                await session.execute(self._get_upsert_stmt(
-                    ThLocalesFallbacks, {"project_id": project_id, "locale": locale, "fallback_order": fallback_order},
+                values = {"project_id": project_id, "locale": locale, "fallback_order": fallback_order}
+                stmt = self._stmt_factory.create_upsert_stmt(
+                    ThLocalesFallbacks, values,
                     index_elements=["project_id", "locale"], update_cols=["fallback_order"]
-                ))
+                )
+                await session.execute(stmt)
         except SQLAlchemyError as e: raise DatabaseError(f"设置回退顺序失败: {e}") from e
 
     async def get_translation_head_by_uida(self, *, project_id: str, namespace: str, keys: dict[str, Any], target_lang: str, variant_key: str) -> TranslationHead | None:
@@ -455,14 +436,8 @@ class BasePersistenceHandler(PersistenceHandler, ABC):
         except SQLAlchemyError as e: raise DatabaseError(f"通过 UIDA 获取 Head 失败: {e}") from e
 
     async def get_head_by_id(self, head_id: str) -> TranslationHead | None:
-        """
-        [最终修复] 根据 head.id (非完整主键) 查找 Head 记录。
-        由于 id 不是唯一或主键，这可能返回多条记录，但在此应用的上下文中，
-        我们假设它在实践中是唯一的。我们使用 select(...).where(...) 代替 session.get()。
-        """
         try:
             async with self._sessionmaker() as session:
-                # 使用 select().where() 而不是 get() 来处理非主键或部分主键的查询
                 stmt = select(ThTransHead).where(ThTransHead.id == head_id)
                 result = (await session.execute(stmt)).scalar_one_or_none()
                 return TranslationHead.from_orm_model(result) if result else None
