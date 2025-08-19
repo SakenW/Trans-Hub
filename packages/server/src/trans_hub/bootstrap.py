@@ -107,8 +107,10 @@ def create_uow_factory(config: TransHubConfig) -> tuple[UowFactory, Any]:
     """创建 UoW 工厂和底层的数据库引擎。"""
     db_engine = create_async_db_engine(config)
     sessionmaker = create_async_sessionmaker(db_engine)
+
     def uow_factory():
         return SqlAlchemyUnitOfWork(sessionmaker)
+
     return uow_factory, db_engine
 
 
