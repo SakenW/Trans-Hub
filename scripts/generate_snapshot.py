@@ -46,7 +46,7 @@ EXCLUDE_NAMES = {
     ".venv", "venv", "node_modules", "dist", "build",
     ".DS_Store", "Thumbs.db",
     "poetry.lock", "package-lock.json", "pnpm-lock.yaml",
-    ".coverage", "htmlcov",
+    ".coverage", "htmlcov", "temp",
 }
 BINARY_EXTS = {
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
