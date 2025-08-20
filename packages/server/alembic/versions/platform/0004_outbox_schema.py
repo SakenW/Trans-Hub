@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/platform/0004_outbox_schema.py
 """
 L4-platform-schema-0004_outbox.py
 职责：Outbox 表结构（收紧：NOT NULL project_id、复合幂等键、JSONB 错误）。
@@ -7,6 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+# revision identifiers
 revision = "0004_outbox_schema"
 down_revision = "0003_aux_tm_tables"
 branch_labels = None

@@ -8,7 +8,7 @@ from .exceptions import (
     EngineNotFoundError, TransHubError, LockAcquisitionError,
 )
 from .interfaces import (
-    CacheHandler, LockProvider, PersistenceHandler,
+    CacheHandler, LockProvider,
     QueueProducer, StreamProducer, RateLimiter,
 )
 from .types import (
@@ -19,7 +19,7 @@ from .types import (
 # [新增] 导出 UoW 和仓库协议
 from .uow import (
     IContentRepository, ITranslationRepository, ITmRepository,
-    IMiscRepository, IUnitOfWork
+    IMiscRepository, IUnitOfWork, IOutboxRepository
 )
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
     "TransHubError", "ConfigurationError", "EngineNotFoundError",
     "DatabaseError", "APIError", "LockAcquisitionError",
     # from interfaces.py
-    "PersistenceHandler", "CacheHandler", "LockProvider",
+    "CacheHandler", "LockProvider",
     "RateLimiter", "QueueProducer", "StreamProducer",
     # from types.py
     "TranslationStatus", "EngineSuccess", "EngineError",
@@ -35,5 +35,5 @@ __all__ = [
     "TranslationHead", "TranslationRevision", "Comment", "Event",
     # [新增] from uow.py
     "IUnitOfWork", "IContentRepository", "ITranslationRepository",
-    "ITmRepository", "IMiscRepository",
+    "ITmRepository", "IMiscRepository", "IOutboxRepository"
 ]

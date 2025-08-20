@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/policy/0006_behavioral_objects.py
 """
 L3-policy-0006_behavioral_objects.py
 职责：事件/缓存函数、触发器挂载、兼容视图（频道名支持 GUC）。
@@ -5,6 +6,7 @@ L3-policy-0006_behavioral_objects.py
 from __future__ import annotations
 from alembic import op
 
+# revision identifiers
 revision = "0006_behavioral_objects"
 down_revision = "0005_perf_objects"
 branch_labels = None

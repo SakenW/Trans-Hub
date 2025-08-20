@@ -1,7 +1,7 @@
 # packages/server/src/trans_hub/infrastructure/db/_schema.py
 """
-定义了与数据库 `3f8b9e6a0c2c` Schema 完全对应的 SQLAlchemy ORM 模型。
-(v3.2.0 Outbox 模式改造版)
+定义了与数据库 Alembic Schema 完全对应的 SQLAlchemy ORM 模型。
+(v3.3.0 修复版)
 """
 
 from __future__ import annotations
@@ -349,22 +349,36 @@ class ThComments(Base):
 
 
 class ThOutboxEvents(Base):
-    """事务性发件箱表，用于确保事件的原子性发布。"""
+    """[修复] 事务性发件箱表，字段与 Alembic 迁移完全对齐。"""
 
     __tablename__ = "outbox_events"
 
-    # 使用 UUID 作为主键以避免序列问题并提高分布式友好性
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
+    project_id: Mapped[str] = mapped_column(Text, nullable=False)
     topic: Mapped[str] = mapped_column(Text, index=True, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(json_type, nullable=False)
     status: Mapped[str] = mapped_column(
         Text, server_default="pending", index=True, nullable=False
-    )  # pending, published
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    last_error: Mapped[dict[str, Any] | None] = mapped_column(json_type, nullable=True)
+    schema_version: Mapped[int] = mapped_column(Integer, server_default="1")
+    event_id: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "topic", "event_id", name="ux_outbox_project_topic_event"
+        ),
+        {"schema": "th"},
     )

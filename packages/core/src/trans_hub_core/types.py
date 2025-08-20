@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING, Any, Union
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from .interfaces import PersistenceHandler
-    from .uow import UowFactory # [修正] Coordinator 不再依赖 Handler
+    from trans_hub.infrastructure.uow import UowFactory
     from trans_hub.config import TransHubConfig
 
 
@@ -151,4 +150,4 @@ class Event(BaseModel):
 class ProcessingContext:
     """一个“工具箱”对象，封装了处理策略执行时所需的所有依赖项。"""
     config: "TransHubConfig"
-    uow_factory: "UowFactory" # [修正] 使用 UoW 工厂
+    uow_factory: "UowFactory"

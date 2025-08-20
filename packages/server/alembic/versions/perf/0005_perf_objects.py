@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/perf/0005_perf_objects.py
 """
 L2-perf-0005_perf_objects.py
 职责：分区子表、常用索引、搜索物化视图（WITH NO DATA + 双 TSV 列）。
@@ -5,6 +6,7 @@ L2-perf-0005_perf_objects.py
 from __future__ import annotations
 from alembic import op
 
+# revision identifiers
 revision = "0005_perf_objects"
 down_revision = "0004_outbox_schema"
 branch_labels = None

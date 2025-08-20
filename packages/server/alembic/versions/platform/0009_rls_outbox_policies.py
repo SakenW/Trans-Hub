@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/platform/0009_rls_outbox_policies.py
 """
 L4-platform-policies-0009_outbox_policies.py
 职责：Outbox RLS（默认拒绝，按 allowed_projects 白名单放行）。
@@ -5,6 +6,7 @@ L4-platform-policies-0009_outbox_policies.py
 from __future__ import annotations
 from alembic import op
 
+# revision identifiers
 revision = "0009_rls_outbox_policies"
 down_revision = "0008_outbox_indexes"
 branch_labels = None

@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/policy/0007_rls_policies.py
 """
 L3-policy-0007_rls_policies.py
 职责：allowed_projects() + 统一 RLS（默认拒绝）。
@@ -5,6 +6,7 @@ L3-policy-0007_rls_policies.py
 from __future__ import annotations
 from alembic import op
 
+# revision identifiers
 revision = "0007_rls_policies"
 down_revision = "0006_behavioral_objects"
 branch_labels = None

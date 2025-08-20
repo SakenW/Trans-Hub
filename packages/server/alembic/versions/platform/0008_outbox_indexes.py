@@ -1,3 +1,4 @@
+# packages/server/alembic/versions/platform/0008_outbox_indexes.py
 """
 L4-platform-indexes-0008_outbox_indexes.py
 职责：Outbox 索引（扫描/调度优化，含部分索引）。
@@ -5,6 +6,7 @@ L4-platform-indexes-0008_outbox_indexes.py
 from __future__ import annotations
 from alembic import op
 
+# revision identifiers
 revision = "0008_outbox_indexes"
 down_revision = "0007_rls_policies"
 branch_labels = None
