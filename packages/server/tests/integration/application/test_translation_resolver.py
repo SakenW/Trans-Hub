@@ -1,6 +1,6 @@
 # tests/integration/application/test_translation_resolver.py
 """
-对 TranslationResolver 的核心回退逻辑进行集成测试 (最终修复版)。
+对 TranslationResolver 的核心回退逻辑进行集成测试 (v3.1.0 修复版)。
 """
 
 from __future__ import annotations
@@ -29,10 +29,11 @@ async def test_resolver_with_full_fallback_chain(
     # --- 1. 准备数据 ---
     project_id = f"fallback-proj-{uuid.uuid4().hex[:4]}"
 
-    # 实例化准备数据所需的服务
+    # 实例化准备数据所需的应用服务
     request_service = RequestTranslationService(uow_factory, test_config)
     lifecycle_service = RevisionLifecycleService(uow_factory, test_config)
 
+    # 创建内容并发布一个德语版本
     req_data = create_request_data(
         project_id=project_id, keys={"id": "fallback-test-ui"}, target_langs=[]
     )
@@ -54,18 +55,20 @@ async def test_resolver_with_full_fallback_chain(
         )
     await lifecycle_service.publish(rev_id_de, "test-setup")
 
+    # 设置回退链 de-CH -> de -> en
     async with uow_factory() as uow:
         await uow.misc.set_fallback_order(
             project_id=project_id, locale="de-CH", fallback_order=["de", "en"]
         )
 
     # --- 2. 执行 ---
+    # 直接实例化 Resolver 并调用其核心方法
     resolver = TranslationResolver(uow_factory)
     result_payload, resolved_rev_id = await resolver.resolve_with_fallback(
         project_id=project_id,
         content_id=content_id,
         target_lang="de-CH",
-        variant_key="some-variant",
+        variant_key="some-variant", # 故意使用一个不存在的变体来测试回退
     )
 
     # --- 3. 验证 ---

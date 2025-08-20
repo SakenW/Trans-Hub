@@ -4,11 +4,12 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+import uuid # [新增]
 
 from sqlalchemy import update
 
 from trans_hub.infrastructure.db._schema import ThTransHead, ThTransRev
-from trans_hub_core.types import TranslationStatus
+from trans_hub_core.types import TranslationStatus, Event
 from ..events import TranslationPublished, TranslationRejected, TranslationUnpublished
 
 if TYPE_CHECKING:
@@ -32,15 +33,20 @@ class RevisionLifecycleService:
             if not head_obj:
                 return False
 
-            await uow.session.execute(
+            # 直接使用 session 执行更新，保持现有逻辑
+            # 注意：这里我们直接操作 ORM 对象也可以，但 execute 更直接
+            session = getattr(uow, "session", None)
+            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+
+            await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id)
+                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
                 .values(status=TranslationStatus.PUBLISHED.value)
             )
 
-            await uow.session.execute(
+            await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.id == head_obj.id)
+                .where(ThTransHead.id == head_obj.id, ThTransHead.project_id == head_obj.project_id)
                 .values(
                     published_rev_id=revision_id,
                     published_no=rev_obj.revision_no,
@@ -72,15 +78,18 @@ class RevisionLifecycleService:
             if not head_obj or head_obj.published_rev_id != revision_id:
                 return False
 
-            await uow.session.execute(
+            session = getattr(uow, "session", None)
+            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+
+            await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id)
+                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
                 .values(status=TranslationStatus.REVIEWED.value)
             )
 
-            await uow.session.execute(
+            await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.id == head_obj.id)
+                .where(ThTransHead.id == head_obj.id, ThTransHead.project_id == head_obj.project_id)
                 .values(
                     published_rev_id=None,
                     published_no=None,
@@ -105,36 +114,44 @@ class RevisionLifecycleService:
             rev_obj = await uow.translations.get_revision_by_id(revision_id)
             if not rev_obj:
                 return False
+            
+            head_obj = await uow.translations.get_head_by_revision(revision_id)
+            if not head_obj:
+                return False
 
-            result = await uow.session.execute(
+            session = getattr(uow, "session", None)
+            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+
+            result = await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id)
+                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
                 .values(status=TranslationStatus.REJECTED.value)
             )
             if result.rowcount == 0:
                 return False
 
-            await uow.session.execute(
+            await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.current_rev_id == revision_id)
+                .where(ThTransHead.current_rev_id == revision_id, ThTransHead.project_id == head_obj.project_id)
                 .values(current_status=TranslationStatus.REJECTED.value)
             )
 
-            head_obj = await uow.translations.get_head_by_revision(revision_id)
-            if head_obj:
-                await self._publish_event(
-                    uow,
-                    TranslationRejected(
-                        head_id=head_obj.id,
-                        project_id=head_obj.project_id,
-                        actor=actor,
-                        payload={"revision_id": revision_id},
-                    ),
-                )
+            await self._publish_event(
+                uow,
+                TranslationRejected(
+                    head_id=head_obj.id,
+                    project_id=head_obj.project_id,
+                    actor=actor,
+                    payload={"revision_id": revision_id},
+                ),
+            )
         return True
 
-    async def _publish_event(self, uow: IUnitOfWork, event) -> None:
+    async def _publish_event(self, uow: IUnitOfWork, event: Event) -> None:
+        # [修复] 传递 project_id 和 event_id
         await uow.outbox.add(
+            project_id=event.project_id,
+            event_id=str(uuid.uuid4()),
             topic=self._config.worker.event_stream_name,
             payload=event.model_dump(mode="json"),
         )

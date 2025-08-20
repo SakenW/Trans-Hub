@@ -1,6 +1,6 @@
 # tests/e2e/cli/test_cli_smoke_flow.py
 """
-对 CLI 进行端到端的冒烟测试，覆盖完整的生命周期 (最终修复版)。
+对 CLI 进行端到端的冒烟测试，覆盖完整的生命周期 (v3.2.3 最终凭证修复版)。
 """
 
 import json
@@ -9,6 +9,7 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncEngine
 from unittest.mock import MagicMock
 
 from tests.helpers.factories import create_request_data
@@ -23,13 +24,21 @@ from trans_hub.infrastructure.uow import UowFactory
 @pytest_asyncio.fixture
 async def mock_cli_context(
     test_config: TransHubConfig,
+    migrated_db: AsyncEngine,
 ) -> AsyncGenerator[MagicMock, None]:
     """
-    创建一个模拟的 Typer Context。
-    它现在直接从 test_config 夹具获取配置。
+    [最终修复] 创建一个模拟的 Typer Context。
+    它克隆一份配置，然后注入临时数据库的、包含真实凭证的 URL。
     """
+    local_config = test_config.model_copy(deep=True)
+    
+    # [关键修复] 必须使用 render_as_string(hide_password=False) 获取包含密码的 DSN
+    real_db_url_with_creds = migrated_db.url.render_as_string(hide_password=False)
+    local_config.database.url = real_db_url_with_creds
+
     mock = MagicMock()
-    mock.obj = CLISharedState(config=test_config)
+    mock.obj = CLISharedState(config=local_config)
+    
     yield mock
 
 
@@ -99,8 +108,6 @@ async def test_cli_full_lifecycle_flow(
     assert "评论已添加" in capsys.readouterr().out
 
     await status_cmd.get_comments(ctx=mock_cli_context, head_id=head_id)
-    # [修复] 将 CaptureResult 对象本身赋值给 captured
     captured = capsys.readouterr()
-    # [修复] 然后再访问 .out 属性
     assert comment_author in captured.out
     assert comment_body in captured.out

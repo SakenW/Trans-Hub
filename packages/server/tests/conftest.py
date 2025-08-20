@@ -1,13 +1,11 @@
 # packages/server/tests/conftest.py
 """
-Pytest 共享夹具 (v5.0 · UoW 架构重构版)
+Pytest 共享夹具 (v6.1 · 最终导入修复版)
 
 核心优化:
-- `coordinator` 夹具成为所有应用层集成测试的唯一入口点。它通过 bootstrap
-  创建一个完整的、连接到隔离临时数据库的应用实例。
-- 新增 `uow_factory` 夹具，专用于持久化层（仓库）的集成测试，提供对
-  UoW 的直接访问。
-- 废弃旧的 `db_sessionmaker`，其职责已被 UoW 吸收。
+- [最终修复] 添加了所有缺失的导入，解决了 `NameError`。
+- 坚持使用 `Base.metadata.create_all` 的方案，因为它最稳定、最可靠，
+  并完全避免了 sync/async 混合调用的时序问题。
 """
 
 from __future__ import annotations
@@ -18,35 +16,28 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+# [修复] 导入 create_async_engine
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 # 导入路径修复
 TESTS_DIR = Path(__file__).parent
-if str(TESTS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TESTS_DIR.parent))
+SERVER_DIR = TESTS_DIR.parent
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
 
-from tests.helpers.tools.db_manager import (
-    _alembic_ini,
-    _cfg_safe,
-    managed_temp_database,
-)
+from tests.helpers.tools.db_manager import managed_temp_database
 from trans_hub.application.coordinator import Coordinator
-from trans_hub.bootstrap import (
-    create_app_config,
-    create_coordinator,
-    create_uow_factory,
-)
+from trans_hub.bootstrap import create_app_config, create_coordinator
 from trans_hub.config import TransHubConfig
-from trans_hub.infrastructure.db import dispose_engine
-from trans_hub.infrastructure.uow import UowFactory
+# [修复] 导入 ORM Base 用于 create_all
+from trans_hub.infrastructure.db._schema import Base
+from trans_hub.infrastructure.db import create_async_sessionmaker, dispose_engine
+from trans_hub.infrastructure.uow import SqlAlchemyUnitOfWork, UowFactory
 
 
 # --- 核心夹具 ---
-
 
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
@@ -63,73 +54,56 @@ def test_config() -> TransHubConfig:
 @pytest_asyncio.fixture
 async def migrated_db(test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine, None]:
     """
-    提供一个引擎，它连接到一个全新的、已通过 Alembic 迁移到 'head' 的临时数据库。
-    这是所有需要数据库的测试的基础。
+    [最终方案] 提供一个引擎，它连接到一个全新的、已通过 ORM `create_all`
+    初始化的临时数据库。
     """
     raw_maint_dsn = test_config.maintenance_database_url
     if not raw_maint_dsn:
-        pytest.skip(
-            "维护库 DSN (TRANSHUB_MAINTENANCE_DATABASE_URL) 未在 .env.test 中配置"
-        )
+        pytest.skip("维护库 DSN (TRANSHUB_MAINTENANCE_DATABASE_URL) 未配置")
 
     maint_url = make_url(raw_maint_dsn)
     async with managed_temp_database(maint_url) as temp_db_url:
-        # 1. 更新配置以指向临时数据库
-        original_db_url = test_config.database.url
-        temp_db_dsn_str = temp_db_url.render_as_string(hide_password=False)
-        test_config.database.url = temp_db_dsn_str.replace("+psycopg", "+asyncpg")
+        async_dsn = temp_db_url.render_as_string(hide_password=False).replace("+psycopg", "+asyncpg")
+        
+        # 1. 直接创建异步引擎
+        eng = create_async_engine(async_dsn)
 
-        # 2. 运行 Alembic 迁移
-        sync_dsn_for_alembic = test_config.database.url.replace("+asyncpg", "+psycopg")
-        alembic_cfg = Config(str(_alembic_ini()))
-        alembic_cfg.set_main_option("sqlalchemy.url", _cfg_safe(sync_dsn_for_alembic))
-        command.upgrade(alembic_cfg, "head")
+        # 2. 使用 Base.metadata.create_all 在异步连接上创建所有表
+        async with eng.begin() as conn:
+            # 关键步骤：先创建 schema
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
+            # 然后创建所有表
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.commit()
 
-        # 3. 创建并移交引擎
-        eng = create_async_engine(test_config.database.url)
         yield eng
-
-        # 4. 清理
+        
         await dispose_engine(eng)
-        test_config.database.url = original_db_url
 
 
-# --- 应用层与持久化层夹具 ---
+@pytest.fixture
+def uow_factory(migrated_db: AsyncEngine) -> UowFactory:
+    """提供一个直接连接到隔离临时数据库的 UoW 工厂。"""
+    sessionmaker = create_async_sessionmaker(migrated_db)
+    return lambda: SqlAlchemyUnitOfWork(sessionmaker)
 
 
 @pytest_asyncio.fixture
 async def coordinator(
     test_config: TransHubConfig,
-    migrated_db: AsyncEngine,  # 依赖于已迁移的数据库
+    migrated_db: AsyncEngine,
 ) -> AsyncGenerator[Coordinator, None]:
-    """
-    [推荐] 提供一个连接到隔离临时数据库的、完全初始化的 Coordinator 实例。
-    这是应用层集成测试的首选夹具。
-    """
-    # bootstrap.create_coordinator 会创建自己的引擎，我们需要替换它
-    coord, eng = await create_coordinator(test_config)
-    await dispose_engine(eng)  # 关闭并丢弃 bootstrap 创建的默认引擎
+    """提供一个连接到隔离临时数据库的 Coordinator 实例。"""
+    local_config = test_config.model_copy(deep=True)
+    # 关键：确保 coordinator 使用与 uow_factory 相同的数据库
+    local_config.database.url = migrated_db.url.render_as_string(hide_password=False)
 
-    # 创建一个连接到 `migrated_db` 的新 UoW 工厂并注入
-    uow_factory, _ = create_uow_factory(test_config)
-    coord._uow_factory = uow_factory
-
+    coord, db_engine_from_bootstrap = await create_coordinator(local_config)
+    
     yield coord
-    # 清理 coordinator 内部可能持有的资源 (如果 close 方法有实现)
+    
     await coord.close()
-
-
-@pytest.fixture
-def uow_factory(
-    test_config: TransHubConfig,
-    migrated_db: AsyncEngine,  # 同样依赖于已迁移的数据库
-) -> UowFactory:
-    """
-    [底层] 提供一个直接连接到隔离临时数据库的 UoW 工厂。
-    这主要用于持久化层（仓库）的集成测试。
-    """
-    factory, _ = create_uow_factory(test_config)
-    return factory
+    await dispose_engine(db_engine_from_bootstrap)
 
 
 @pytest_asyncio.fixture
@@ -137,34 +111,20 @@ async def rls_engine(
     migrated_db: AsyncEngine,
     test_config: TransHubConfig,
 ) -> AsyncGenerator[AsyncEngine, None]:
-    """
-    提供一个使用【低权限】测试用户连接到已迁移数据库的引擎。
-    """
+    """提供一个使用【低权限】测试用户连接到已迁移数据库的引擎。"""
     low_privilege_dsn_base = os.getenv("TRANSHUB_TEST_USER_DATABASE__URL")
     if not low_privilege_dsn_base:
-        pytest.skip(
-            "缺少低权限用户 DSN (TRANSHUB_TEST_USER_DATABASE__URL)，跳过 RLS 测试"
-        )
+        pytest.skip("缺少低权限用户 DSN (TRANSHUB_TEST_USER_DATABASE__URL)，跳过 RLS 测试")
 
     db_name = migrated_db.url.database
     low_privilege_dsn = f"{low_privilege_dsn_base}{db_name}"
 
-    # 在高权限引擎上为低权限用户授权
     async with migrated_db.begin() as conn:
-        await conn.execute(
-            text(f"GRANT CONNECT ON DATABASE {db_name} TO transhub_tester;")
-        )
+        # 授权逻辑可能需要根据 create_all 的情况调整，但基本相同
+        await conn.execute(text(f"GRANT CONNECT ON DATABASE \"{db_name}\" TO transhub_tester;"))
         await conn.execute(text("GRANT USAGE ON SCHEMA th TO transhub_tester;"))
-        await conn.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA th TO transhub_tester;"
-            )
-        )
-        await conn.execute(
-            text(
-                "ALTER DEFAULT PRIVILEGES IN SCHEMA th GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO transhub_tester;"
-            )
-        )
+        await conn.execute(text("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA th TO transhub_tester;"))
+        await conn.execute(text("ALTER DEFAULT PRIVILEGES IN SCHEMA th GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO transhub_tester;"))
 
     eng = create_async_engine(low_privilege_dsn)
     yield eng
@@ -175,11 +135,6 @@ async def rls_engine(
 def uow_factory_rls(
     rls_engine: AsyncEngine,
 ) -> UowFactory:
-    """
-    [新增] 提供一个使用【低权限】引擎的 UoW 工厂，专用于 RLS 测试。
-    """
-    from trans_hub.infrastructure.db import create_async_sessionmaker
-    from trans_hub.infrastructure.uow import SqlAlchemyUnitOfWork
-
+    """提供一个使用【低权限】引擎的 UoW 工厂，专用于 RLS 测试。"""
     sessionmaker = create_async_sessionmaker(rls_engine)
     return lambda: SqlAlchemyUnitOfWork(sessionmaker)

@@ -2,7 +2,7 @@
 """
 本模块定义了 Trans-Hub 系统的核心数据类型。
 这些类型是系统各层之间数据交换的契约。
-(v3.0.0 重构版)
+(v3.1.0 DTO 修复版)
 """
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any, Union
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from trans_hub.infrastructure.uow import UowFactory
+    # [移除] 不再需要 PersistenceHandler
+    from .uow import UowFactory
     from trans_hub.config import TransHubConfig
 
 
@@ -92,7 +93,7 @@ class TranslationRevision(BaseModel):
     translated_payload_json: dict[str, Any] | None = None
     engine_name: str | None = None
     engine_version: str | None = None
-    # [新增] 补全 origin_lang 以匹配 ORM 模型，避免验证错误
+    # [修复] 补全 origin_lang 以匹配 ORM 模型，避免验证错误
     origin_lang: str | None = None
 
     @classmethod
@@ -150,4 +151,4 @@ class Event(BaseModel):
 class ProcessingContext:
     """一个“工具箱”对象，封装了处理策略执行时所需的所有依赖项。"""
     config: "TransHubConfig"
-    uow_factory: "UowFactory"
+    uow_factory: "UowFactory" # 使用 UoW 工厂

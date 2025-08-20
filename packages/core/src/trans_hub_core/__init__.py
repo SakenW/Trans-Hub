@@ -16,10 +16,10 @@ from .types import (
     Event, ProcessingContext, TranslationHead, TranslationRevision,
     TranslationStatus,
 )
-# [新增] 导出 UoW 和仓库协议
+# [修复] 从 uow 导入 IOutboxRepository
 from .uow import (
     IContentRepository, ITranslationRepository, ITmRepository,
-    IMiscRepository, IUnitOfWork, IOutboxRepository
+    IMiscRepository, IOutboxRepository, IUnitOfWork
 )
 
 __all__ = [
@@ -33,7 +33,7 @@ __all__ = [
     "TranslationStatus", "EngineSuccess", "EngineError",
     "EngineBatchItemResult", "ContentItem", "ProcessingContext",
     "TranslationHead", "TranslationRevision", "Comment", "Event",
-    # [新增] from uow.py
+    # from uow.py
     "IUnitOfWork", "IContentRepository", "ITranslationRepository",
-    "ITmRepository", "IMiscRepository", "IOutboxRepository"
+    "ITmRepository", "IMiscRepository", "IOutboxRepository", # [修复] 添加到 __all__
 ]

@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
+import uuid # [新增] 导入 uuid
 
 from trans_hub.domain import tm as tm_domain
-from trans_hub_core.types import TranslationStatus
+from trans_hub_core.types import TranslationStatus, Event
 from trans_hub_uida import generate_uida
 from ..events import TMApplied, TranslationSubmitted
 
@@ -48,6 +49,7 @@ class RequestTranslationService:
                 await uow.content.update_payload(content_id, source_payload)
             else:
                 content_id = await uow.content.add(
+                    id=str(uuid.uuid4()), # [修复] 显式提供ID
                     project_id=project_id,
                     namespace=namespace,
                     keys_sha256_bytes=uida.keys_sha256_bytes,
@@ -109,8 +111,11 @@ class RequestTranslationService:
                     )
         return content_id
 
-    async def _publish_event(self, uow: IUnitOfWork, event) -> None:
+    async def _publish_event(self, uow: IUnitOfWork, event: Event) -> None:
+        # [修复] 传递 project_id 和 event_id (使用新生成的 uuid)
         await uow.outbox.add(
+            project_id=event.project_id,
+            event_id=str(uuid.uuid4()),
             topic=self._config.worker.event_stream_name,
             payload=event.model_dump(mode="json"),
         )

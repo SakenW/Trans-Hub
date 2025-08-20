@@ -15,8 +15,14 @@ from ._base_repo import BaseRepository
 class SqlAlchemyOutboxRepository(BaseRepository, IOutboxRepository):
     """发件箱仓库实现。"""
 
-    async def add(self, topic: str, payload: dict[str, Any]) -> None:
-        event = ThOutboxEvents(id=uuid.uuid4(), topic=topic, payload=payload)
+    # [修复] 更新方法签名以匹配协议，并使用所有必需字段
+    async def add(self, *, project_id: str, event_id: str, topic: str, payload: dict[str, Any]) -> None:
+        event = ThOutboxEvents(
+            project_id=project_id,
+            event_id=event_id,
+            topic=topic,
+            payload=payload
+        )
         self._session.add(event)
 
     async def pull_pending(self, batch_size: int) -> list[ThOutboxEvents]:

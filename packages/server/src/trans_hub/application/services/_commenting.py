@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
+import uuid # [新增]
 
-from trans_hub_core.types import Comment
+from trans_hub_core.types import Comment, Event
 from ..events import CommentAdded
 
 if TYPE_CHECKING:
@@ -38,14 +39,19 @@ class CommentingService:
                     payload={"comment_id": comment_id},
                 ),
             )
+            # [修复] 手动提交，因为事件发布后需要 comment_id，所以不能等 UoW 自动提交
+            await uow.commit()
         return comment_id
 
     async def get_all(self, head_id: str) -> list[Comment]:
         async with self._uow_factory() as uow:
             return await uow.misc.get_comments(head_id)
 
-    async def _publish_event(self, uow: IUnitOfWork, event) -> None:
+    async def _publish_event(self, uow: IUnitOfWork, event: Event) -> None:
+        # [修复] 传递 project_id 和 event_id
         await uow.outbox.add(
+            project_id=event.project_id,
+            event_id=str(uuid.uuid4()),
             topic=self._config.worker.event_stream_name,
             payload=event.model_dump(mode="json"),
         )

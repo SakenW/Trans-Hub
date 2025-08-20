@@ -1,6 +1,6 @@
 # tests/integration/application/test_app_flow.py
 """
-对 Coordinator 驱动的核心业务流程进行集成测试 (最终修复版)。
+对 Coordinator 驱动的核心业务流程进行集成测试 (v3.1.0 修复版)。
 """
 
 import pytest
@@ -25,7 +25,6 @@ async def test_full_request_publish_get_flow(
     content_id = await coordinator.request_translation(**req_data)
 
     # 2. 准备 & 行动: 模拟 Worker 处理并创建 'reviewed' 修订
-    # 数据准备直接使用 uow_factory，与 coordinator 实例解耦
     async with uow_factory() as uow:
         head = await uow.translations.get_head_by_uida(
             project_id=req_data["project_id"],

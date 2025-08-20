@@ -1,6 +1,6 @@
 # tests/integration/infrastructure/db/invariants/test_invariants_rls.py
 """
-测试数据库架构中的不变式 (Invariants) - 行级安全 (RLS) (UoW 修复版)
+测试数据库架构中的不变式 (Invariants) - 行级安全 (RLS) (v3.1.0 UoW 修复版)
 """
 
 from __future__ import annotations
@@ -33,12 +33,14 @@ async def setup_rls_data(uow_factory: UowFactory):
             namespace="test",
             keys_sha256_bytes=os.urandom(32),
             source_lang="en",
+            source_payload_json={},
         )
         await uow.content.add(
             project_id=PROJECT_B,
             namespace="test",
             keys_sha256_bytes=os.urandom(32),
             source_lang="en",
+            source_payload_json={},
         )
 
 
@@ -46,12 +48,15 @@ async def setup_rls_data(uow_factory: UowFactory):
 async def test_rls_read_isolation(uow_factory_rls: UowFactory, setup_rls_data):
     """测试 RLS 的读取隔离。"""
     async with uow_factory_rls() as uow:
+        # 在低权限会话中设置允许的项目
         await uow.session.execute(
             text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'")
         )
-        result = await uow.session.execute(select(ThContent))
-        # [修复] 使用 .scalars().all() 来明确获取 ORM 对象列表
+        
+        stmt = select(ThContent)
+        result = await uow.session.execute(stmt)
         rows = result.scalars().all()
+        
         assert len(rows) == 1
         assert rows[0].project_id == PROJECT_A
 
@@ -64,7 +69,7 @@ async def test_rls_write_isolation(uow_factory_rls: UowFactory, setup_rls_data):
             text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'")
         )
 
-        # [修复] 将预期失败的操作包裹在嵌套事务 (SAVEPOINT) 中
+        # [修复] 将预期失败的操作包裹在嵌套事务 (SAVEPOINT) 中，防止顶级事务中止
         with pytest.raises(
             DBAPIError, match="new row violates row-level security policy"
         ):
@@ -74,16 +79,21 @@ async def test_rls_write_isolation(uow_factory_rls: UowFactory, setup_rls_data):
                     namespace="malicious",
                     keys_sha256_bytes=os.urandom(32),
                     source_lang="en",
+                    source_payload_json={},
                 )
-        # 此处，顶级 uow 事务仍然是健康的
+        
+        # 验证顶级事务仍然健康，可以继续执行查询
+        count_after = await uow.session.scalar(select(func.count(ThContent.id)))
+        assert count_after == 2 # 确认恶意写入未成功
 
 
 @pytest.mark.asyncio
 async def test_rls_unrestricted_when_empty(uow_factory_rls: UowFactory, setup_rls_data):
-    """测试 RLS 的“超级用户/维护模式”。"""
+    """测试当 allowed_projects 为空时，RLS 策略应拒绝所有访问（默认拒绝）。"""
     async with uow_factory_rls() as uow:
         await uow.session.execute(text("SET LOCAL th.allowed_projects = ''"))
+        
         result = await uow.session.execute(select(ThContent))
-        # [修复] 使用 .scalars().all() 保持一致性
         rows = result.scalars().all()
-        assert len(rows) >= 2
+        
+        assert len(rows) == 0 # 预期不返回任何行
