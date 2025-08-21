@@ -3,6 +3,7 @@
 L3-policy-0006_behavioral_objects.py
 职责：事件/缓存函数、触发器挂载、兼容视图（频道名支持 GUC）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -155,8 +156,10 @@ BEGIN
 END $$;
 """
 
+
 def upgrade() -> None:
     op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     op.execute(SQL_DOWN)

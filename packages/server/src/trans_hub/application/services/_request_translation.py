@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
-import uuid # [新增] 导入 uuid
+import uuid  # [新增] 导入 uuid
 
 from trans_hub.domain import tm as tm_domain
 from trans_hub_core.types import TranslationStatus, Event
@@ -49,7 +49,7 @@ class RequestTranslationService:
                 await uow.content.update_payload(content_id, source_payload)
             else:
                 content_id = await uow.content.add(
-                    id=str(uuid.uuid4()), # [修复] 显式提供ID
+                    id=str(uuid.uuid4()),  # [修复] 显式提供ID
                     project_id=project_id,
                     namespace=namespace,
                     keys_sha256_bytes=uida.keys_sha256_bytes,

@@ -1,18 +1,4 @@
 # packages/server/tests/conftest.py
-"""
-Pytest 共享夹具 (v6.8 · RLS(测试友好) + 触发器(BEFORE) + asyncpg单语句)
-
-要点：
-- ORM create_all 建表后，手动安装：
-  1) RLS 函数与策略（测试友好：未设置 GUC 时放开；空字符串时拒绝；指定列表时按列表过滤）
-  2) 行为触发器：
-     - 变体键归一化：None/空白 => '-'；其余小写 + 空白压缩为连字符（BEFORE）
-     - 发布/撤回：维护 published_at，写事件(加入必填 actor='system')，精准失效缓存（BEFORE）
-     - 自动更新时间戳：任意 UPDATE 刷新 updated_at（BEFORE）
-- 兼容 asyncpg：所有顶层 SQL 按“单语句”拆分执行，避免
-  “cannot insert multiple commands into a prepared statement”。
-"""
-
 from __future__ import annotations
 
 import os
@@ -42,20 +28,14 @@ from trans_hub.infrastructure.uow import SqlAlchemyUnitOfWork, UowFactory
 
 from tests.helpers.tools.db_manager import managed_temp_database
 
-# =========================
-# 核心夹具
-# =========================
-
 
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
-    """强制 pytest-asyncio 使用 asyncio 后端。"""
     return "asyncio"
 
 
 @pytest.fixture(scope="session")
 def test_config() -> TransHubConfig:
-    """提供一个会话级配置对象，加载 .env.test。"""
     return create_app_config(env_mode="test")
 
 
@@ -72,25 +52,21 @@ async def migrated_db(test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine
     """
     raw_maint_dsn = test_config.maintenance_database_url
     if not raw_maint_dsn:
-        pytest.skip(
-            "维护库 DSN (TRANSHUB_MAINTENANCE_DATABASE_URL) 未配置，跳过数据库相关测试"
-        )
+        pytest.skip("维护库 DSN 未配置，跳过数据库相关测试")
 
     maint_url = make_url(raw_maint_dsn)
     async with managed_temp_database(maint_url) as temp_db_url:
-        # 将 psycopg DSN 转换为 asyncpg DSN
         async_dsn = temp_db_url.render_as_string(hide_password=False).replace(
             "+psycopg", "+asyncpg"
         )
         eng = create_async_engine(async_dsn)
 
         async with eng.begin() as conn:
-            # 1) Schema 与 ORM 表
+            # 1) schema + ORM 表
             await conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
             await conn.run_sync(Base.metadata.create_all)
 
-            # 2) RLS 安装（测试友好版）
-            # 2a) allowed_projects(): 未设置 => NULL(放开)；空字符串 => 空数组(拒绝)；否则解析为数组
+            # 2) RLS（测试友好）
             await conn.execute(
                 text(
                     r"""
@@ -98,10 +74,10 @@ CREATE OR REPLACE FUNCTION th.allowed_projects() RETURNS TEXT[] LANGUAGE plpgsql
 DECLARE v TEXT := current_setting('th.allowed_projects', true);
 BEGIN
   IF v IS NULL THEN
-    RETURN NULL; -- 未设置 => 放开（仅测试环境）
+    RETURN NULL; -- 未设置 => 放开（测试）
   END IF;
   IF btrim(v) = '' THEN
-    RETURN ARRAY[]::TEXT[]; -- 显式空 => 拒绝
+    RETURN ARRAY[]::TEXT[]; -- 空串 => 拒绝
   END IF;
   RETURN string_to_array(regexp_replace(v, '\s+', '', 'g'), ',');
 END;
@@ -110,7 +86,6 @@ $$;
                 )
             )
 
-            # 2b) RLS：启用/强制 + 统一策略（allowed_projects() 为 NULL 时放开，否则按列表过滤）
             await conn.execute(
                 text(
                     r"""
@@ -138,9 +113,9 @@ END $$;
                 )
             )
 
-            # 3) 行为触发器安装（全部 BEFORE，确保可改 NEW.* 且同事务可见）
+            # 3) 触发器
 
-            # 3a) 变体归一化函数
+            # 3a) 变体规范化函数
             await conn.execute(
                 text(
                     r"""
@@ -200,8 +175,7 @@ EXECUTE FUNCTION th.trg_biu_trans_head_normalize_variant();
                 )
             )
 
-            # 3c) BEFORE：发布/撤回 —— 不读取 trans_rev.no；published_no 置 NULL；
-            #              事件：写入 (project_id, head_id, actor='system', event_type)
+            # 3c) BEFORE：发布/撤回（写事件含 payload）
             await conn.execute(
                 text(
                     r"""
@@ -212,6 +186,7 @@ AS $$
 BEGIN
   IF TG_OP = 'UPDATE' AND (NEW.published_rev_id IS DISTINCT FROM OLD.published_rev_id) THEN
     IF NEW.published_rev_id IS NOT NULL THEN
+      -- 发布
       NEW.published_no := NULL;
       NEW.published_at := now();
 
@@ -227,6 +202,7 @@ BEGIN
         )
       );
     ELSE
+      -- 撤回发布
       NEW.published_no := NULL;
       NEW.published_at := NULL;
 
@@ -270,7 +246,7 @@ EXECUTE FUNCTION th.trg_bu_trans_head_publish();
                 )
             )
 
-            # 3d) BEFORE：自动更新时间戳（NEW.updated_at := now()）
+            # 3d) BEFORE：任意 UPDATE 刷新 updated_at
             await conn.execute(
                 text(
                     r"""
@@ -302,7 +278,7 @@ EXECUTE FUNCTION th.trg_bu_trans_head_set_updated_at();
                 )
             )
 
-            # 4) GRANT：逐条执行
+            # 4) GRANT
             await conn.execute(
                 text("GRANT EXECUTE ON FUNCTION th.allowed_projects() TO PUBLIC;")
             )
@@ -324,7 +300,6 @@ EXECUTE FUNCTION th.trg_bu_trans_head_set_updated_at();
 
             await conn.commit()
 
-        # 暴露引擎
         try:
             yield eng
         finally:
@@ -333,19 +308,14 @@ EXECUTE FUNCTION th.trg_bu_trans_head_set_updated_at();
 
 @pytest.fixture
 def uow_factory(migrated_db: AsyncEngine) -> UowFactory:
-    """提供一个直接连接到隔离临时数据库的 UoW 工厂。"""
     sessionmaker = create_async_sessionmaker(migrated_db)
     return lambda: SqlAlchemyUnitOfWork(sessionmaker)
 
 
 @pytest_asyncio.fixture
 async def coordinator(
-    test_config: TransHubConfig,
-    migrated_db: AsyncEngine,
+    test_config: TransHubConfig, migrated_db: AsyncEngine
 ) -> AsyncGenerator[Coordinator, None]:
-    """
-    提供一个连接到隔离临时数据库的 Coordinator。
-    """
     local_config = test_config.model_copy(deep=True)
     local_config.database.url = migrated_db.url.render_as_string(hide_password=False)
     coord, db_engine_from_bootstrap = await create_coordinator(local_config)
@@ -362,23 +332,17 @@ async def rls_engine(
     test_config: TransHubConfig,
 ) -> AsyncGenerator[AsyncEngine, None]:
     """
-    提供一个使用【低权限】测试用户连接到已安装 RLS/触发器 的引擎。
-    需求：
-      - 环境变量 TRANSHUB_TEST_USER_DATABASE__URL 形如：
-        postgresql+asyncpg://transhub_tester:<pwd>@<host>:<port>/
-        （注意末尾以 / 结尾，测试夹具会拼接临时库名）
-      - 低权限用户不应具有 SUPERUSER 权限或 BYPASS RLS 能力。
+    低权限用户引擎（用于 RLS 测试）：
+      需要 TRANSHUB_TEST_USER_DATABASE__URL（以 / 结尾），测试夹具会拼接临时库名。
     """
     low_privilege_dsn_base = os.getenv("TRANSHUB_TEST_USER_DATABASE__URL")
     if not low_privilege_dsn_base:
-        pytest.skip(
-            "缺少低权限用户 DSN (TRANSHUB_TEST_USER_DATABASE__URL)，跳过 RLS 相关测试"
-        )
+        pytest.skip("缺少低权限用户 DSN，跳过 RLS 相关测试")
 
     db_name = migrated_db.url.database
     low_privilege_dsn = f"{low_privilege_dsn_base}{db_name}"
 
-    # 授权低权限用户可访问 schema 与对象；触发器内部 INSERT 事件也需要表权限
+    # 授权
     async with migrated_db.begin() as conn:
         await conn.execute(
             text(f'GRANT CONNECT ON DATABASE "{db_name}" TO transhub_tester;')
@@ -391,7 +355,8 @@ async def rls_engine(
         )
         await conn.execute(
             text(
-                "ALTER DEFAULT PRIVILEGES IN SCHEMA th GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO transhub_tester;"
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA th "
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO transhub_tester;"
             )
         )
         await conn.execute(
@@ -413,6 +378,5 @@ async def rls_engine(
 
 @pytest.fixture
 def uow_factory_rls(rls_engine: AsyncEngine) -> UowFactory:
-    """提供一个使用【低权限】引擎的 UoW 工厂（专用于 RLS 集成测试）。"""
     sessionmaker = create_async_sessionmaker(rls_engine)
     return lambda: SqlAlchemyUnitOfWork(sessionmaker)

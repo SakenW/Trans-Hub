@@ -3,6 +3,7 @@
 L4-platform-policies-0009_outbox_policies.py
 职责：Outbox RLS（默认拒绝，按 allowed_projects 白名单放行）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -27,8 +28,10 @@ DROP POLICY IF EXISTS p_outbox_rls ON th.outbox_events;
 ALTER TABLE th.outbox_events DISABLE ROW LEVEL SECURITY;
 """
 
+
 def upgrade() -> None:
     op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     op.execute(SQL_DOWN)

@@ -3,6 +3,7 @@
 L3-policy-0007_rls_policies.py
 职责：allowed_projects() + 统一 RLS（默认拒绝）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -62,8 +63,10 @@ END; $$;
 DROP FUNCTION IF EXISTS th.allowed_projects() CASCADE;
 """
 
+
 def upgrade() -> None:
     op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     op.execute(SQL_DOWN)

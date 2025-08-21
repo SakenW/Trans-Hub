@@ -68,7 +68,7 @@ async def test_resolver_with_full_fallback_chain(
         project_id=project_id,
         content_id=content_id,
         target_lang="de-CH",
-        variant_key="some-variant", # 故意使用一个不存在的变体来测试回退
+        variant_key="some-variant",  # 故意使用一个不存在的变体来测试回退
     )
 
     # --- 3. 验证 ---

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
-import uuid # [新增]
+import uuid  # [新增]
 
 from trans_hub_core.types import Comment, Event
 from ..events import CommentAdded

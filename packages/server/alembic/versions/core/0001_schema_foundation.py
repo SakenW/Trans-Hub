@@ -2,6 +2,7 @@
 L1-core-schema-0001_schema_foundation.py
 职责：创建 schema/扩展、通用 ENUM、公共函数（不挂触发器）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -136,8 +137,10 @@ END$$;
 -- DROP EXTENSION IF EXISTS pg_trgm;
 """
 
+
 def upgrade() -> None:
     op.execute(SQL_UP)
+
 
 def downgrade() -> None:
     op.execute(SQL_DOWN)

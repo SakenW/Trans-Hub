@@ -31,14 +31,14 @@ async def mock_cli_context(
     它克隆一份配置，然后注入临时数据库的、包含真实凭证的 URL。
     """
     local_config = test_config.model_copy(deep=True)
-    
+
     # [关键修复] 必须使用 render_as_string(hide_password=False) 获取包含密码的 DSN
     real_db_url_with_creds = migrated_db.url.render_as_string(hide_password=False)
     local_config.database.url = real_db_url_with_creds
 
     mock = MagicMock()
     mock.obj = CLISharedState(config=local_config)
-    
+
     yield mock
 
 

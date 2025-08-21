@@ -3,6 +3,7 @@
 L4-platform-indexes-0008_outbox_indexes.py
 职责：Outbox 索引（扫描/调度优化，含部分索引）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -12,9 +13,14 @@ down_revision = "0007_rls_policies"
 branch_labels = None
 depends_on = None
 
+
 def upgrade() -> None:
-    op.execute("CREATE INDEX IF NOT EXISTS ix_outbox_status ON th.outbox_events (status);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_outbox_topic_created ON th.outbox_events (topic, created_at);")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_outbox_status ON th.outbox_events (status);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_outbox_topic_created ON th.outbox_events (topic, created_at);"
+    )
     op.execute(r"""
     DO $$ BEGIN
       IF to_regclass('th.ix_outbox_status_next') IS NULL THEN
@@ -26,6 +32,7 @@ def upgrade() -> None:
       END IF;
     END $$;
     """)
+
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS th.ix_outbox_due_partial;")

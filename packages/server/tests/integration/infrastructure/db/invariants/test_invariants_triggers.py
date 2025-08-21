@@ -118,7 +118,7 @@ async def test_trigger_set_updated_at(
         )
         await uow.session.execute(update_stmt)
 
-        # 在同一个事务中再次查询，以验证 onupdate 行为
+        # 在同一个事务中再次查询，以验证更新时的行为
         final_updated_at = (await uow.session.execute(select_stmt)).scalar_one()
         assert final_updated_at > initial_updated_at
 

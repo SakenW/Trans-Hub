@@ -4,7 +4,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
-import uuid # [新增]
+import uuid  # [新增]
 
 from sqlalchemy import update
 
@@ -36,17 +36,24 @@ class RevisionLifecycleService:
             # 直接使用 session 执行更新，保持现有逻辑
             # 注意：这里我们直接操作 ORM 对象也可以，但 execute 更直接
             session = getattr(uow, "session", None)
-            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+            if not session:
+                raise TypeError("UoW is missing a 'session' attribute.")
 
             await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
+                .where(
+                    ThTransRev.id == revision_id,
+                    ThTransRev.project_id == head_obj.project_id,
+                )
                 .values(status=TranslationStatus.PUBLISHED.value)
             )
 
             await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.id == head_obj.id, ThTransHead.project_id == head_obj.project_id)
+                .where(
+                    ThTransHead.id == head_obj.id,
+                    ThTransHead.project_id == head_obj.project_id,
+                )
                 .values(
                     published_rev_id=revision_id,
                     published_no=rev_obj.revision_no,
@@ -79,17 +86,24 @@ class RevisionLifecycleService:
                 return False
 
             session = getattr(uow, "session", None)
-            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+            if not session:
+                raise TypeError("UoW is missing a 'session' attribute.")
 
             await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
+                .where(
+                    ThTransRev.id == revision_id,
+                    ThTransRev.project_id == head_obj.project_id,
+                )
                 .values(status=TranslationStatus.REVIEWED.value)
             )
 
             await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.id == head_obj.id, ThTransHead.project_id == head_obj.project_id)
+                .where(
+                    ThTransHead.id == head_obj.id,
+                    ThTransHead.project_id == head_obj.project_id,
+                )
                 .values(
                     published_rev_id=None,
                     published_no=None,
@@ -114,17 +128,21 @@ class RevisionLifecycleService:
             rev_obj = await uow.translations.get_revision_by_id(revision_id)
             if not rev_obj:
                 return False
-            
+
             head_obj = await uow.translations.get_head_by_revision(revision_id)
             if not head_obj:
                 return False
 
             session = getattr(uow, "session", None)
-            if not session: raise TypeError("UoW is missing a 'session' attribute.")
+            if not session:
+                raise TypeError("UoW is missing a 'session' attribute.")
 
             result = await session.execute(
                 update(ThTransRev)
-                .where(ThTransRev.id == revision_id, ThTransRev.project_id == head_obj.project_id)
+                .where(
+                    ThTransRev.id == revision_id,
+                    ThTransRev.project_id == head_obj.project_id,
+                )
                 .values(status=TranslationStatus.REJECTED.value)
             )
             if result.rowcount == 0:
@@ -132,7 +150,10 @@ class RevisionLifecycleService:
 
             await session.execute(
                 update(ThTransHead)
-                .where(ThTransHead.current_rev_id == revision_id, ThTransHead.project_id == head_obj.project_id)
+                .where(
+                    ThTransHead.current_rev_id == revision_id,
+                    ThTransHead.project_id == head_obj.project_id,
+                )
                 .values(current_status=TranslationStatus.REJECTED.value)
             )
 

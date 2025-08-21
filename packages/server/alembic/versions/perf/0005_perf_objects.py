@@ -3,6 +3,7 @@
 L2-perf-0005_perf_objects.py
 职责：分区子表、常用索引、搜索物化视图（WITH NO DATA + 双 TSV 列）。
 """
+
 from __future__ import annotations
 from alembic import op
 
@@ -11,6 +12,7 @@ revision = "0005_perf_objects"
 down_revision = "0004_outbox_schema"
 branch_labels = None
 depends_on = None
+
 
 def upgrade() -> None:
     # 分区子表
@@ -33,15 +35,29 @@ def upgrade() -> None:
     """)
 
     # 常用索引（幂等）
-    op.execute("CREATE INDEX IF NOT EXISTS ix_resolve_expires ON th.resolve_cache (expires_at);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_events_head ON th.events (project_id, head_id);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_comments_head ON th.comments (project_id, head_id);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_comments_open ON th.comments (project_id, head_id, resolved);")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_resolve_expires ON th.resolve_cache (expires_at);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_events_head ON th.events (project_id, head_id);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_comments_head ON th.comments (project_id, head_id);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_comments_open ON th.comments (project_id, head_id, resolved);"
+    )
     op.execute("CREATE INDEX IF NOT EXISTS ix_tm_links_tm_id ON th.tm_links (tm_id);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_cache_dim_build ON th.resolve_cache (project_id, content_id, target_lang, variant_key, build_rev_id);")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_cache_dim_scope ON th.resolve_cache (project_id, content_id, target_lang, variant_key, cache_scope);")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_cache_dim_build ON th.resolve_cache (project_id, content_id, target_lang, variant_key, build_rev_id);"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_cache_dim_scope ON th.resolve_cache (project_id, content_id, target_lang, variant_key, cache_scope);"
+    )
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_trans_rev_trgm ON th.trans_rev USING gin ((translated_payload_json::text) gin_trgm_ops);")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_trans_rev_trgm ON th.trans_rev USING gin ((translated_payload_json::text) gin_trgm_ops);"
+    )
 
     # 搜索物化视图（WITH NO DATA）
     op.execute(r"""
@@ -72,6 +88,7 @@ def upgrade() -> None:
       END IF;
     END $$;
     """)
+
 
 def downgrade() -> None:
     op.execute("DROP MATERIALIZED VIEW IF EXISTS th.search_rev CASCADE;")

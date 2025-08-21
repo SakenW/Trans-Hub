@@ -115,6 +115,8 @@
     "pytestmark",
     "urandom",
     "sqlalchemy",
-    "sessionmaker"
+    "sessionmaker",
+    "plpgsql",
+    "btrim"
   ]
 }

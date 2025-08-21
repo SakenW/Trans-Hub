@@ -2,12 +2,14 @@
 """内容仓库的 SQLAlchemy 实现。"""
 
 from __future__ import annotations
+
 import uuid
 from typing import Any
 
-from sqlalchemy import select, update, func
+from sqlalchemy import func, select, update
 from trans_hub.infrastructure.db._schema import ThContent
 from trans_hub_core.uow import IContentRepository
+
 from ._base_repo import BaseRepository
 
 
@@ -17,11 +19,16 @@ class SqlAlchemyContentRepository(BaseRepository, IContentRepository):
     async def add(self, **data: Any) -> str:
         """
         添加一个新的内容记录。
-        如果 data 中包含 id，则使用它；否则，生成一个新的 UUID。
+        - 允许外部传入 id；若未传入则自动生成。
+        - 确保 source_payload_json 非空，避免触发 NOT NULL 约束。
         """
-        # [修复] 优先使用传入的 id
-        if "id" not in data:
-            data["id"] = str(uuid.uuid4())
+        content_id = data.get("id") or str(uuid.uuid4())
+
+        # 关键修复：保证 NOT NULL 字段有默认值
+        if data.get("source_payload_json") is None:
+            data["source_payload_json"] = {}
+
+        data["id"] = content_id
 
         content = ThContent(**data)
         self._session.add(content)
