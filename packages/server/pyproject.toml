@@ -34,6 +34,7 @@ redis = { version = ">=5.1.1", extras = ["hiredis"], optional = true }  # 最新
 
 # CLI 运行期依赖（从可选改为必装，确保入口脚本可用）
 typer = { version = ">=0.15.1", extras = ["all"] }    # 最新稳定版 
+dependency-injector = "^4.48.1"
 
 [tool.poetry.extras]
 postgres = ["asyncpg"]

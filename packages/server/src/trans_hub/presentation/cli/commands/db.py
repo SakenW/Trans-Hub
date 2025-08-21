@@ -1,35 +1,31 @@
 # packages/server/src/trans_hub/presentation/cli/commands/db.py
-"""
-数据库管理命令，整合了迁移、健康检查、重建和数据审查等功能。
-"""
-
 from __future__ import annotations
-
 
 import typer
 from rich.console import Console
+from dependency_injector.wiring import inject, Provide
 
+from trans_hub.containers import ApplicationContainer
+from trans_hub.config import TransHubConfig
 from trans_hub.management.db_service import DbService
-from trans_hub.management.utils import find_alembic_ini  # [修改] 从共享模块导入
-from .._state import CLISharedState
+from trans_hub.management.utils import find_alembic_ini
 
 app = typer.Typer(help="数据库管理命令 (迁移、检查、重建等)。", no_args_is_help=True)
 console = Console()
 
 
 @app.command("migrate")
+@inject
 def db_migrate(
     ctx: typer.Context,
     force: bool = typer.Option(
         False, "--force", help="迁移失败时，强制使用 ORM 兜底。"
     ),
+    config: TransHubConfig = Provide[ApplicationContainer.pydantic_config],
 ) -> None:
     """运行数据库迁移，将 Schema 升级到最新版本。"""
-    state: CLISharedState = ctx.obj
     try:
-        service = DbService(
-            state.config, str(find_alembic_ini())
-        )  # [修改] 使用导入的函数
+        service = DbService(config, str(find_alembic_ini()))
         service.run_migrations(force=force)
     except Exception as e:
         console.print(f"[bold red]❌ 迁移命令执行失败: {e}[/bold red]")
@@ -37,16 +33,15 @@ def db_migrate(
 
 
 @app.command("stamp")
+@inject
 def db_stamp(
     ctx: typer.Context,
     revision: str = typer.Argument("head", help="要标记的版本号 (通常是 'head')。"),
+    config: TransHubConfig = Provide[ApplicationContainer.pydantic_config],
 ) -> None:
     """[高级] 将数据库版本标记为指定值，而不运行迁移脚本。"""
-    state: CLISharedState = ctx.obj
     try:
-        service = DbService(
-            state.config, str(find_alembic_ini())
-        )  # [修改] 使用导入的函数
+        service = DbService(config, str(find_alembic_ini()))
         service.stamp_version(revision)
     except Exception as e:
         console.print(f"[bold red]❌ 标记命令执行失败: {e}[/bold red]")
@@ -54,13 +49,14 @@ def db_stamp(
 
 
 @app.command("inspect")
-def db_inspect(ctx: typer.Context) -> None:
+@inject
+def db_inspect(
+    ctx: typer.Context,
+    config: TransHubConfig = Provide[ApplicationContainer.pydantic_config],
+) -> None:
     """以可读格式显示数据库中的核心内容。"""
-    state: CLISharedState = ctx.obj
     try:
-        service = DbService(
-            state.config, str(find_alembic_ini())
-        )  # [修改] 使用导入的函数
+        service = DbService(config, str(find_alembic_ini()))
         service.inspect_database()
     except Exception as e:
         console.print(f"[bold red]❌ 审查数据库失败: {e}[/bold red]")
@@ -68,6 +64,7 @@ def db_inspect(ctx: typer.Context) -> None:
 
 
 @app.command("doctor")
+@inject
 def db_doctor(
     ctx: typer.Context,
     check: bool = typer.Option(False, "--check", help="仅执行健康检查。"),
@@ -75,13 +72,11 @@ def db_doctor(
     rebuild: bool = typer.Option(False, "--rebuild", help="[危险] 重建数据库。"),
     clear: bool = typer.Option(False, "--clear", help="[危险] 清空数据库数据。"),
     yes: bool = typer.Option(False, "-y", "--yes", help="对危险操作自动应答'是'。"),
+    config: TransHubConfig = Provide[ApplicationContainer.pydantic_config],
 ) -> None:
     """提供交互式或命令式的数据库诊断与修复工具。"""
-    state: CLISharedState = ctx.obj
     try:
-        service = DbService(
-            state.config, str(find_alembic_ini())
-        )  # [修改] 使用导入的函数
+        service = DbService(config, str(find_alembic_ini()))
 
         if any([check, deep, rebuild, clear]):
             if check or deep:
