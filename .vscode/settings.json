@@ -1,0 +1,120 @@
+{
+  // ===========================================================================
+  //  Trans-Hub 项目共享 VSCode 设置（提交到版本库，统一团队开发环境）
+  // ===========================================================================
+
+  // —— Python & Ruff（唯一格式化器）——
+  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // —— Pylance / Pyright（严格类型）——
+  "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.exclude": ["**/alembic/versions/**", ".venv/**"],
+  "python.analysis.diagnosticMode": "workspace",
+
+  // —— Ruff（lint + 导入排序 + 格式化）——
+  "ruff.enable": true,
+  "ruff.fixAll": true,
+  "ruff.organizeImports": true,
+
+  // —— Error Lens：降噪展示 —— 
+  "errorLens.enabled": true,
+  "errorLens.fontWeight": "normal",
+  "errorLens.margin": "80ch",
+  "errorLens.errorRangePrefix": "⛔ ",
+  "errorLens.warningRangePrefix": "⚠️ ",
+  "errorLens.infoRangePrefix": "ℹ️ ",
+
+  // —— TODO Tree：标签与正则 —— 
+  "todo-tree.highlights.enabled": true,
+  "todo-tree.general.tags": [
+    "TODO",
+    "FIXME",
+    "NOTE",
+    "HACK",
+    "OPTIMIZE",
+    "PERF",
+    "SECURITY"
+  ],
+  "todo-tree.regex.regex": "((//|#|<!--|;|/\\*)\\s*($TAGS)|^\\s*- \\[ \\]\\s*)",
+
+  // —— REST Client：公共头与环境 —— 
+  "rest-client.defaultHeaders": {
+    "User-Agent": "Trans-Hub-Dev/1.0",
+    "Content-Type": "application/json"
+  },
+  "rest-client.environmentVariables": {
+    "$shared": { "baseUrl": "http://127.0.0.1:8000" },
+    "dev": { "token": "dev-token" },
+    "prod": { "token": "prod-token" }
+  },
+
+  // —— Code Runner：指定 .venv 的 Python —— 
+  "code-runner.executorMap": {
+    "python": "${workspaceFolder}/.venv/bin/python"
+  },
+  "code-runner.clearPreviousOutput": true,
+
+  // —— SQLTools：PostgreSQL & SQLite 连接 —— 
+  "sqltools.useNodeRuntime": true,
+  "sqltools.connections": [
+    {
+      "name": "Trans-Hub (Postgres dev)",
+      "driver": "PostgreSQL",
+      "previewLimit": 50,
+      "server": "127.0.0.1",
+      "port": 5432,
+      "database": "postgres",
+      "username": "postgres",
+      "password": "postgres"
+    },
+    {
+      "name": "Trans-Hub (SQLite dev)",
+      "driver": "SQLite",
+      "database": "${workspaceFolder}/packages/server/dev.db"
+    }
+  ],
+
+  // —— SQLite 扩展：静默 —— 
+  "sqlite.logLevel": "ERROR",
+
+  // —— GitLens：精简干扰，保留关键 —— 
+  "gitlens.views.showWelcome": false,
+  "gitlens.codeLens.enabled": false,
+  "gitlens.currentLine.enabled": true,
+  "gitlens.hovers.enabled": true,
+  "gitlens.statusBar.enabled": true,
+  "gitlens.blame.highlight.enabled": true,
+  "gitlens.defaultDateFormat": "yyyy-MM-dd HH:mm",
+  "gitlens.defaultTimeFormat": "relative",
+
+  // —— Code Spell Checker：启用常用附加字典 + 仅保留项目特有词 —— 
+  "cSpell.dictionaries": [
+    "python",          // Python 常用词
+    "softwareTerms",   // 常见技术词
+    "sql",             // SQL/数据库词
+    "node",            // Node/NPM 常见词
+    "filetypes",       // 文件扩展名
+    "npm"              // npm 包名
+  ],
+
+  "cSpell.words": [
+    "transhub",
+    "uida",
+    "maint",
+    "datefmt",
+    "levelname",
+    "qualname",
+    "NOTSET",
+    "pytestmark",
+    "urandom",
+    "sqlalchemy",
+    "sessionmaker"
+  ]
+}

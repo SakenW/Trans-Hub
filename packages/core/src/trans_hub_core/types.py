@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     # [移除] 不再需要 PersistenceHandler
-    from .uow import UowFactory
     from trans_hub.config import TransHubConfig
+    from trans_hub.infrastructure.uow import UowFactory
 
 
 class TranslationStatus(str, Enum):

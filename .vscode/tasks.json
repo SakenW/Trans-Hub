@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "ruff:fix+format", "type": "shell", "command": "ruff check --fix . && ruff format ."},
+    { "label": "pytest", "type": "shell", "command": "pytest -q" },
+    { "label": "type-check", "type": "shell", "command": "pyright" },
+    { "label": "alembic:upgrade-head", "type": "shell", "command": "alembic upgrade head", "options": {"cwd": "${workspaceFolder}/packages/server"} }
+  ]
+}

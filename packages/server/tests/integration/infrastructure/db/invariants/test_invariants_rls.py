@@ -8,7 +8,7 @@ import os
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.exc import DBAPIError
 
 from trans_hub.infrastructure.db._schema import ThContent
@@ -65,26 +65,27 @@ async def test_rls_read_isolation(uow_factory_rls: UowFactory, setup_rls_data):
 async def test_rls_write_isolation(uow_factory_rls: UowFactory, setup_rls_data):
     """测试 RLS 的写入隔离。"""
     async with uow_factory_rls() as uow:
-        await uow.session.execute(
-            text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'")
-        )
-
-        # [修复] 将预期失败的操作包裹在嵌套事务 (SAVEPOINT) 中，防止顶级事务中止
-        with pytest.raises(
-            DBAPIError, match="new row violates row-level security policy"
-        ):
+        # 进入低权限会话，限定仅可见 A 项目
+        await uow.session.execute(text(f"SET LOCAL th.allowed_projects = '{PROJECT_A}'"))
+        
+        # 写入前计数（受 RLS 可见性约束）
+        count_before = await uow.session.scalar(select(func.count()).select_from(ThContent))
+        
+        # 预期失败的写入放在 SAVEPOINT 中
+        with pytest.raises(DBAPIError, match="row-level security"):
             async with uow.session.begin_nested():
                 await uow.content.add(
-                    project_id=PROJECT_B,  # 尝试写入不被允许的项目
+                    project_id=PROJECT_B,          # 不被允许的项目
                     namespace="malicious",
                     keys_sha256_bytes=os.urandom(32),
                     source_lang="en",
                     source_payload_json={},
                 )
+                await uow.session.flush()         # 显式触发 SQL，尽早暴露 RLS 拒绝（可选但推荐）
         
-        # 验证顶级事务仍然健康，可以继续执行查询
-        count_after = await uow.session.scalar(select(func.count(ThContent.id)))
-        assert count_after == 2 # 确认恶意写入未成功
+        # 顶层事务未中止，继续查询
+        count_after = await uow.session.scalar(select(func.count()).select_from(ThContent))
+        assert count_after == count_before       # 恶意写入未成功
 
 
 @pytest.mark.asyncio
