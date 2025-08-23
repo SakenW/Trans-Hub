@@ -25,6 +25,7 @@ Trans-Hub Monorepo 项目快照生成工具（纯标准库版 v6.3）
 
 退出码：0 成功；非 0 为错误
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,30 +38,78 @@ from typing import IO, Iterable
 # -------- 可调参数 --------
 DEFAULT_DIRS = ["packages", "scripts", "docs", "alembic", "migrations"]
 DEFAULT_ROOT_FILES = [
-    ".env.example", "pyproject.toml", "poetry.toml", "README.md",
-    "alembic.ini", ".gitignore", "ruff.toml", ".flake8", ".editorconfig", "LICENSE",
+    ".env.example",
+    "pyproject.toml",
+    "poetry.toml",
+    "README.md",
+    "alembic.ini",
+    ".gitignore",
+    "ruff.toml",
+    ".flake8",
+    ".editorconfig",
+    "LICENSE",
 ]
 EXCLUDE_NAMES = {
-    "__pycache__", ".git", ".idea", ".vscode",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".venv", "venv", "node_modules", "dist", "build",
-    ".DS_Store", "Thumbs.db",
-    "poetry.lock", "package-lock.json", "pnpm-lock.yaml",
-    ".coverage", "htmlcov", "temp",
+    "__pycache__",
+    ".git",
+    ".idea",
+    ".vscode",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "node_modules",
+    "dist",
+    "build",
+    ".DS_Store",
+    "Thumbs.db",
+    "poetry.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    ".coverage",
+    "htmlcov",
+    "temp",
 }
 BINARY_EXTS = {
-    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
-    ".ico", ".pdf", ".zip", ".tar", ".gz", ".7z",
-    ".so", ".dylib", ".dll", ".wasm", ".db",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".so",
+    ".dylib",
+    ".dll",
+    ".wasm",
+    ".db",
 }
 LANG_MAP = {
-    ".py": "python", ".toml": "toml", ".ini": "ini",
-    ".yml": "yaml", ".yaml": "yaml", ".json": "json",
-    ".sql": "sql", ".md": "markdown", ".sh": "bash",
-    ".ps1": "powershell", ".ts": "typescript", ".tsx": "tsx",
-    ".js": "javascript", ".jsx": "jsx", ".css": "css",
-    ".html": "html", ".env": "bash",
+    ".py": "python",
+    ".toml": "toml",
+    ".ini": "ini",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".json": "json",
+    ".sql": "sql",
+    ".md": "markdown",
+    ".sh": "bash",
+    ".ps1": "powershell",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".js": "javascript",
+    ".jsx": "jsx",
+    ".css": "css",
+    ".html": "html",
+    ".env": "bash",
 }
+
 
 # -------- 根目录发现（优选最高祖先） --------
 def looks_like_repo_root(path: Path) -> tuple[bool, bool, bool]:
@@ -70,6 +119,7 @@ def looks_like_repo_root(path: Path) -> tuple[bool, bool, bool]:
         (path / ".git").exists(),
         (path / "pyproject.toml").is_file(),
     )
+
 
 def find_best_repo_root(start: Path, debug: bool = False) -> Path | None:
     """
@@ -87,7 +137,9 @@ def find_best_repo_root(start: Path, debug: bool = False) -> Path | None:
     while True:
         has_packages, has_git, has_py = looks_like_repo_root(cur)
         if debug:
-            chain.append(f"{cur}  [packages={has_packages}, git={has_git}, py={has_py}]")
+            chain.append(
+                f"{cur}  [packages={has_packages}, git={has_git}, py={has_py}]"
+            )
         if has_packages:
             best_packages = cur  # 越往上覆盖为“更高祖先”
         if has_git:
@@ -104,6 +156,7 @@ def find_best_repo_root(start: Path, debug: bool = False) -> Path | None:
             print(" -", line)
 
     return best_packages or best_git or best_py
+
 
 # -------- 扫描与过滤 --------
 def iter_targets(scan_root: Path, extra: list[str]) -> list[Path]:
@@ -125,11 +178,13 @@ def iter_targets(scan_root: Path, extra: list[str]) -> list[Path]:
             targets.append(p)
     return sorted(set(targets))
 
+
 def should_exclude(path: Path) -> bool:
     """名称级排除（命中任一父级亦排除）。"""
     if path.name in EXCLUDE_NAMES:
         return True
     return any(parent.name in EXCLUDE_NAMES for parent in path.parents)
+
 
 def walk_files(scan_root: Path, targets: Iterable[Path]) -> list[Path]:
     """递归收集文件，相对 scan_root 返回。"""
@@ -147,6 +202,7 @@ def walk_files(scan_root: Path, targets: Iterable[Path]) -> list[Path]:
                 if p.is_file():
                     result.append(p.relative_to(scan_root))
     return sorted(set(result))
+
 
 # -------- 内容输出 --------
 def detect_binary(path: Path) -> bool:
@@ -167,8 +223,10 @@ def detect_binary(path: Path) -> bool:
         return True
     return False
 
+
 def code_lang_for(path: Path) -> str:
     return LANG_MAP.get(path.suffix.lower(), (path.suffix.lstrip(".") or "text"))
+
 
 def write_dir_tree(scan_root: Path, files: list[Path], out: IO[str]) -> None:
     out.write("## 目录结构\n\n")
@@ -177,6 +235,7 @@ def write_dir_tree(scan_root: Path, files: list[Path], out: IO[str]) -> None:
         node = tree
         for part in rel.parts:
             node = node.setdefault(part, {})
+
     def render(node: dict[str, dict], indent: str = "") -> None:
         items = sorted(node.items(), key=lambda kv: kv[0])
         for i, (name, sub) in enumerate(items):
@@ -184,10 +243,14 @@ def write_dir_tree(scan_root: Path, files: list[Path], out: IO[str]) -> None:
             out.write(f"{indent}{connector}{name}\n")
             if sub:
                 render(sub, indent + ("    " if i == len(items) - 1 else "│   "))
+
     render(tree)
     out.write("\n")
 
-def write_file_contents(scan_root: Path, files: list[Path], out: IO[str], max_bytes: int, no_content: bool) -> None:
+
+def write_file_contents(
+    scan_root: Path, files: list[Path], out: IO[str], max_bytes: int, no_content: bool
+) -> None:
     out.write("## 文件内容\n\n")
     if no_content:
         out.write("_已根据 --no-content 跳过文件内容，仅展示目录结构。_\n")
@@ -207,9 +270,12 @@ def write_file_contents(scan_root: Path, files: list[Path], out: IO[str], max_by
             text = data.decode("utf-8", errors="replace").strip()
             out.write(f"```{code_lang_for(abs_path)}\n{text}\n```\n\n")
             if truncated:
-                out.write(f"> ⚠︎ 文件过大，已按 --max-bytes={max_bytes} 截断，仅展示前部内容。\n\n")
+                out.write(
+                    f"> ⚠︎ 文件过大，已按 --max-bytes={max_bytes} 截断，仅展示前部内容。\n\n"
+                )
         except Exception as e:
             out.write(f"```text\n[无法读取文件内容: {e}]\n```\n\n")
+
 
 # -------- 入口 --------
 def main() -> None:
@@ -218,18 +284,32 @@ def main() -> None:
         description="生成 Trans-Hub 的项目快照（目录树 + 文件内容）。扫描根自动向上发现（优先 packages/）。",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("-o", "--output", type=str, default="project_snapshot.txt",
-                        help="输出文件名（写入到脚本所在目录）。")
-    parser.add_argument("--max-bytes", type=int, default=512 * 1024,
-                        help="单文件最大读取字节数（超过截断）。")
-    parser.add_argument("--no-content", action="store_true",
-                        help="仅输出目录树，不写文件内容。")
-    parser.add_argument("--extra", nargs="*",
-                        default=[], help="额外包含路径（相对扫描根）。")
-    parser.add_argument("--scan-root", type=str, default="",
-                        help="手工指定扫描根；留空则自动从 CWD 向上查找。")
-    parser.add_argument("--debug", action="store_true",
-                        help="打印根目录判定过程。")
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="project_snapshot.txt",
+        help="输出文件名（写入到脚本所在目录）。",
+    )
+    parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=512 * 1024,
+        help="单文件最大读取字节数（超过截断）。",
+    )
+    parser.add_argument(
+        "--no-content", action="store_true", help="仅输出目录树，不写文件内容。"
+    )
+    parser.add_argument(
+        "--extra", nargs="*", default=[], help="额外包含路径（相对扫描根）。"
+    )
+    parser.add_argument(
+        "--scan-root",
+        type=str,
+        default="",
+        help="手工指定扫描根；留空则自动从 CWD 向上查找。",
+    )
+    parser.add_argument("--debug", action="store_true", help="打印根目录判定过程。")
     args = parser.parse_args()
 
     # 1) 扫描根：自动向上找“最高祖先”
@@ -263,8 +343,8 @@ def main() -> None:
         print(f"⚠️ 无法删除旧文件 {output_path}: {e}", file=sys.stderr)
         # 尝试清空文件内容而不是删除
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write('')
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write("")
             print(f"🔄 已清空旧文件内容: {output_path}")
         except OSError as e2:
             print(f"❌ 无法清空旧文件 {output_path}: {e2}", file=sys.stderr)
@@ -276,19 +356,26 @@ def main() -> None:
     print("🚀 开始生成项目快照")
     print(f" - 扫描根目录: {scan_root}")
     print(f" - 脚本目录 / 输出文件: {script_dir} / {output_path.name}")
-    print(f" - 包含起点:   {', '.join(p.as_posix() for p in targets) if targets else '(空)'}")
+    print(
+        f" - 包含起点:   {', '.join(p.as_posix() for p in targets) if targets else '(空)'}"
+    )
     print(f" - 文件总数:   {len(files)}")
     if args.no_content:
         print(" - 模式:       仅目录树（--no-content）")
     print(f" - 最大字节:   {args.max_bytes}")
 
     with io.open(output_path, "w", encoding="utf-8", newline="\n") as out:
-        out.write(f"# Trans-Hub Monorepo 项目快照（{datetime.now().strftime('%Y-%m-%d %H:%M')}）\n\n")
-        out.write("> 说明：本文件由脚本自动生成，包含目录结构与核心文件内容（可能截断）。\n\n")
+        out.write(
+            f"# Trans-Hub Monorepo 项目快照（{datetime.now().strftime('%Y-%m-%d %H:%M')}）\n\n"
+        )
+        out.write(
+            "> 说明：本文件由脚本自动生成，包含目录结构与核心文件内容（可能截断）。\n\n"
+        )
         write_dir_tree(scan_root, files, out)
         write_file_contents(scan_root, files, out, args.max_bytes, args.no_content)
 
     print(f"\n✅ 已生成：{output_path}")
+
 
 if __name__ == "__main__":
     main()
