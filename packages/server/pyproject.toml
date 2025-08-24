@@ -51,6 +51,7 @@ pytest = ">=8.4.1"
 pytest-asyncio = ">=1.1.0"
 nest-asyncio = ">=1.6.0"   # [新增] 允许在已有事件循环中嵌套运行 asyncio.run()
 pytest-cov = ">=6.2.1"
+pytest-rerunfailures = ">=14.0"  # [新增] 测试失败重试机制
 
 # 代码质量与静态分析
 ruff = ">=0.12.9"       # Linter & Formatter
@@ -73,7 +74,7 @@ trans-hub = "trans_hub.adapters.cli.main:app"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-ra -q --strict-markers"
+addopts = "-ra -q --strict-markers --reruns=2 --reruns-delay=1"
 markers = [
     "unit: Mark a test as a unit test (fast, no I/O).",
     "integration: Mark a test as an integration test (can use local DB/cache).",

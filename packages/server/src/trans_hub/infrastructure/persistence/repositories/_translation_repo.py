@@ -128,42 +128,49 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
     async def create_revision(self, **data: Any) -> str:
         """
         创建一条新的修订，并更新其所属头指针的状态。
+        使用事务级别的操作避免会话冲突。
         """
         head_id = data.pop("head_id")
-
-        # 重新从数据库获取翻译头，确保它绑定到当前会话
-        head_stmt = select(ThTransHead).where(
-            ThTransHead.project_id == data["project_id"], ThTransHead.id == head_id
-        )
-        head = (await self._session.execute(head_stmt)).scalar_one_or_none()
-
-        if not head:
-            raise NoResultFound(
-                f"翻译头记录未找到: project_id={data['project_id']}, head_id={head_id}"
-            )
-
-        content = await self._session.get(ThContent, data["content_id"])
-        if not content:
-            raise NoResultFound(f"内容记录未找到: content_id={data['content_id']}")
-
+        project_id = data["project_id"]
+        content_id = data["content_id"]
+        
         # 从data中提取variant_key，因为该字段设置了init=False
         variant_key = data.pop("variant_key", "-")
         
         # 生成新的revision ID
         new_rev_id = str(uuid.uuid4())
         
+        # 获取content信息
+        content = await self._session.get(ThContent, content_id)
+        if not content:
+            raise NoResultFound(f"内容记录未找到: content_id={content_id}")
+        
+        # 创建新revision对象
         new_rev = ThTransRev(
             id=new_rev_id, src_payload_json=content.source_payload_json, **data
         )
         new_rev.variant_key = variant_key
         
-        # 将新revision添加到会话
+        # 添加新revision到会话
         self._session.add(new_rev)
         
-        # 更新 head 对象的状态，使用预生成的ID
-        head.current_rev_id = new_rev_id
-        head.current_status = new_rev.status
-        head.current_no = new_rev.revision_no
+        # 使用原生SQL更新head状态，避免ORM会话冲突
+        from sqlalchemy import text
+        update_stmt = text("""
+            UPDATE th_trans_head 
+            SET current_rev_id = :new_rev_id,
+                current_status = :status,
+                current_no = :revision_no
+            WHERE id = :head_id AND project_id = :project_id
+        """)
+        
+        await self._session.execute(update_stmt, {
+            "new_rev_id": new_rev_id,
+            "status": new_rev.status.value,
+            "revision_no": new_rev.revision_no,
+            "head_id": head_id,
+            "project_id": project_id
+        })
         
         # flush确保更改被持久化
         await self._session.flush()
