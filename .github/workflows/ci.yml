@@ -1,0 +1,101 @@
+name: Trans-Hub CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  lint-and-static-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "poetry"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+        working-directory: ./packages/server
+
+      - name: Run Linting and Static Analysis
+        # 调用我们刚刚创建的统一脚本
+        run: poetry run python ../../scripts/lint_check.py
+        working-directory: ./packages/server
+
+  tests:
+    runs-on: ubuntu-latest
+    needs: lint-and-static-analysis # 依赖 lint 作业成功
+
+    # 为作业设置数据库服务
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: saken
+          POSTGRES_PASSWORD: a1234567
+          POSTGRES_DB: postgres # Alembic/测试框架会连接到这里来创建临时库
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "poetry"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+        working-directory: ./packages/server
+
+      - name: Check Test Database Connectivity
+        # 在运行完整测试套件前，快速检查环境
+        run: poetry run python scripts/check_test_environment.py
+        working-directory: ./packages/server
+        env:
+          # 确保测试环境使用容器中的数据库
+          TRANSHUB_MAINTENANCE_DATABASE_URL: "postgresql+psycopg://saken:a1234567@localhost:5432/postgres"
+          TRANSHUB_DATABASE__URL: "postgresql+asyncpg://saken:a1234567@localhost:5432/transhub_test"
+          # 允许低权限用户测试 RLS
+          TRANSHUB_TEST_USER_DATABASE__URL: "postgresql+asyncpg://transhub_tester:password@localhost:5432/"
+
+      - name: Run Tests with Coverage
+        run: poetry run pytest --cov=src/trans_hub --cov-report=xml --cov-fail-under=80
+        working-directory: ./packages/server
+        env:
+          TRANSHUB_MAINTENANCE_DATABASE_URL: "postgresql+psycopg://saken:a1234567@localhost:5432/postgres"
+          TRANSHUB_DATABASE__URL: "postgresql+asyncpg://saken:a1234567@localhost:5432/transhub_test"
+          TRANSHUB_TEST_USER_DATABASE__URL: "postgresql+asyncpg://transhub_tester:password@localhost:5432/"
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: packages/server/coverage.xml

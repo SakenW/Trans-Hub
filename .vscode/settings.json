@@ -7,8 +7,6 @@
       "source.organizeImports.ruff": "explicit"
     }
   },
-  "editor.formatOnSave": true,
-
   // —— Ruff 插件开关 ——
   "ruff.enable": true,             // 启用 Ruff
   "ruff.format.enable": true,      // 允许 Ruff 做格式化
@@ -16,5 +14,6 @@
 
   // —— 项目行长与标尺，与 .ruff.toml 对齐 ——
   "editor.wordWrapColumn": 100,
-  "editor.rulers": [100]
+  "editor.rulers": [100],
+
 }

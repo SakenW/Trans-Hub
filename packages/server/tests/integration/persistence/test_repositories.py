@@ -61,12 +61,15 @@ async def test_translation_repo_get_or_create_head_is_atomic(uow_factory: UowFac
         )
 
         # 在同一个 UoW (事务) 中多次调用
+        print(f"TEST DEBUG: About to call get_or_create_head with content_id={content_id!r}")
         head_id1, rev_no1 = await uow.translations.get_or_create_head(
             project_id, content_id, "de", "-"
         )
+        print(f"TEST DEBUG: First call returned head_id={head_id1}, rev_no={rev_no1}")
         head_id2, rev_no2 = await uow.translations.get_or_create_head(
             project_id, content_id, "de", "-"
         )
+        print(f"TEST DEBUG: Second call returned head_id={head_id2}, rev_no={rev_no2}")
 
         assert head_id1 == head_id2
         assert rev_no1 == rev_no2 == 0

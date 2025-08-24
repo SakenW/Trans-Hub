@@ -1,30 +1,41 @@
-# packages/server/alembic/versions/platform/0004_outbox_schema.py
 """
-L4-platform-schema-0004_outbox.py
-职责：Outbox 表结构（收紧：NOT NULL project_id、复合幂等键、JSONB 错误）。
+0004_outbox_schema.py (方言感知版)
+职责：Outbox 表结构（最优化：表名 th.outbox，复合幂等键，JSONB 错误字段）。
+对齐基线：MIGRATION_GUIDE §L4 / 白皮书 v3.0 §7.*
 """
 
 from __future__ import annotations
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers
-revision = "0004_outbox_schema"
-down_revision = "0003_aux_tm_tables"
+revision = "0004"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == "postgresql"
+    schema = "th" if is_postgres else None
+
     op.create_table(
-        "outbox_events",
+        "outbox",
         sa.Column(
-            "id", sa.UUID(), server_default=sa.text("gen_random_uuid()"), nullable=False
+            "id",
+            sa.UUID(),
+            server_default=sa.text("gen_random_uuid()") if is_postgres else None,
+            nullable=False,
         ),
         sa.Column("project_id", sa.Text(), nullable=False),
         sa.Column("topic", sa.Text(), nullable=False),
-        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "payload",
+            postgresql.JSONB(astext_type=sa.Text()) if is_postgres else sa.JSON(),
+            nullable=False,
+        ),
         sa.Column("status", sa.Text(), server_default="pending", nullable=False),
         sa.Column(
             "created_at",
@@ -39,7 +50,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "last_error",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()) if is_postgres else sa.JSON(),
             nullable=True,
             comment="结构化错误",
         ),
@@ -47,13 +58,16 @@ def upgrade() -> None:
             "schema_version", sa.Integer(), server_default=sa.text("1"), nullable=False
         ),
         sa.Column("event_id", sa.Text(), nullable=False, comment="业务幂等键"),
-        sa.PrimaryKeyConstraint("id", name="pk_outbox_events"),
+        sa.PrimaryKeyConstraint("id", name="pk_outbox"),
         sa.UniqueConstraint(
             "project_id", "topic", "event_id", name="ux_outbox_project_topic_event"
         ),
-        schema="th",
+        schema=schema,
     )
 
 
 def downgrade() -> None:
-    op.drop_table("outbox_events", schema="th")
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == "postgresql"
+    schema = "th" if is_postgres else None
+    op.drop_table("outbox", schema=schema)

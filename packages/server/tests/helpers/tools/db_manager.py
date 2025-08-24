@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import re
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import AsyncGenerator, Final
+from typing import AsyncGenerator, Final, Generator
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -68,6 +68,30 @@ async def managed_temp_database(
 ) -> AsyncGenerator[URL, None]:
     """
     一个纯粹的异步上下文管理器，接收一个维护库 URL 来创建和销毁临时数据库。
+    """
+    temp_db_name = f"{prefix}{uuid.uuid4().hex[:8]}"
+    if not SAFE_DBNAME_RE.match(temp_db_name):
+        raise ValueError(f"生成的临时库名不合法：{temp_db_name}")
+
+    # 保留原始URL中的所有查询参数（包括schema信息）
+    temp_db_url = maint_url.set(database=temp_db_name)
+
+    # 先清理可能存在的残留
+    drop_db(maint_url, temp_db_name)
+    create_db(maint_url, temp_db_name)
+
+    try:
+        yield temp_db_url
+    finally:
+        drop_db(maint_url, temp_db_name)
+
+
+@contextmanager
+def managed_temp_database_sync(
+    maint_url: URL, prefix: str = "th_test_"
+) -> Generator[URL, None, None]:
+    """
+    一个纯粹的同步上下文管理器，用于创建和销毁临时数据库。
     """
     temp_db_name = f"{prefix}{uuid.uuid4().hex[:8]}"
     if not SAFE_DBNAME_RE.match(temp_db_name):

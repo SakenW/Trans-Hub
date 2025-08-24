@@ -4,6 +4,7 @@
 [v3.0.0 重构版]
 """
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -38,7 +39,7 @@ async def example_runner(
         db_file.unlink()
 
     # 1. 使用标准引导程序加载配置，并允许覆盖
-    # 注意：示例使用 "prod" 模式，因为它不应该依赖 .env.test
+    # 注意：示例使用 "prod" 模式，因为它不应该依赖测试环境配置
     # 我们通过 os.environ 注入覆盖，模拟真实部署场景
     database_url = f"sqlite+aiosqlite:///{db_file.resolve()}"
     os.environ["TRANSHUB_DATABASE__URL"] = database_url

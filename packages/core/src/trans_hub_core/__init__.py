@@ -13,7 +13,7 @@ from .interfaces import (
 )
 from .types import (
     Comment, ContentItem, EngineBatchItemResult, EngineError, EngineSuccess,
-    Event, ProcessingContext, TranslationHead, TranslationRevision,
+    Event, TranslationHead, TranslationRevision,
     TranslationStatus,
 )
 # [修复] 从 uow 导入 IOutboxRepository
@@ -31,7 +31,7 @@ __all__ = [
     "RateLimiter", "QueueProducer", "StreamProducer",
     # from types.py
     "TranslationStatus", "EngineSuccess", "EngineError",
-    "EngineBatchItemResult", "ContentItem", "ProcessingContext",
+    "EngineBatchItemResult", "ContentItem",
     "TranslationHead", "TranslationRevision", "Comment", "Event",
     # from uow.py
     "IUnitOfWork", "IContentRepository", "ITranslationRepository",

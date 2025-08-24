@@ -1,20 +1,14 @@
-# packages/server/alembic/versions/policy/0007_rls_policies.py
-"""
-L3-policy-0007_rls_policies.py
-职责：allowed_projects() + 统一 RLS（默认拒绝）。
-"""
-
 from __future__ import annotations
+
 from alembic import op
 
-# revision identifiers
-revision = "0007_rls_policies"
-down_revision = "0006_behavioral_objects"
+revision = "0007"
+down_revision = "0006"
 branch_labels = None
 depends_on = None
 
-SQL_UP = r"""
-CREATE OR REPLACE FUNCTION th.allowed_projects() RETURNS TEXT[] LANGUAGE plpgsql STABLE AS $$
+SQL_UP_COMMANDS = [
+    r"""CREATE OR REPLACE FUNCTION th.allowed_projects() RETURNS TEXT[] LANGUAGE plpgsql STABLE AS $$
 DECLARE v TEXT := current_setting('th.allowed_projects', true);
 BEGIN
   IF v IS NULL OR btrim(v) = '' THEN
@@ -22,9 +16,8 @@ BEGIN
   END IF;
   RETURN string_to_array(regexp_replace(v, '\s+', '', 'g'), ',');
 END;
-$$;
-
-DO $$
+$$;""",
+    r"""DO $$
 DECLARE
   tables_with_rls TEXT[] := ARRAY[
     'projects','content','trans_rev','trans_head','resolve_cache',
@@ -43,11 +36,11 @@ BEGIN
       t_name
     );
   END LOOP;
-END; $$;
-"""
+END; $$;""",
+]
 
-SQL_DOWN = r"""
-DO $$
+SQL_DOWN_COMMANDS = [
+    r"""DO $$
 DECLARE
   tables_with_rls TEXT[] := ARRAY[
     'projects','content','trans_rev','trans_head','resolve_cache',
@@ -59,14 +52,22 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS p_%1$s_rls ON th.%1$s;', t_name);
     EXECUTE format('ALTER TABLE th.%1$s DISABLE ROW LEVEL SECURITY;', t_name);
   END LOOP;
-END; $$;
-DROP FUNCTION IF EXISTS th.allowed_projects() CASCADE;
-"""
+END; $$;""",
+    "DROP FUNCTION IF EXISTS th.allowed_projects() CASCADE;",
+]
 
 
 def upgrade() -> None:
-    op.execute(SQL_UP)
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    for command in SQL_UP_COMMANDS:
+        op.execute(command)
 
 
 def downgrade() -> None:
-    op.execute(SQL_DOWN)
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    for command in SQL_DOWN_COMMANDS:
+        op.execute(command)

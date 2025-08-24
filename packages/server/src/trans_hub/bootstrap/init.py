@@ -1,4 +1,4 @@
-# packages/server/src/trans_hub/bootstrap.py
+# packages/server/src/trans_hub/bootstrap/init.py
 """
 应用引导程序。
 
@@ -10,46 +10,28 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, Any
+from typing import Literal
 
 import structlog
-
-from trans_hub.application import Coordinator
-from trans_hub.application.resolvers import TranslationResolver
-from trans_hub.application.services import (
-    CommentingService,
-    RequestTranslationService,
-    RevisionLifecycleService,
-    TranslationQueryService,
-)
 from trans_hub.config import TransHubConfig
-from trans_hub.infrastructure.db import (
-    create_async_db_engine,
-    create_async_sessionmaker,
-)
-from trans_hub.infrastructure.uow import SqlAlchemyUnitOfWork, UowFactory
+
+# [新增] 导入 DI 容器
+from trans_hub.di.container import AppContainer
 from trans_hub.management.config_utils import mask_db_url
 
-SERVER_ROOT_DIR = Path(__file__).resolve().parents[2]
+# [关键修复] parents[3] 才指向 packages/server 目录
+SERVER_ROOT_DIR = Path(__file__).resolve().parents[3]
 MONOREPO_ROOT = SERVER_ROOT_DIR.parent.parent
 logger = structlog.get_logger("trans_hub.bootstrap")
 
 
 # --- .env 加载逻辑 ---
 def _load_dotenv_files(env_mode: Literal["prod", "dev", "test"]) -> list[Path]:
-    """根据环境模式，确定并加载相应的 .env 文件。"""
+    """加载统一的 .env 文件。"""
     files_to_load: list[Path] = []
     base_env = SERVER_ROOT_DIR / ".env"
     if base_env.is_file():
         files_to_load.append(base_env)
-
-    dev_env = SERVER_ROOT_DIR / ".env.dev"
-    if env_mode in ("dev", "test") and dev_env.is_file():
-        files_to_load.append(dev_env)
-
-    test_env = SERVER_ROOT_DIR / ".env.test"
-    if env_mode == "test" and test_env.is_file():
-        files_to_load.append(test_env)
 
     logger.debug(
         "Dotenv files determined for loading",
@@ -90,67 +72,91 @@ def create_app_config(env_mode: Literal["prod", "dev", "test"]) -> TransHubConfi
     """加载、验证并返回应用配置对象。"""
     _ensure_no_legacy_prefix()
     _load_dotenv_files(env_mode)
-    config = TransHubConfig()
-    logger.debug(
-        "Config instance created",
-        env_mode=env_mode,
-        # [修改] 使用新的工具函数进行安全打印
-        final_db_url=mask_db_url(config.database.url),
-        final_maint_url=mask_db_url(config.maintenance_database_url)
-        if config.maintenance_database_url
-        else None,
+    
+    try:
+        config = TransHubConfig(app_env=env_mode)
+        logger.debug(
+            "Config instance created",
+            env_mode=env_mode,
+            # [修改] 使用新的工具函数进行安全打印
+            final_db_url=mask_db_url(config.database.url),
+            final_maint_url=mask_db_url(config.maintenance_database_url)
+            if config.maintenance_database_url
+            else None,
+        )
+        return config
+    except Exception as e:
+        logger.error(
+            "Failed to create config",
+            env_mode=env_mode,
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        raise
+
+
+# [删除] 所有旧的 create_* 工厂函数
+# def create_uow_factory(config: TransHubConfig) -> tuple[UowFactory, Any]: ...
+# async def create_coordinator(config: TransHubConfig) -> tuple[Coordinator, Any]: ...
+
+
+from sqlalchemy.ext.asyncio import AsyncEngine
+from trans_hub.management.config_utils import validate_database_connection as _validate_db_connection
+
+
+def validate_database_connection(config: TransHubConfig) -> bool:
+    """验证数据库连接是否可用。"""
+    return _validate_db_connection(
+        database_url=config.database.url,
+        maintenance_url=config.maintenance_database_url,
+        connection_type="应用"
     )
+
+
+def load_config_with_validation(env_mode: Literal["prod", "dev", "test"]) -> TransHubConfig:
+    """统一的配置加载入口，包含数据库连接验证。"""
+    config = create_app_config(env_mode)
+    
+    # 在测试环境中验证数据库连接
+    if env_mode == "test":
+        if not validate_database_connection(config):
+            raise RuntimeError(
+                f"数据库连接验证失败。请检查：\n"
+                f"1. 数据库服务器是否运行在 {config.database.url.host}:{config.database.url.port}\n"
+                f"2. 用户 '{config.database.url.username}' 的密码和权限是否正确\n"
+                f"3. 数据库 '{config.database.url.database}' 是否存在\n"
+                f"4. 网络连接是否正常"
+            )
+    
     return config
 
 
-def create_uow_factory(config: TransHubConfig) -> tuple[UowFactory, Any]:
-    """创建 UoW 工厂和底层的数据库引擎。"""
-    db_engine = create_async_db_engine(config)
-    sessionmaker = create_async_sessionmaker(db_engine)
-
-    def uow_factory():
-        return SqlAlchemyUnitOfWork(sessionmaker)
-
-    return uow_factory, db_engine
-
-
-async def create_coordinator(config: TransHubConfig) -> tuple[Coordinator, Any]:
+def bootstrap_app(
+    env_mode: Literal["prod", "dev", "test"],
+    db_engine: AsyncEngine | None = None,
+) -> AppContainer:
     """
-    创建并组装一个完全配置的 Coordinator 实例及其所有依赖的服务。
-    返回 Coordinator 实例和数据库引擎（用于生命周期管理）。
+    应用引导程序：加载配置、初始化并装配 DI 容器。
+    这是所有应用入口的统一启动点。
     """
-    uow_factory, db_engine = create_uow_factory(config)
+    config = load_config_with_validation(env_mode=env_mode)
 
-    _stream_producer, cache_handler = None, None
-    if config.redis.url:
-        from trans_hub.infrastructure.redis._client import get_redis_client
-        from trans_hub.infrastructure.redis.cache import RedisCacheHandler
-        from trans_hub.infrastructure.redis.streams import RedisStreamProducer
+    container = AppContainer()
+    container.config.override(config)
 
-        redis_client = await get_redis_client(config)
-        RedisStreamProducer(redis_client)
-        cache_handler = RedisCacheHandler(redis_client, config.redis.key_prefix)
-        logger.info("Redis 基础设施已初始化 (Stream, Cache)。")
+    # 如果测试环境提供了专用的数据库引擎，则直接覆盖
+    if db_engine:
+        container.db_engine.override(db_engine)
 
-    # 1. 实例化所有依赖和服务
-    resolver = TranslationResolver(uow_factory)
-
-    request_service = RequestTranslationService(uow_factory, config)
-    lifecycle_service = RevisionLifecycleService(uow_factory, config)
-    commenting_service = CommentingService(uow_factory, config)
-    query_service = TranslationQueryService(
-        uow_factory, config, cache_handler, resolver
+    container.wire(
+        modules=[
+            __name__,
+            "trans_hub.adapters.cli.main",
+            "trans_hub.adapters.cli.commands.db",
+            "trans_hub.adapters.cli.commands.request",
+            "trans_hub.adapters.cli.commands.status",
+            "trans_hub.adapters.cli.commands.worker",
+        ]
     )
 
-    # 2. 将所有服务注入到 Coordinator 门面
-    coordinator = Coordinator(
-        request_service=request_service,
-        lifecycle_service=lifecycle_service,
-        commenting_service=commenting_service,
-        query_service=query_service,
-    )
-
-    # 3. 执行简单的初始化（如果需要）
-    await coordinator.initialize()
-
-    return coordinator, db_engine
+    return container

@@ -1,9 +1,10 @@
-# packages/server/src/trans_hub/infrastructure/engines/base.py
+# packages/server/src/trans_hub/adapters/engines/base.py
 """
 定义了所有翻译引擎的抽象基类和通用配置。
 """
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 

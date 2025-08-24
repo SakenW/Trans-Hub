@@ -1,0 +1,104 @@
+[importlinter]
+root_packages =
+    trans_hub_core
+    trans_hub_uida
+    trans_hub
+
+[importlinter:contract:layering-contract]
+type = layers
+layers =
+    core
+    domain
+    application
+    infrastructure
+    adapters
+    di
+    bootstrap
+    # 将 workers 和 management 视为特殊的顶层应用，它们可以使用 DI 和 bootstrap
+    workers
+    management
+containers =
+    trans_hub_core
+    trans_hub_uida
+    trans_hub
+modules =
+    # 核心契约，任何层都可以依赖
+    core:
+        trans_hub_core
+    # 领域层，纯粹且独立
+    domain:
+        trans_hub.domain
+    # 应用服务层，编排领域和基础设施接口
+    application:
+        trans_hub.application
+    # 基础设施实现层
+    infrastructure:
+        trans_hub.infrastructure
+    # 适配器层 (CLI, 引擎, HTTP, TUI等)
+    adapters:
+        trans_hub.adapters
+    # 依赖注入容器
+    di:
+        trans_hub.di
+    # 启动引导程序
+    bootstrap:
+        trans_hub.bootstrap
+    # 后台 Worker
+    workers:
+        trans_hub.workers
+    # 管理与运维
+    management:
+        trans_hub.management
+
+#
+# 定义层与层之间的合法依赖关系 (单向流)
+#
+chain =
+    # 核心流: adapters -> application -> domain -> core
+    adapters -> application
+    application -> domain
+    domain -> core
+
+    # 应用层可以使用基础设施的接口 (通过UoW)，但不能直接用实现
+    application -> infrastructure
+
+    # 基础设施层可以依赖领域和核心
+    infrastructure -> domain
+    infrastructure -> core
+
+    # 启动程序负责装配所有东西
+    bootstrap -> di
+    bootstrap -> adapters
+    bootstrap -> workers
+    bootstrap -> management
+
+    # DI容器负责了解所有层级以进行装配
+    di -> adapters
+    di -> workers
+    di -> management
+    di -> application
+    di -> infrastructure
+    di -> domain
+    di -> core
+
+    # Worker 和 Management 是应用的入口，可以使用引导程序
+    workers -> bootstrap
+    management -> bootstrap
+
+#
+# 定义被禁止的非法依赖关系
+#
+forbidden =
+    # 核心原则：禁止任何反向或跨层依赖
+    domain -> application
+    domain -> infrastructure
+    domain -> adapters
+    application -> adapters
+    infrastructure -> adapters
+
+    # DI容器是单向的，任何层都不能反向依赖它
+    core -> di
+    domain -> di
+    application -> di
+    infrastructure -> di
+    adapters -> di

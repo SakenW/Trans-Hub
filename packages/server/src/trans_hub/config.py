@@ -28,6 +28,9 @@ class DatabaseSettings(BaseModel):
         description="异步 DSN（sqlite+aiosqlite / postgresql+asyncpg / mysql+aiomysql）",
     )
     echo: bool = Field(default=False, description="SQLAlchemy echo（调试）")
+    default_schema: str | None = Field(
+        default="th", description="所有表默认使用的数据库 schema"
+    )
 
     @field_validator("url")
     @classmethod
@@ -118,6 +121,9 @@ class TransHubConfig(BaseSettings):
     Trans-Hub 核心配置模型。
     """
 
+    # --- 应用环境 ---
+    app_env: Literal["prod", "dev", "test"] = "dev"
+
     # --- 服务器通用 ---
     debug: bool = True
     host: str = "0.0.0.0"
@@ -143,8 +149,11 @@ class TransHubConfig(BaseSettings):
     db_pool_pre_ping: bool = True
     db_echo: bool = False
 
-    # --- 维护库 ---
+    # --- 维护库与测试库 ---
     maintenance_database_url: Optional[str] = None
+    test_user_database_url: Optional[str] = Field(
+        default=None, description="用于 RLS 测试的低权限用户 DSN"
+    )
 
     # --- 语言/引擎/批量/GC ---
     default_source_lang: Optional[str] = None

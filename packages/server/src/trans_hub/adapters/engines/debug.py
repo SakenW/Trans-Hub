@@ -1,4 +1,4 @@
-# packages/server/src/trans_hub/infrastructure/engines/debug.py
+# packages/server/src/trans_hub/adapters/engines/debug.py
 """
 提供一个用于开发和测试的调试翻译引擎。
 """
@@ -6,7 +6,8 @@
 import asyncio  # [修复] 导入 asyncio
 
 from trans_hub.config import DebugEngineSettings
-from trans_hub_core.types import EngineBatchItemResult, EngineSuccess, EngineError
+from trans_hub_core.types import EngineBatchItemResult, EngineError, EngineSuccess
+
 from .base import BaseTranslationEngine
 
 

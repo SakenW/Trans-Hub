@@ -1,86 +1,110 @@
-# packages/server/src/trans_hub/presentation/cli/commands/request.py
+# src/trans_hub/adapters/cli/commands/request.py
 """
-处理翻译请求提交的 CLI 命令。
+CLI 命令: `request`
+
+该命令族负责处理所有与翻译请求相关的操作，例如创建新的翻译请求。
 """
 
+import asyncio
 import json
 from typing import Annotated
 
 import typer
-from rich.console import Console
+from dependency_injector.wiring import Provide, inject
+from rich import print_json
 
-from .._utils import get_coordinator
-from .._state import CLISharedState
-from .._shared_options import (
-    PROJECT_ID_OPTION,
-    NAMESPACE_OPTION,
-    KEYS_JSON_OPTION,
-    ACTOR_OPTION,
-)
+from trans_hub.application.coordinator import Coordinator
+from trans_hub.di.container import AppContainer
 
-app = typer.Typer(help="提交和管理翻译请求。")
-console = Console()
+# --- CLI 命令定义 ---
+
+app = typer.Typer(name="request", help="创建和管理翻译请求。")
 
 
-@app.command("new")
-async def request_new(
-    ctx: typer.Context,
-    project_id: PROJECT_ID_OPTION,
-    namespace: NAMESPACE_OPTION,
-    keys_json: KEYS_JSON_OPTION,
-    source_payload_json: Annotated[
-        str, typer.Option("--payload", "-d", help="要翻译的源内容 (JSON 字符串)。")
-    ],
-    target_langs: Annotated[
-        list[str],
-        typer.Option("--target", "-t", help="一个或多个目标语言代码 (可多次使用)。"),
-    ],
-    source_lang: Annotated[
-        str | None,
-        typer.Option("--source", "-s", help="源语言代码 (可选，若配置中已提供)。"),
-    ] = None,
-    variant_key: Annotated[
-        str, typer.Option("--variant", "-v", help="语言内变体 (可选)。")
-    ] = "-",
-    actor: ACTOR_OPTION = "cli_user",
+@inject
+async def _request_new_logic(
+    project_id: str,
+    source_locale: str,
+    target_locales: list[str],
+    keys: dict[str, str],
+    coordinator: Coordinator = Provide[AppContainer.coordinator],
 ) -> None:
-    """
-    向 Trans-Hub 提交一个新的 UIDA 翻译请求。
-    """
-    state: CLISharedState = ctx.obj
+    """异步的业务逻辑实现。"""
+    # 1. 调用应用服务
+    request_id = await coordinator.create_request(
+        project_id=project_id,
+        source_locale=source_locale,
+        target_locales=target_locales,
+        keys=keys,
+    )
 
+    # 2. 打印结果
+    result = {
+        "status": "success",
+        "message": "翻译请求已成功创建。",
+        "request_id": str(request_id),
+    }
+    print_json(data=result)
+
+
+@app.command(
+    name="new",
+    help="创建一个新的翻译请求。",
+    no_args_is_help=True,
+)
+def request_new_cli(
+    project_id: Annotated[
+        str,
+        typer.Option(
+            "--project",
+            "-p",
+            help="项目 ID。",
+            show_default=False,
+        ),
+    ],
+    source_locale: Annotated[
+        str,
+        typer.Option(
+            "--source",
+            "-s",
+            help="源语言代码 (BCP 47)。",
+            show_default=False,
+        ),
+    ],
+    target_locales: Annotated[
+        str,
+        typer.Option(
+            "--targets",
+            "-t",
+            help="目标语言代码列表，以逗号分隔。",
+            show_default=False,
+        ),
+    ],
+    keys: Annotated[
+        str,
+        typer.Option(
+            "--keys",
+            "-k",
+            help="要翻译的键值对 (JSON 格式字符串)。",
+            show_default=False,
+        ),
+    ],
+) -> None:
+    """同步的 CLI 接口函数，内部调用异步业务逻辑。"""
+    # 1. 解析输入
     try:
-        keys = json.loads(keys_json)
-        source_payload = json.loads(source_payload_json)
-    except json.JSONDecodeError as e:
-        console.print(f"[bold red]❌ JSON 格式错误: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        keys_data = json.loads(keys)
+    except json.JSONDecodeError:
+        raise typer.BadParameter(f"'{keys}' 不是一个有效的 JSON。", param_hint="--keys")
 
-    if not target_langs:
-        console.print("[bold red]❌ 错误: 必须至少提供一个 --target 语言。[/bold red]")
-        raise typer.Exit(code=1)
+    target_locales_list = [locale.strip() for locale in target_locales.split(",")]
 
-    console.print("[cyan]正在提交翻译请求...[/cyan]")
-
-    async with get_coordinator(state) as coordinator:
-        # [修复] 从 state 中获取配置，而不是从 coordinator
-        final_source_lang = source_lang or state.config.default_source_lang
-        if not final_source_lang:
-            console.print(
-                "[bold red]❌ 错误: 必须通过 --source 或在配置中提供源语言。[/bold red]"
-            )
-            raise typer.Exit(code=1)
-
-        content_id = await coordinator.request_translation(
+    # 2. 调用异步业务逻辑
+    asyncio.run(
+        _request_new_logic(
             project_id=project_id,
-            namespace=namespace,
-            keys=keys,
-            source_payload=source_payload,
-            target_langs=target_langs,
-            source_lang=final_source_lang,
-            variant_key=variant_key,
-            actor=actor,
+            source_locale=source_locale,
+            target_locales=target_locales_list,
+            keys=keys_data,
         )
-        console.print("[bold green]✅ 翻译请求已成功提交！[/bold green]")
-        console.print(f"  - [dim]内容 ID (Content ID):[/dim] {content_id}")
-        console.print("  - [dim]TM 未命中时，任务已加入后台队列等待处理。[/dim]")
+    )

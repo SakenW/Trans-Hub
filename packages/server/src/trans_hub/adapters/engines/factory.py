@@ -1,4 +1,4 @@
-# packages/server/src/trans_hub/infrastructure/engines/factory.py
+# packages/server/src/trans_hub/adapters/engines/factory.py
 """
 翻译引擎工厂
 
@@ -7,15 +7,17 @@
 """
 
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 import structlog
-
 from trans_hub_core.exceptions import ConfigurationError, EngineNotFoundError
-from . import discover_engines, ENGINE_REGISTRY
+
+from . import ENGINE_REGISTRY, discover_engines
 
 if TYPE_CHECKING:
     from trans_hub.config import TransHubConfig
+
     from .base import BaseTranslationEngine
 
 logger = structlog.get_logger(__name__)

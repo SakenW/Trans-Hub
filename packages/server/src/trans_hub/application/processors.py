@@ -7,7 +7,6 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import structlog
-
 from trans_hub.domain import tm as tm_domain
 from trans_hub_core.types import (
     ContentItem,
@@ -17,7 +16,7 @@ from trans_hub_core.types import (
 )
 
 if TYPE_CHECKING:
-    from trans_hub.infrastructure.engines.base import BaseTranslationEngine
+    from trans_hub.adapters.engines.base import BaseTranslationEngine
     from trans_hub_core.interfaces import StreamProducer
     from trans_hub_core.uow import IUnitOfWork
 

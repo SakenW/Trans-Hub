@@ -32,11 +32,14 @@ async def setup_trigger_base_data(uow_factory: UowFactory) -> dict:
     """
     (函数级) 使用 uow_factory 准备所有触发器测试所需的基础数据。
     """
-    project_id = "trigger_proj"
-    content_id = "content_for_trigger"
-    rev1_id = "rev1_for_trigger"
-    rev2_id = "rev2_for_trigger"
-    head_id = "head_for_trigger"
+    import uuid
+    # 使用随机ID避免测试间的数据冲突
+    suffix = uuid.uuid4().hex[:8]
+    project_id = f"trigger_proj_{suffix}"
+    content_id = f"content_for_trigger_{suffix}"
+    rev1_id = f"rev1_for_trigger_{suffix}"
+    rev2_id = f"rev2_for_trigger_{suffix}"
+    head_id = f"head_for_trigger_{suffix}"
 
     async with uow_factory() as uow:
         # 使用仓库方法或原生 SQL 创建基础数据

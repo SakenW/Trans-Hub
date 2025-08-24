@@ -102,24 +102,24 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
             project_id=project_id,
             content_id=content_id,
             target_lang=target_lang,
-            variant_key=variant_key,
             status=TranslationStatus.DRAFT,
             revision_no=0,
             src_payload_json=content.source_payload_json,
         )
+        initial_rev.variant_key = variant_key
         self._session.add(initial_rev)
         await self._session.flush()
 
         new_head = ThTransHead(
-            id=str(uuid.uuid4()),
             project_id=project_id,
             content_id=content_id,
             target_lang=target_lang,
-            variant_key=variant_key,
             current_rev_id=initial_rev.id,
             current_status=TranslationStatus.DRAFT,
             current_no=0,
         )
+        new_head.variant_key = variant_key
+        
         self._session.add(new_head)
         await self._session.flush()
 
@@ -146,9 +146,13 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
         if not content:
             raise NoResultFound(f"内容记录未找到: content_id={data['content_id']}")
 
+        # 从data中提取variant_key，因为该字段设置了init=False
+        variant_key = data.pop("variant_key", "-")
+        
         new_rev = ThTransRev(
             id=str(uuid.uuid4()), src_payload_json=content.source_payload_json, **data
         )
+        new_rev.variant_key = variant_key
         self._session.add(new_rev)
         await self._session.flush()  # 确保 new_rev.id 可用
 

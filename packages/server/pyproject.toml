@@ -13,27 +13,31 @@ packages = [{ include = "trans_hub", from = "src" }]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-# 核心依赖（对齐至稳定最新版）
-pydantic = "^2.11.6"                # 2025-08 最新稳定版 
-pydantic-settings = "^2.6.1"         # 最新稳定版 
-structlog = "^24.4.0"                # 最新稳定版 
 
-# 引用本地包
+# --- 核心框架 ---
+pydantic = "^2.11.6"         # 数据校验与模型
+pydantic-settings = "^2.6.1" # 从环境加载配置
+structlog = "^24.4.0"        # 结构化日志
+
+# --- 本地 Monorepo 包 ---
 trans-hub-core = { path = "../core", develop = true }
 trans-hub-uida = { path = "../uida", develop = true }
 
-# 数据库与迁移
-sqlalchemy = { version = "^2.0.36", extras = ["asyncio"] }  # 最新 2.0.x 
-alembic = "^1.14.0"                   # 最新稳定版 
-greenlet = "^3.1.0"                   # 最新稳定版 
+# --- 数据库与迁移 ---
+sqlalchemy = { version = "^2.0.36", extras = ["asyncio"] }
+alembic = "^1.14.0"
+greenlet = "^3.1.0"                                        # SQLAlchemy 异步模式依赖
+dependency-injector = "^4.41.0"                            # [新增] DI 容器
+
+# --- CLI 框架 (必装) ---
+typer = { version = ">=0.15.1", extras = ["all"] }
 
 # --- 可选运行时驱动 ---
-asyncpg = { version = ">=0.30.0", optional = true }   # 最新主线 
-aiosqlite = { version = ">=0.20.0", optional = true } # 最新主线 
-redis = { version = ">=5.1.1", extras = ["hiredis"], optional = true }  # 最新稳定版 :contentReference[oaicite:8]{index=8}
-
-# CLI 运行期依赖（从可选改为必装，确保入口脚本可用）
-typer = { version = ">=0.15.1", extras = ["all"] }    # 最新稳定版 
+asyncpg = { version = ">=0.30.0", optional = true } # PostgreSQL 异步驱动
+aiosqlite = { version = ">=0.20.0", optional = true } # SQLite 异步驱动
+redis = { version = ">=5.1.1", extras = [
+    "hiredis",
+], optional = true } # Redis 客户端 (hiredis 加速)
 
 [tool.poetry.extras]
 postgres = ["asyncpg"]
@@ -42,23 +46,42 @@ redis = ["redis"]
 
 # --- 开发与测试依赖 ---
 [tool.poetry.group.dev.dependencies]
-pytest = ">=8.4.1"                 # 最新稳定版 
-pytest-asyncio = ">=1.1.0"         # 最新稳定版（Py3.12 支持良好） :contentReference[oaicite:11]{index=11}
-pytest-cov = ">=6.2.1"             # 最新稳定版 :contentReference[oaicite:12]{index=12}
-ruff = ">=0.12.9"                  # 最新稳定版 :contentReference[oaicite:13]{index=13}
-mypy = ">=1.17.1"                  # 最新稳定版 :contentReference[oaicite:14]{index=14}
-rich = ">=14.1.0"                  # 最新稳定版 :contentReference[oaicite:15]{index=15}
-questionary = ">=2.1.0"            # 最新稳定版 :contentReference[oaicite:16]{index=16}
+# 测试框架
+pytest = ">=8.4.1"
+pytest-asyncio = ">=1.1.0"
+nest-asyncio = ">=1.6.0"   # [新增] 允许在已有事件循环中嵌套运行 asyncio.run()
+pytest-cov = ">=6.2.1"
 
-# 测试会执行迁移与维护库操作，需要同步驱动
-psycopg = { version = ">=3.2.3", extras = ["binary"] } # 最新稳定版 
-# 为了本地与CI测试默认具备 Postgres 异步驱动，加入 dev 组
-asyncpg = ">=0.30.0"  # 与主依赖保持一致（避免因 extras 未启用导致缺库） 
+# 代码质量与静态分析
+ruff = ">=0.12.9"       # Linter & Formatter
+mypy = ">=1.17.1"       # 静态类型检查
+import-linter = ">=2.4" # [新增] 架构分层守护
+
+# 开发体验与工具
+rich = ">=14.1.0"       # 漂亮的 CLI/日志输出
+questionary = ">=2.1.0" # 交互式 CLI
+
+# 测试所需的数据库驱动
+# (测试需要同步驱动用于建/删库，也需要异步驱动用于运行测试)
+# [修复] Alembic 默认依赖的同步驱动
+psycopg = { version = ">=3.2.3", extras = ["binary"] } # PostgreSQL 同步驱动
+asyncpg = ">=0.30.0"                                   # 确保 asyncpg 在开发环境中始终可用
 
 [tool.poetry.scripts]
-trans-hub = "trans_hub.presentation.cli.main:app"
+# CLI 入口点
+trans-hub = "trans_hub.adapters.cli.main:app"
 
 [tool.pytest.ini_options]
-# 注意：pytest-asyncio 1.x 推荐 auto；如你的夹具策略为 STRICT，可改回 strict
 asyncio_mode = "auto"
-pythonpath = [".", "src", "tests"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "unit: Mark a test as a unit test (fast, no I/O).",
+    "integration: Mark a test as an integration test (can use local DB/cache).",
+    "e2e: Mark a test as an end-to-end test (from external boundary).",
+    "db: Mark a test as database-dependent.",
+    "slow: Mark a test as slow to run.",
+    "migrations: Mark a test related to Alembic migrations.",
+    "invariants: Mark a test that checks architectural invariants.",
+    "engine: Mark a test related to translation engines.",
+    "tm: Mark a test related to translation memory logic.",
+]

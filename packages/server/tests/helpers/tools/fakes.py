@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import Any
 
-from trans_hub.infrastructure.engines.base import (
-    BaseTranslationEngine,
+from trans_hub.adapters.engines.base import (
     BaseEngineConfig,
+    BaseTranslationEngine,
 )
-from trans_hub_core.types import EngineBatchItemResult, EngineSuccess, EngineError
+from trans_hub_core.interfaces import StreamProducer
+from trans_hub_core.types import EngineBatchItemResult, EngineError, EngineSuccess
 
 
 class FakeEngineConfig(BaseEngineConfig):
@@ -43,3 +46,21 @@ class FakeTranslationEngine(BaseTranslationEngine[FakeEngineConfig]):
                 EngineSuccess(translated_text=f"Translated('{text}') to {target_lang}")
             )
         return results
+
+
+class FakeStreamProducer(StreamProducer):
+    """一个用于测试的、在内存中记录事件的假事件流生产者。"""
+
+    def __init__(self):
+        self.published_events: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.call_count = 0
+
+    async def publish(self, stream_name: str, event_data: dict[str, Any]) -> None:
+        """记录发布的事件，而不是真正发送它。"""
+        self.published_events[stream_name].append(event_data)
+        self.call_count += 1
+
+    def clear(self):
+        """清空所有记录的事件。"""
+        self.published_events.clear()
+        self.call_count = 0

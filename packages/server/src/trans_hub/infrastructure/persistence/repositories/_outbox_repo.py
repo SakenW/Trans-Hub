@@ -2,13 +2,14 @@
 """事务性发件箱仓库的 SQLAlchemy 实现。"""
 
 from __future__ import annotations
-from typing import Any
+
 import uuid
+from typing import Any
 
-from sqlalchemy import select, update, func
-
+from sqlalchemy import func, select, update
 from trans_hub.infrastructure.db._schema import ThOutboxEvents
 from trans_hub_core.uow import IOutboxRepository
+
 from ._base_repo import BaseRepository
 
 
@@ -20,7 +21,10 @@ class SqlAlchemyOutboxRepository(BaseRepository, IOutboxRepository):
         self, *, project_id: str, event_id: str, topic: str, payload: dict[str, Any]
     ) -> None:
         event = ThOutboxEvents(
-            project_id=project_id, event_id=event_id, topic=topic, payload=payload
+            project_id=project_id,
+            event_id=event_id,
+            topic=topic,
+            payload=payload,
         )
         self._session.add(event)
 

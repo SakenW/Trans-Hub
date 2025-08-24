@@ -8,11 +8,10 @@ import signal
 from typing import Any
 
 import structlog
-
+from trans_hub.adapters.engines.base import BaseTranslationEngine
+from trans_hub.adapters.engines.factory import create_engine_instance
 from trans_hub.application.processors import TranslationProcessor
 from trans_hub.config import TransHubConfig
-from trans_hub.infrastructure.engines.base import BaseTranslationEngine
-from trans_hub.infrastructure.engines.factory import create_engine_instance
 from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.exceptions import TransHubError
 

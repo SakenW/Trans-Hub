@@ -6,11 +6,13 @@
 """
 
 from ._commenting import CommentingService
+from ._event_publisher import EventPublisher  # [新增] 导入 EventPublisher
 from ._request_translation import RequestTranslationService
 from ._revision_lifecycle import RevisionLifecycleService
 from ._translation_query import TranslationQueryService
 
 __all__ = [
+    "EventPublisher",  # [新增] 添加到 __all__
     "CommentingService",
     "RequestTranslationService",
     "RevisionLifecycleService",

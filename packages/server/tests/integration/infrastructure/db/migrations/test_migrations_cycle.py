@@ -1,19 +1,20 @@
 # packages/server/tests/integration/infrastructure/db/migrations/test_migrations_cycle.py
 from __future__ import annotations
+
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy.engine import make_url
 
+# [最终修复] 导入 bootstrap 以获取配置
+from trans_hub.bootstrap.init import create_app_config
+
 # [最终修复] 更新导入路径
 from tests.helpers.tools.db_manager import (
-    managed_temp_database,
     _alembic_ini,
     _cfg_safe,
+    managed_temp_database,
 )
-
-# [最终修复] 导入 bootstrap 以获取配置
-from trans_hub.bootstrap import create_app_config
 
 pytestmark = [pytest.mark.db, pytest.mark.migrations, pytest.mark.slow]
 

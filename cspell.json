@@ -1,0 +1,30 @@
+{
+  "version": "0.2",
+  "language": "en,zh-CN",
+  "words": [
+    "asyncio",
+    "pytest",
+    "sessionmaker",
+    "structlog",
+    "TransHub",
+    "uida",
+    "usefixtures",
+    "asyncpg",
+    "sqlalchemy",
+    "aiosqlite",
+    "pytest",
+    "pydantic",
+    "structlog",
+    "alembic",
+    "psycopg",
+    "pythonpath",
+    "mypy"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/alembic/versions/**",
+    ".venv",
+    "poetry.lock"
+  ]
+}

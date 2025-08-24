@@ -1,4 +1,4 @@
-# packages/server/src/trans_hub/infrastructure/engines/__init__.py
+# packages/server/src/trans_hub/adapters/engines/__init__.py
 """
 本模块负责动态发现和加载所有可用的翻译引擎。
 """

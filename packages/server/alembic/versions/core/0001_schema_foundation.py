@@ -1,23 +1,34 @@
 """
-L1-core-schema-0001_schema_foundation.py
+0001_schema_foundation.py (方言感知版)
 职责：创建 schema/扩展、通用 ENUM、公共函数（不挂触发器）。
+对齐基线：MIGRATION_GUIDE §L1 / 白皮书 v3.0 §6.*
 """
 
 from __future__ import annotations
+
 from alembic import op
 
 # Alembic identifiers
-revision = "0001_schema_foundation"
+revision = "0001"
 down_revision = None
 branch_labels = None
 depends_on = None
 
-SQL_UP = r"""
-CREATE SCHEMA IF NOT EXISTS th;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+# --- PostgreSQL 特定 DDL ---
 
--- ENUM 定义（幂等）
+SQL_UP_COMMANDS = [
+    "DROP SCHEMA IF EXISTS th CASCADE",
+    "CREATE SCHEMA IF NOT EXISTS th",
+    "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+    "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+    # 确保alembic_version表在th schema中创建
+    r"""
+CREATE TABLE IF NOT EXISTS th.alembic_version (
+    version_num VARCHAR(32) NOT NULL,
+    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+);
+""",
+    r"""
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -41,14 +52,15 @@ BEGIN
     CREATE TYPE th.workflow_state AS ENUM ('draft','in_review','ready','frozen');
   END IF;
 END$$;
-
--- BCP-47 校验
+""",
+    "DROP FUNCTION IF EXISTS th.is_bcp47(TEXT) CASCADE",
+    r"""
 CREATE OR REPLACE FUNCTION th.is_bcp47(p TEXT)
 RETURNS BOOLEAN LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   SELECT p IS NOT NULL AND p ~ '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$'
 $$;
-
--- 变体标准化
+""",
+    r"""
 CREATE OR REPLACE FUNCTION th.variant_normalize()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -60,8 +72,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
--- 自动 updated_at
+""",
+    r"""
 CREATE OR REPLACE FUNCTION th.set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -69,8 +81,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
--- 稳定顺序的 JSONB 文本提取
+""",
+    r"""
 CREATE OR REPLACE FUNCTION th.extract_text(j JSONB)
 RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
   SELECT string_agg(value, ' ' ORDER BY key)
@@ -79,8 +91,8 @@ RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
     FROM jsonb_each_text(coalesce(j, '{}'::jsonb))
   ) t
 $$;
-
--- 禁止 UIDA 修改
+""",
+    r"""
 CREATE OR REPLACE FUNCTION th.forbid_uida_update()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -90,8 +102,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
--- BCP-47 → tsvector 配置映射
+""",
+    r"""
 CREATE OR REPLACE FUNCTION th.tsv_config_for_bcp47(lang TEXT)
 RETURNS regconfig LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
@@ -109,16 +121,17 @@ BEGIN
   END;
 END;
 $$;
-"""
+""",
+]
 
-SQL_DOWN = r"""
-DROP FUNCTION IF EXISTS th.tsv_config_for_bcp47(TEXT) CASCADE;
-DROP FUNCTION IF EXISTS th.forbid_uida_update() CASCADE;
-DROP FUNCTION IF EXISTS th.extract_text(JSONB) CASCADE;
-DROP FUNCTION IF EXISTS th.set_updated_at() CASCADE;
-DROP FUNCTION IF EXISTS th.variant_normalize() CASCADE;
-DROP FUNCTION IF EXISTS th.is_bcp47(TEXT) CASCADE;
-
+SQL_DOWN_COMMANDS = [
+    "DROP FUNCTION IF EXISTS th.tsv_config_for_bcp47(TEXT) CASCADE",
+    "DROP FUNCTION IF EXISTS th.forbid_uida_update() CASCADE",
+    "DROP FUNCTION IF EXISTS th.extract_text(JSONB) CASCADE",
+    "DROP FUNCTION IF EXISTS th.set_updated_at() CASCADE",
+    "DROP FUNCTION IF EXISTS th.variant_normalize() CASCADE",
+    "DROP FUNCTION IF EXISTS th.is_bcp47(TEXT) CASCADE",
+    r"""
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE t.typname='workflow_state' AND n.nspname='th') THEN
@@ -131,16 +144,23 @@ BEGIN
     DROP TYPE th.translation_status;
   END IF;
 END$$;
-
--- 按需决定是否删除扩展（通常不删）
--- DROP EXTENSION IF EXISTS pgcrypto;
--- DROP EXTENSION IF EXISTS pg_trgm;
-"""
+""",
+    # "-- 按需决定是否删除扩展（通常不删）",
+    # "DROP EXTENSION IF EXISTS pgcrypto",
+    # "DROP EXTENSION IF EXISTS pg_trgm",
+    # "DROP SCHEMA IF EXISTS th",
+]
 
 
 def upgrade() -> None:
-    op.execute(SQL_UP)
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        for command in SQL_UP_COMMANDS:
+            op.execute(command)
 
 
 def downgrade() -> None:
-    op.execute(SQL_DOWN)
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        for command in SQL_DOWN_COMMANDS:
+            op.execute(command)

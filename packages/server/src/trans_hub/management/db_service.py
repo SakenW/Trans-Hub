@@ -6,27 +6,25 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
-import json
 from typing import TYPE_CHECKING
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.table import Table
-from sqlalchemy import create_engine, text, Engine, inspect
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import ProgrammingError
-from sqlalchemy.orm import sessionmaker
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-
-from trans_hub.infrastructure.db._schema import Base, ThContent, ThTransHead, ThTransRev
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.table import Table
+from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import sessionmaker
 from trans_hub.config import TransHubConfig
+from trans_hub.infrastructure.db._schema import Base, ThContent, ThTransHead, ThTransRev
 from trans_hub.management.config_utils import mask_db_url  # [新增] 导入工具函数
 
 if TYPE_CHECKING:
@@ -79,23 +77,12 @@ class DbService:
 
     @staticmethod
     def _create_sync_engine(url: URL) -> Engine:
-        """创建带有统一 search_path 的同步引擎。"""
-        if "postgresql" in url.drivername:
-            return create_engine(
-                url,
-                connect_args={"options": "-c search_path=th,public"},
-            )
+        """创建同步引擎。"""
         return create_engine(url)
 
     @staticmethod
     def _create_sync_engine_autocommit(url: URL) -> Engine:
-        """创建带有统一 search_path 且自动提交的同步引擎。"""
-        if "postgresql" in url.drivername:
-            return create_engine(
-                url,
-                connect_args={"options": "-c search_path=th,public"},
-                isolation_level="AUTOCOMMIT",
-            )
+        """创建自动提交的同步引擎。"""
         return create_engine(url, isolation_level="AUTOCOMMIT")
 
     def _get_alembic_cfg(self) -> AlembicConfig:
@@ -107,6 +94,24 @@ class DbService:
         cfg.set_main_option("sqlalchemy.url", safe_url)
         return cfg
 
+    def _apply_version_table_separation_strategy(
+        self, alembic_cfg: AlembicConfig
+    ) -> None:
+        """应用版本表分离策略：确保 alembic_version 表在 public schema，业务表在指定 schema"""
+        import alembic.context
+
+        # 保存原始的 configure 函数
+        original_configure = alembic.context.configure
+
+        def patched_configure(*args, **kwargs):
+            # 强制将 version_table_schema 设置为 None (public schema)
+            kwargs["version_table_schema"] = None
+            return original_configure(*args, **kwargs)
+
+        # 应用 monkey patch
+        alembic.context.configure = patched_configure
+        console.print("[dim]✅ 已应用版本表分离策略[/dim]")
+
     def _run_deep_structure_probe(self, engine: Engine, table: Table):
         """运行深度结构探测。"""
         try:
@@ -114,17 +119,22 @@ class DbService:
             schemas = inspector.get_schema_names()
             table.add_row("探测到的 Schemas", f"{schemas}")
 
-            if "th" in schemas:
-                th_tables = inspector.get_table_names(schema="th")
+            # 获取所有 schema 下的 alembic_version 表
+            alembic_found_in = []
+            for schema in schemas:
+                if inspector.has_table("alembic_version", schema=schema):
+                    alembic_found_in.append(schema)
+
+            if alembic_found_in:
                 table.add_row(
-                    "`th` schema下的表", f"{th_tables if th_tables else '[空]'}"
+                    "`alembic_version` 表位置",
+                    f"[green]✅ 存在于: {alembic_found_in}[/green]",
                 )
-                if "alembic_version" in th_tables:
-                    table.add_row("`th.alembic_version`", "[green]✅ 物理存在[/green]")
-                else:
-                    table.add_row("`th.alembic_version`", "[red]❌ 物理不存在[/red]")
             else:
-                table.add_row("`th` schema", "[red]❌ 不存在[/red]")
+                table.add_row(
+                    "`alembic_version` 表", "[red]❌ 在任何 schema 中都未找到[/red]"
+                )
+
         except Exception as e:
             table.add_row("深度探测", f"[red]❌ 失败: {e}[/red]")
 
@@ -157,10 +167,38 @@ class DbService:
                     self._run_deep_structure_probe(engine, table)
 
                 try:
-                    res = conn.execute(
-                        text("SELECT version_num FROM th.alembic_version")
-                    )
-                    db_version = res.scalar_one_or_none() or "[空]"
+                    # 动态确定 alembic_version 表的 schema
+                    inspector = inspect(conn)
+                    all_schemas = inspector.get_schema_names()
+                    version_schema = self.config.database.schema
+                    version_table_found = False
+                    if inspector.has_table("alembic_version", schema=version_schema):
+                        version_table_found = True
+
+                    # 如果在配置的 schema 中找不到，则在公共 schema 搜索
+                    if not version_table_found and inspector.has_table(
+                        "alembic_version", schema="public"
+                    ):
+                        version_schema = "public"
+                        version_table_found = True
+
+                    # 如果还找不到，就在所有 schema 中找
+                    if not version_table_found:
+                        for s in all_schemas:
+                            if inspector.has_table("alembic_version", schema=s):
+                                version_schema = s
+                                version_table_found = True
+                                break
+
+                    if version_table_found:
+                        res = conn.execute(
+                            text(
+                                f"SELECT version_num FROM {version_schema}.alembic_version"
+                            )
+                        )
+                        db_version = res.scalar_one_or_none() or "[空]"
+                    else:
+                        db_version = "[表不存在]"
                 except ProgrammingError:
                     db_version = "[表不存在]"
         except Exception as e:
@@ -191,6 +229,10 @@ class DbService:
         """运行数据库迁移，可选强制兜底。"""
         console.print(Panel("🚀 数据库迁移 (Upgrade to Head)", border_style="cyan"))
         alembic_cfg = self._get_alembic_cfg()
+
+        # 应用版本表分离策略
+        self._apply_version_table_separation_strategy(alembic_cfg)
+
         try:
             console.print("正在尝试标准 Alembic 迁移...")
             command.upgrade(alembic_cfg, "head")
@@ -212,18 +254,36 @@ class DbService:
             engine = self._create_sync_engine(self.sync_app_url)
             with engine.begin() as conn:
                 console.print("  - 正在执行 `Base.metadata.create_all()`...")
-                if "postgresql" in engine.dialect.name:
-                    conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-                Base.metadata.create_all(bind=conn)
-                console.print("  - ORM 表结构创建完成。")
+
+                # 确保 schema 存在
+                schema = self.config.database.default_schema
+                if schema and schema != "public":
+                    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+                    console.print(f"  - 已确保 schema '{schema}' 存在。")
+
+                # 设置 metadata 的 schema
+                original_schema = Base.metadata.schema
+                try:
+                    Base.metadata.schema = schema
+                    # create_all 会根据模型的 __table_args__ 处理 schema
+                    Base.metadata.create_all(bind=conn)
+                    console.print("  - ORM 表结构创建完成。")
+                finally:
+                    # 恢复原始 schema 设置
+                    Base.metadata.schema = original_schema
 
                 head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
                 if head:
-                    table_name = (
-                        "th.alembic_version"
-                        if "postgresql" in engine.dialect.name
-                        else "alembic_version"
-                    )
+                    # 使用配置中的 schema，如果它存在的话
+                    schema = self.config.database.default_schema
+
+                    # 如果有 schema，先确保它存在
+                    if schema:
+                        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+                        table_name = f'"{schema}".alembic_version'
+                    else:
+                        table_name = "alembic_version"
+
                     conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
                     conn.execute(
                         text(
@@ -266,21 +326,44 @@ class DbService:
             return
 
         console.print(Panel(f"重建数据库: {self.app_db_name}", border_style="red"))
-        engine = self._create_sync_engine_autocommit(self.sync_maint_url)
-        try:
-            with engine.connect() as conn:
-                console.print(f"  - 正在终止到 '{self.app_db_name}' 的所有连接...")
-                conn.execute(
-                    text(f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)')
+
+        db_rebuilt_successfully = False
+        # 检查是否为 SQLite
+        if "sqlite" in self.sync_app_url.drivername:
+            db_path = self.app_db_name
+            try:
+                if db_path and os.path.exists(db_path):
+                    os.remove(db_path)
+                    console.print(f"  - 已删除旧的数据库文件: {db_path}")
+                # 对于 SQLite，文件将在首次连接时自动创建
+                console.print(f"  - 准备创建新的数据库文件: {db_path}")
+                db_rebuilt_successfully = True
+            except Exception as e:
+                console.print(f"[bold red]❌ 重建 SQLite 数据库失败: {e}[/bold red]")
+        else:  # 默认视为 PostgreSQL
+            engine = self._create_sync_engine_autocommit(self.sync_maint_url)
+            try:
+                with engine.connect() as conn:
+                    console.print(f"  - 正在终止到 '{self.app_db_name}' 的所有连接...")
+                    conn.execute(
+                        text(
+                            f'DROP DATABASE IF EXISTS "{self.app_db_name}" WITH (FORCE)'
+                        )
+                    )
+                    console.print(f"  - 正在创建数据库 '{self.app_db_name}'...")
+                    conn.execute(text(f'CREATE DATABASE "{self.app_db_name}"'))
+                db_rebuilt_successfully = True
+            except Exception as e:
+                console.print(
+                    f"[bold red]❌ 重建 PostgreSQL 数据库失败: {e}[/bold red]"
                 )
-                console.print(f"  - 正在创建数据库 '{self.app_db_name}'...")
-                conn.execute(text(f'CREATE DATABASE "{self.app_db_name}"'))
+            finally:
+                engine.dispose()
+
+        if db_rebuilt_successfully:
             console.print("[bold green]✅ 数据库重建成功。[/bold green]")
-            self.run_migrations()
-        except Exception as e:
-            console.print(f"[bold red]❌ 重建失败: {e}[/bold red]")
-        finally:
-            engine.dispose()
+            # 强制运行迁移，允许在 SQLite 上使用兜底模式
+            self.run_migrations(force=True)
 
     def clear_database(self) -> None:
         """[危险] 清空数据库中的所有数据。"""
@@ -294,18 +377,24 @@ class DbService:
         engine = self._create_sync_engine(self.sync_app_url)
         try:
             with engine.begin() as conn:
-                if "postgresql" in engine.dialect.name:
-                    conn.execute(text("CREATE SCHEMA IF NOT EXISTS th"))
-                    console.print("  - 正在清空所有表...")
-                    for table in reversed(Base.metadata.sorted_tables):
+                console.print("  - 正在清空所有表...")
+                for table in reversed(Base.metadata.sorted_tables):
+                    # 动态获取 schema 和表名
+                    schema_name = table.schema
+                    table_name = table.name
+                    if schema_name:
+                        qualified_name = f'"{schema_name}"."{table_name}"'
+                    else:
+                        qualified_name = f'"{table_name}"'
+
+                    if "postgresql" in engine.dialect.name:
                         conn.execute(
                             text(
-                                f'TRUNCATE TABLE "{table.schema}"."{table.name}" RESTART IDENTITY CASCADE;'
+                                f"TRUNCATE TABLE {qualified_name} RESTART IDENTITY CASCADE;"
                             )
                         )
-                else:  # SQLite case
-                    for table in reversed(Base.metadata.sorted_tables):
-                        conn.execute(text(f'DELETE FROM "{table.name}";'))
+                    else:  # SQLite case
+                        conn.execute(text(f"DELETE FROM {qualified_name};"))
 
             console.print("[bold green]✅ 数据库已清空。[/bold green]")
         except Exception as e:
