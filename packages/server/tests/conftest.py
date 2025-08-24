@@ -271,9 +271,16 @@ async def app_container(
         await container.shutdown_resources()
 
 
-@pytest.fixture
-def uow_factory(app_container: AppContainer) -> UowFactory:
+@pytest_asyncio.fixture
+async def uow_factory(app_container: AppContainer) -> UowFactory:
     """(函数级) 从 DI 容器获取 UoW 工厂。"""
+    # 在每个测试前清理 outbox 表，避免测试间状态污染
+    async with app_container.uow_factory() as uow:
+        await uow.session.execute(text("DELETE FROM th.outbox"))
+        await uow.commit()
+        # 清理会话，确保没有遗留的 detached 对象
+        uow.session.expunge_all()
+    
     return app_container.uow_factory
 
 

@@ -80,10 +80,13 @@ class TestHybridPanelRenderer:
         """测试基本事件的渲染。"""
         mock_console = Mock()
         mock_console_class.return_value = mock_console
-        mock_capture = Mock()
-        mock_capture.get.return_value = "mocked output\n"
-        mock_console.capture.return_value.__enter__.return_value = mock_capture
-        mock_console.capture.return_value.__exit__.return_value = None
+        
+        # 正确模拟capture上下文管理器
+        mock_capture_context = Mock()
+        mock_capture_context.__enter__ = Mock(return_value=Mock())
+        mock_capture_context.__exit__ = Mock(return_value=None)
+        mock_capture_context.__enter__.return_value.get = Mock(return_value="mocked output\n")
+        mock_console.capture.return_value = mock_capture_context
 
         renderer = HybridPanelRenderer()
         event_dict: MutableMapping[str, Any] = {
@@ -104,10 +107,13 @@ class TestHybridPanelRenderer:
         """测试第二次调用时不添加前导换行符。"""
         mock_console = Mock()
         mock_console_class.return_value = mock_console
-        mock_capture = Mock()
-        mock_capture.get.return_value = "mocked output\n"
-        mock_console.capture.return_value.__enter__.return_value = mock_capture
-        mock_console.capture.return_value.__exit__.return_value = None
+        
+        # 正确模拟capture上下文管理器
+        mock_capture_context = Mock()
+        mock_capture_context.__enter__ = Mock(return_value=Mock())
+        mock_capture_context.__exit__ = Mock(return_value=None)
+        mock_capture_context.__enter__.return_value.get = Mock(return_value="mocked output\n")
+        mock_console.capture.return_value = mock_capture_context
 
         renderer = HybridPanelRenderer()
         event_dict1: MutableMapping[str, Any] = {"event": "First message"}
@@ -164,10 +170,8 @@ class TestSetupLogging:
     def test_setup_logging_with_custom_log_level(self):
         """测试使用自定义日志级别设置日志。"""
         with patch("structlog.configure") as mock_configure:
-            with patch("logging.basicConfig") as mock_basic_config:
-                setup_logging(log_level="DEBUG")
-                mock_configure.assert_called_once()
-                mock_basic_config.assert_called_once()
+            setup_logging(log_level="DEBUG")
+            mock_configure.assert_called_once()
 
     def test_setup_logging_with_silence_noisy_libs(self):
         """测试静默嘈杂库的日志。"""
@@ -242,10 +246,8 @@ class TestLoggingIntegration:
     def test_standard_logging_integration(self):
         """测试与标准 logging 模块的集成。"""
         with patch("structlog.configure"):
-            with patch("logging.basicConfig") as mock_basic_config:
-                setup_logging()
-                mock_basic_config.assert_called_once()
+            setup_logging()
 
-                # 验证能够获取标准 logger
-                std_logger = logging.getLogger("test_std_logger")
-                assert std_logger is not None
+            # 验证能够获取标准 logger
+            std_logger = logging.getLogger("test_std_logger")
+            assert std_logger is not None

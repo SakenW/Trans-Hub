@@ -44,6 +44,8 @@ async def test_worker_processes_draft_task_successfully(
         assert head_before is not None
         assert head_before.current_status == TranslationStatus.DRAFT
         assert head_before.current_no == 0
+        # 保存 current_rev_id 以避免 DetachedInstanceError
+        head_before_rev_id = head_before.current_rev_id
 
     # 2. 准备 Worker 的依赖
     fake_engine = FakeTranslationEngine(config=FakeEngineConfig())
@@ -71,7 +73,7 @@ async def test_worker_processes_draft_task_successfully(
         assert head_after is not None
         assert head_after.current_status == TranslationStatus.REVIEWED
         assert head_after.current_no == 1
-        assert head_after.current_rev_id != head_before.current_rev_id
+        assert head_after.current_rev_id != head_before_rev_id
 
         new_rev = await uow.translations.get_revision_by_id(head_after.current_rev_id)
         assert new_rev is not None

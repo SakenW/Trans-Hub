@@ -131,7 +131,7 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
         """
         head_id = data.pop("head_id")
 
-        # ThTransHead 的主键是复合键
+        # 重新从数据库获取翻译头，确保它绑定到当前会话
         head_stmt = select(ThTransHead).where(
             ThTransHead.project_id == data["project_id"], ThTransHead.id == head_id
         )
@@ -149,19 +149,26 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
         # 从data中提取variant_key，因为该字段设置了init=False
         variant_key = data.pop("variant_key", "-")
         
+        # 生成新的revision ID
+        new_rev_id = str(uuid.uuid4())
+        
         new_rev = ThTransRev(
-            id=str(uuid.uuid4()), src_payload_json=content.source_payload_json, **data
+            id=new_rev_id, src_payload_json=content.source_payload_json, **data
         )
         new_rev.variant_key = variant_key
+        
+        # 将新revision添加到会话
         self._session.add(new_rev)
-        await self._session.flush()  # 确保 new_rev.id 可用
-
-        # 更新 head 对象的状态，SQLAlchemy 的 UoW 会跟踪这些变化
-        head.current_rev_id = new_rev.id
+        
+        # 更新 head 对象的状态，使用预生成的ID
+        head.current_rev_id = new_rev_id
         head.current_status = new_rev.status
         head.current_no = new_rev.revision_no
+        
+        # flush确保更改被持久化
+        await self._session.flush()
 
-        return new_rev.id
+        return new_rev_id
 
     async def get_published_translation(
         self, content_id: str, target_lang: str, variant_key: str

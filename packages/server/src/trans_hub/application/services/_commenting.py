@@ -35,6 +35,7 @@ class CommentingService:
                 uow,
                 CommentAdded(
                     head_id=head_id,
+                    project_id=head.project_id,
                     comment_id=comment_id,
                     actor=author,
                     payload={"comment_id": comment_id},

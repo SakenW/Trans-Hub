@@ -46,7 +46,7 @@ class SqlAlchemyMiscRepository(BaseRepository, IMiscRepository):
         self._session.add(db_event)
 
     async def add_comment(self, comment: Comment) -> str:
-        db_comment = ThComments(**comment.model_dump(exclude={"id"}))
+        db_comment = ThComments(**comment.model_dump(exclude={"id", "created_at"}))
         self._session.add(db_comment)
         await self._session.flush()
         return str(db_comment.id)

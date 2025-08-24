@@ -42,7 +42,7 @@ def run_migrations(engine, db_schema: str | None):
     print("迁移执行完成")
 
 
-async def test_postgresql_migration():
+def test_postgresql_migration():
     """测试PostgreSQL环境下的迁移"""
     print("=== PostgreSQL迁移测试 ===")
     
