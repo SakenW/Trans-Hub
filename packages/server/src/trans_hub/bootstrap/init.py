@@ -15,8 +15,9 @@ from typing import Literal
 import structlog
 from trans_hub.config import TransHubConfig
 
-# [新增] 导入 DI 容器
+# [修改] 导入新的工具函数
 from trans_hub.di.container import AppContainer
+from trans_hub.infrastructure.db.utils import get_database_info, detect_database_driver
 from trans_hub.management.config_utils import mask_db_url
 
 # [关键修复] parents[3] 才指向 packages/server 目录
@@ -75,6 +76,39 @@ def create_app_config(env_mode: Literal["prod", "dev", "test"]) -> TransHubConfi
     
     try:
         config = TransHubConfig(app_env=env_mode)
+        
+        # [新增] 获取数据库驱动信息
+        try:
+            db_driver = detect_database_driver(config.database.url)
+            db_info = get_database_info(config.database.url)
+            
+            logger.info(
+                "数据库配置加载完成",
+                env_mode=env_mode,
+                driver=db_driver.value,
+                supports_schema=db_driver.name != "SQLITE",
+                schema=config.database.default_schema if db_driver.name != "SQLITE" else None,
+                masked_url=mask_db_url(config.database.url),
+                **{k: v for k, v in db_info.items() if k not in ["username", "error", "raw_url"]}
+            )
+            
+            # 维护数据库URL的信息（如果存在）
+            if config.maintenance_database_url:
+                maint_driver = detect_database_driver(config.maintenance_database_url)
+                logger.debug(
+                    "维护数据库配置",
+                    maint_driver=maint_driver.value,
+                    masked_maint_url=mask_db_url(config.maintenance_database_url)
+                )
+                
+        except Exception as db_err:
+            logger.warning(
+                "数据库配置信息获取失败",
+                env_mode=env_mode,
+                error=str(db_err),
+                masked_url=mask_db_url(config.database.url)
+            )
+        
         logger.debug(
             "Config instance created",
             env_mode=env_mode,
