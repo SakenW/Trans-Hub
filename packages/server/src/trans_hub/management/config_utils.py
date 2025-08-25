@@ -4,7 +4,7 @@
 """
 
 from __future__ import annotations
-from typing import Union, Literal
+from typing import Union
 
 import structlog
 from sqlalchemy import create_engine, text

@@ -11,6 +11,7 @@ import structlog
 from trans_hub.adapters.engines.base import BaseTranslationEngine
 from trans_hub.adapters.engines.factory import create_engine_instance
 from trans_hub.application.processors import TranslationProcessor
+from trans_hub.bootstrap.init import bootstrap_app
 from trans_hub.config import TransHubConfig
 from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.exceptions import TransHubError
@@ -69,14 +70,16 @@ async def run_worker_loop(
         loop.add_signal_handler(sig, _signal_handler)
 
     try:
+        # 初始化 DI 容器
+        container = bootstrap_app(env_mode="prod")
+        
         # 在循环外创建一次引擎实例和处理器
         try:
             active_engine = create_engine_instance(config, config.active_engine)
             await active_engine.initialize()
 
-            # 处理器现在也在这里初始化，但它不再持有状态
-            # stream_producer 暂时为 None，等待 Outbox 模式实现
-            processor = TranslationProcessor(stream_producer=None, event_stream_name="")
+            # 从 DI 容器获取处理器实例
+            processor = container.translation_processor()
 
             logger.info("翻译 Worker 已启动，正在轮询任务...")
         except TransHubError as e:

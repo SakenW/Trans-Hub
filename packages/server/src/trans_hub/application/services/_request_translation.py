@@ -3,23 +3,24 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
-import uuid  # [新增] 导入 uuid
+import uuid
 
 from trans_hub.domain import tm as tm_domain
-from trans_hub_core.types import TranslationStatus, Event
+from trans_hub_core.types import TranslationStatus
 from trans_hub_uida import generate_uida
 from ..events import TMApplied, TranslationSubmitted
 
 if TYPE_CHECKING:
     from trans_hub.config import TransHubConfig
     from trans_hub.infrastructure.uow import UowFactory
-    from trans_hub_core.uow import IUnitOfWork
+    from ._event_publisher import EventPublisher
 
 
 class RequestTranslationService:
-    def __init__(self, uow_factory: UowFactory, config: TransHubConfig):
+    def __init__(self, uow_factory: UowFactory, config: TransHubConfig, event_publisher: EventPublisher):
         self._uow_factory = uow_factory
         self._config = config
+        self._event_publisher = event_publisher
 
     async def execute(
         self,
@@ -70,7 +71,7 @@ class RequestTranslationService:
                 head_id, rev_no = await uow.translations.get_or_create_head(
                     project_id, content_id, lang, variant_key
                 )
-                await self._publish_event(
+                await self._event_publisher.publish(
                     uow,
                     TranslationSubmitted(
                         head_id=head_id, project_id=project_id, actor=actor
@@ -100,7 +101,7 @@ class RequestTranslationService:
                         origin_lang="tm",
                     )
                     await uow.tm.link_revision_to_tm(rev_id, tm_id, project_id)
-                    await self._publish_event(
+                    await self._event_publisher.publish(
                         uow,
                         TMApplied(
                             head_id=head_id,
@@ -110,12 +111,3 @@ class RequestTranslationService:
                         ),
                     )
         return content_id
-
-    async def _publish_event(self, uow: IUnitOfWork, event: Event) -> None:
-        # [修复] 传递 project_id 和 event_id (使用新生成的 uuid)
-        await uow.outbox.add(
-            project_id=event.project_id,
-            event_id=str(uuid.uuid4()),
-            topic=self._config.worker.event_stream_name,
-            payload=event.model_dump(mode="json"),
-        )

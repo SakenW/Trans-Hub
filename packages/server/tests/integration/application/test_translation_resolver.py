@@ -12,6 +12,7 @@ from trans_hub.application.resolvers import TranslationResolver
 from trans_hub.application.services import (
     RequestTranslationService,
     RevisionLifecycleService,
+    EventPublisher,
 )
 from trans_hub.infrastructure.uow import UowFactory
 from trans_hub_core.types import TranslationStatus
@@ -30,8 +31,9 @@ async def test_resolver_with_full_fallback_chain(
     project_id = f"fallback-proj-{uuid.uuid4().hex[:4]}"
 
     # 实例化准备数据所需的应用服务
-    request_service = RequestTranslationService(uow_factory, test_config)
-    lifecycle_service = RevisionLifecycleService(uow_factory, test_config)
+    event_publisher = EventPublisher(test_config)
+    request_service = RequestTranslationService(uow_factory, test_config, event_publisher)
+    lifecycle_service = RevisionLifecycleService(uow_factory, test_config, event_publisher)
 
     # 创建内容并发布一个德语版本
     req_data = create_request_data(

@@ -3,7 +3,6 @@
 包含处理翻译任务的核心逻辑单元（处理器）。 (UoW 架构版)
 """
 
-import asyncio
 from typing import TYPE_CHECKING
 
 import structlog
@@ -59,12 +58,9 @@ class TranslationProcessor:
             source_lang=item_template.source_lang,
         )
 
-        success_tasks = []
         for item, output in zip(batch, engine_outputs):
             if isinstance(output, EngineSuccess):
-                success_tasks.append(
-                    self._handle_success(uow, item, output, active_engine)
-                )
+                await self._handle_success(uow, item, output, active_engine)
             elif isinstance(output, EngineError):
                 logger.error(
                     "引擎翻译失败，将等待重试",
@@ -72,9 +68,6 @@ class TranslationProcessor:
                     error=output.error_message,
                     is_retryable=output.is_retryable,
                 )
-
-        if success_tasks:
-            await asyncio.gather(*success_tasks)
 
     async def _handle_success(
         self,
@@ -122,8 +115,37 @@ class TranslationProcessor:
             )
             await uow.tm.link_revision_to_tm(new_rev_id, tm_id, item.project_id)
 
+            # 发布翻译完成事件
+            if self._stream_producer and self._event_stream_name:
+                event_data = {
+                    "event_type": "translation_completed",
+                    "head_id": item.head_id,
+                    "project_id": item.project_id,
+                    "content_id": item.content_id,
+                    "target_lang": item.target_lang,
+                    "revision_id": new_rev_id,
+                    "engine_name": active_engine.name(),
+                    "engine_version": active_engine.VERSION,
+                }
+                try:
+                    await self._stream_producer.publish(self._event_stream_name, event_data)
+                    logger.debug(
+                        "翻译完成事件已发布",
+                        head_id=item.head_id,
+                        stream=self._event_stream_name,
+                    )
+                except Exception:
+                    logger.warning(
+                        "发布翻译完成事件失败，但不影响翻译结果保存",
+                        head_id=item.head_id,
+                        stream=self._event_stream_name,
+                        exc_info=True,
+                    )
+
         except Exception:
             logger.error(
                 "保存成功翻译结果到数据库时失败", head_id=item.head_id, exc_info=True
             )
-            # UoW 将自动回滚这个失败的条目
+            # 重新抛出异常以确保 UoW 回滚事务
+            raise
+

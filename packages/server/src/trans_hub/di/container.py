@@ -25,10 +25,8 @@ from trans_hub.infrastructure.db import (
     create_async_sessionmaker,
 )
 from trans_hub.infrastructure.redis._client import get_redis_client
-from trans_hub.infrastructure.redis.cache import RedisCacheHandler
 from trans_hub.infrastructure.redis.streams import RedisStreamProducer
 from trans_hub.infrastructure.cache.memory import MemoryCacheHandler
-from trans_hub_core.interfaces import CacheHandler
 from trans_hub.infrastructure.uow import SqlAlchemyUnitOfWork
 
 
@@ -92,21 +90,22 @@ class AppContainer(containers.DeclarativeContainer):
 
     translation_processor = providers.Factory(
         TranslationProcessor,
-        uow_factory=uow_factory.provider,
-        engine=active_engine,
-        event_publisher=event_publisher,
+        stream_producer=stream_producer,
+        event_stream_name="translation_events",
     )
 
     request_translation_service = providers.Factory(
         RequestTranslationService,
         uow_factory=uow_factory.provider,
         config=config,
+        event_publisher=event_publisher,
     )
 
     revision_lifecycle_service = providers.Factory(
         RevisionLifecycleService,
         uow_factory=uow_factory.provider,
         config=config,
+        event_publisher=event_publisher,
     )
 
     commenting_service = providers.Factory(
