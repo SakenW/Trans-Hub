@@ -16,16 +16,12 @@
 """
 
 import asyncio
-import json
-from datetime import datetime
-from typing import Any, Dict, List
 
 import structlog
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from rich.text import Text
 
 from trans_hub.core.types import TranslationStatus
 from _shared import example_runner
@@ -349,7 +345,7 @@ class ECommerceLocalizationScenario:
             try:
                 # 注意：这里使用head_id，在实际场景中需要从request_id获取
                 # 由于演示限制，我们使用content_id作为head_id的替代
-                comment_id = await self.coordinator.add_comment(
+                await self.coordinator.add_comment(
                     head_id=request['content_id'],  # 实际应该是head_id
                     author=reviewer,
                     body=comments[i % len(comments)]

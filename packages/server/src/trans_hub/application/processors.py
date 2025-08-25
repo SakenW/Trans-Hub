@@ -80,6 +80,20 @@ class TranslationProcessor:
             source_lang=item_template.source_lang,
         )
 
+        # 校验引擎返回数量与输入数量是否匹配
+        if len(engine_outputs) != len(valid_items):
+            logger.error(
+                "引擎返回结果数量与输入条目数量不匹配，存在数据丢失风险",
+                expected_count=len(valid_items),
+                actual_count=len(engine_outputs),
+                engine_name=active_engine.name(),
+                batch_size=len(batch),
+            )
+            raise ValueError(
+                f"引擎返回结果数量不匹配：期望 {len(valid_items)} 个结果，"
+                f"实际收到 {len(engine_outputs)} 个结果"
+            )
+
         for item, output in zip(valid_items, engine_outputs):
             if isinstance(output, EngineSuccess):
                 await self._handle_success(uow, item, output, active_engine)

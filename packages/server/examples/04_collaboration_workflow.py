@@ -13,7 +13,7 @@
 """
 
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict
 from datetime import datetime, timedelta
 from _shared import example_runner, print_section_header, print_step, print_success
 
@@ -195,7 +195,7 @@ async def simulate_translation_work(coordinator, task_mapping: Dict[str, str]) -
         
         # 模拟翻译过程
         translated_text = translation_results[task_id]
-        target_payload = {"text": translated_text}
+        # target_payload = {"text": translated_text}
         
         # 在实际实现中，这里会调用：
         # revision_id = await coordinator.submit_translation(
@@ -332,7 +332,7 @@ async def track_project_progress(coordinator, project_id: str) -> None:
         "overall_progress": 0.75
     }
     
-    print(f"\n📊 项目进度概览:")
+    print("\n📊 项目进度概览:")
     print(f"   • 总任务数: {progress_stats['total_tasks']}")
     print(f"   • 已完成: {progress_stats['completed_tasks']}")
     print(f"   • 审校中: {progress_stats['in_review_tasks']}")
@@ -340,7 +340,7 @@ async def track_project_progress(coordinator, project_id: str) -> None:
     print(f"   • 整体进度: {progress_stats['overall_progress']:.1%}")
     
     # 团队工作量统计
-    print(f"\n👥 团队工作量:")
+    print("\n👥 团队工作量:")
     for user_id, member in TEAM_MEMBERS.items():
         if member["role"] == "translator":
             assigned_tasks = [t for t in TRANSLATION_TASKS if t["assigned_to"] == user_id]
@@ -380,7 +380,7 @@ async def demonstrate_version_control(coordinator) -> None:
         }
     ]
     
-    print(f"\n📚 版本历史:")
+    print("\n📚 版本历史:")
     for version in version_history:
         author_name = TEAM_MEMBERS[version["author"]]["name"]
         timestamp = version["timestamp"].strftime("%H:%M")
@@ -399,26 +399,26 @@ async def generate_collaboration_report(coordinator, project_id: str) -> None:
     """
     print_section_header("协作项目报告", "📋")
     
-    print(f"🎯 项目概览:")
+    print("🎯 项目概览:")
     print(f"   • 项目ID: {project_id}")
     print(f"   • 团队规模: {len(TEAM_MEMBERS)} 人")
-    print(f"   • 目标语言: zh-CN, ja-JP")
+    print("   • 目标语言: zh-CN, ja-JP")
     print(f"   • 任务总数: {len(TRANSLATION_TASKS)}")
     
-    print(f"\n👥 团队贡献:")
+    print("\n👥 团队贡献:")
     for user_id, member in TEAM_MEMBERS.items():
         role_desc = {"translator": "译者", "reviewer": "审校", "manager": "经理"}[member["role"]]
         print(f"   • {member['name']} ({role_desc}): {member['specialization']}")
     
-    print(f"\n⏱️  时间统计:")
-    print(f"   • 平均翻译时间: 30分钟/任务")
-    print(f"   • 平均审校时间: 15分钟/任务")
-    print(f"   • 项目总耗时: 3小时")
+    print("\n⏱️  时间统计:")
+    print("   • 平均翻译时间: 30分钟/任务")
+    print("   • 平均审校时间: 15分钟/任务")
+    print("   • 项目总耗时: 3小时")
     
-    print(f"\n🎉 质量指标:")
-    print(f"   • 一次通过率: 75%")
-    print(f"   • 平均修订次数: 1.2次")
-    print(f"   • 客户满意度: 95%")
+    print("\n🎉 质量指标:")
+    print("   • 一次通过率: 75%")
+    print("   • 平均修订次数: 1.2次")
+    print("   • 客户满意度: 95%")
 
 
 async def main() -> None:
@@ -438,7 +438,7 @@ async def main() -> None:
         revision_mapping = await simulate_translation_work(coordinator, task_mapping)
         
         # 模拟审校流程
-        review_results = await simulate_review_process(coordinator, revision_mapping)
+        await simulate_review_process(coordinator, revision_mapping)
         
         # 模拟反馈系统
         await simulate_feedback_system(coordinator, revision_mapping)

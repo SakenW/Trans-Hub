@@ -94,23 +94,23 @@ async def simulate_batch_processing(content_ids: Dict[str, List[str]]) -> None:
     print_step(2, "模拟批量翻译引擎处理")
     
     # 模拟翻译映射（简化版）
-    translation_map = {
-        "zh-CN": {
-            "Premium Wireless Headphones": "高级无线耳机",
-            "Add to Cart": "添加到购物车",
-            "Experience crystal-clear audio": "体验水晶般清晰的音频"
-        },
-        "ja-JP": {
-            "Premium Wireless Headphones": "プレミアムワイヤレスヘッドフォン",
-            "Add to Cart": "カートに追加",
-            "Experience crystal-clear audio": "クリスタルクリアなオーディオを体験"
-        },
-        "es-ES": {
-            "Premium Wireless Headphones": "Auriculares Inalámbricos Premium",
-            "Add to Cart": "Añadir al Carrito",
-            "Experience crystal-clear audio": "Experimenta audio cristalino"
-        }
-    }
+    # translation_map = {
+    #     "zh-CN": {
+    #         "Premium Wireless Headphones": "高级无线耳机",
+    #         "Add to Cart": "添加到购物车",
+    #         "Experience crystal-clear audio": "体验水晶般清晰的音频"
+    #     },
+    #     "ja-JP": {
+    #         "Premium Wireless Headphones": "プレミアムワイヤレスヘッドフォン",
+    #         "Add to Cart": "カートに追加",
+    #         "Experience crystal-clear audio": "クリスタルクリアなオーディオを体験"
+    #     },
+    #     "es-ES": {
+    #         "Premium Wireless Headphones": "Auriculares Inalámbricos Premium",
+    #         "Add to Cart": "Añadir al Carrito",
+    #         "Experience crystal-clear audio": "Experimenta audio cristalino"
+    #     }
+    # }
     
     total_translations = sum(len(ids) for ids in content_ids.values()) * len(TARGET_LANGUAGES)
     print_success("批量翻译处理完成", 
@@ -223,17 +223,17 @@ async def generate_report(content_ids: Dict[str, List[str]]) -> None:
     total_content = sum(len(ids) for ids in content_ids.values())
     total_translations = total_content * len(TARGET_LANGUAGES)
     
-    print(f"📈 处理统计:")
+    print("📈 处理统计:")
     print(f"   • 内容类型: {len(content_ids)} 种")
     print(f"   • 原始内容: {total_content} 条")
     print(f"   • 目标语言: {len(TARGET_LANGUAGES)} 种")
     print(f"   • 总翻译数: {total_translations} 条")
     
-    print(f"\n🌍 支持语言:")
+    print("\n🌍 支持语言:")
     for lang in TARGET_LANGUAGES:
         print(f"   • {lang}")
     
-    print(f"\n📦 内容分布:")
+    print("\n📦 内容分布:")
     for content_type, ids in content_ids.items():
         print(f"   • {content_type}: {len(ids)} 条")
 

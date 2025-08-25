@@ -14,10 +14,13 @@
 
 import asyncio
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-from _shared import example_runner, print_section_header, print_step, print_success, print_error
+import structlog
+from _shared import example_runner, print_section_header, print_step, print_success
+
+logger = structlog.get_logger()
 
 
 class QualityIssueType(Enum):
@@ -402,20 +405,24 @@ async def display_quality_reports(reports: List[QualityReport]) -> None:
     for i, report in enumerate(reports, 1):
         sample = next(s for s in TRANSLATION_SAMPLES if s["content_id"] == report.content_id)
         
-        print(f"\n📄 报告 {i}: {report.content_id}")
-        print(f"   源文本: {sample['source_text']}")
-        print(f"   译文: {sample['target_text']}")
-        print(f"   语言: {report.target_lang}")
-        print(f"   质量分数: {report.overall_score:.1f}/100")
+        logger.info(
+            "质量报告详情",
+            报告序号=i,
+            内容ID=report.content_id,
+            源文本=sample['source_text'],
+            译文=sample['target_text'],
+            语言=report.target_lang,
+            质量分数=f"{report.overall_score:.1f}/100"
+        )
         
         if report.passed_checks:
-            print(f"   ✅ 通过检查: {', '.join(report.passed_checks)}")
+            logger.info("通过检查", 检查项=', '.join(report.passed_checks))
         
         if report.failed_checks:
-            print(f"   ❌ 未通过检查: {', '.join(report.failed_checks)}")
+            logger.warning("未通过检查", 检查项=', '.join(report.failed_checks))
         
         if report.issues:
-            print(f"   🔍 发现的问题:")
+            logger.info("发现的问题")
             for j, issue in enumerate(report.issues, 1):
                 severity_icon = {
                     QualitySeverity.CRITICAL: "🔴",
@@ -424,11 +431,15 @@ async def display_quality_reports(reports: List[QualityReport]) -> None:
                     QualitySeverity.INFO: "🔵"
                 }[issue.severity]
                 
-                print(f"      {j}. {severity_icon} {issue.message}")
-                if issue.suggestion:
-                    print(f"         💡 建议: {issue.suggestion}")
+                logger.info(
+                    "质量问题",
+                    序号=j,
+                    严重程度=severity_icon,
+                    消息=issue.message,
+                    建议=issue.suggestion if issue.suggestion else None
+                )
         else:
-            print(f"   🎉 无质量问题")
+            logger.info("🎉 无质量问题")
 
 
 async def generate_quality_statistics(reports: List[QualityReport]) -> None:
@@ -447,7 +458,7 @@ async def generate_quality_statistics(reports: List[QualityReport]) -> None:
     medium_quality = sum(1 for r in reports if 70 <= r.overall_score < 90)
     low_quality = sum(1 for r in reports if r.overall_score < 70)
     
-    print(f"📈 总体质量概览:")
+    print("📈 总体质量概览:")
     print(f"   • 样本总数: {total_samples}")
     print(f"   • 平均分数: {avg_score:.1f}/100")
     print(f"   • 高质量 (≥90分): {high_quality} ({high_quality/total_samples:.1%})")
@@ -464,7 +475,7 @@ async def generate_quality_statistics(reports: List[QualityReport]) -> None:
             issue_severity_counts[issue.severity] = issue_severity_counts.get(issue.severity, 0) + 1
     
     if issue_type_counts:
-        print(f"\n🔍 问题类型分布:")
+        print("\n🔍 问题类型分布:")
         for issue_type, count in issue_type_counts.items():
             type_name = {
                 QualityIssueType.TERMINOLOGY: "术语问题",
@@ -477,7 +488,7 @@ async def generate_quality_statistics(reports: List[QualityReport]) -> None:
             print(f"   • {type_name}: {count} 次")
     
     if issue_severity_counts:
-        print(f"\n⚠️  问题严重程度分布:")
+        print("\n⚠️  问题严重程度分布:")
         for severity, count in issue_severity_counts.items():
             severity_name = {
                 QualitySeverity.CRITICAL: "严重",
@@ -495,7 +506,7 @@ async def generate_quality_statistics(reports: List[QualityReport]) -> None:
         lang_scores[report.target_lang].append(report.overall_score)
     
     if len(lang_scores) > 1:
-        print(f"\n🌍 语言质量对比:")
+        print("\n🌍 语言质量对比:")
         for lang, scores in lang_scores.items():
             avg_lang_score = sum(scores) / len(scores)
             print(f"   • {lang}: {avg_lang_score:.1f}/100 (样本数: {len(scores)})")
@@ -544,10 +555,10 @@ async def provide_improvement_suggestions(reports: List[QualityReport]) -> None:
         print(f"   {i}. {suggestion}")
     
     # 质量目标
-    print(f"\n🎯 质量目标建议:")
-    print(f"   • 短期目标: 平均质量分数达到 85分")
-    print(f"   • 中期目标: 90% 的翻译达到高质量标准 (≥90分)")
-    print(f"   • 长期目标: 建立零缺陷的翻译质量体系")
+    print("\n🎯 质量目标建议:")
+    print("   • 短期目标: 平均质量分数达到 85分")
+    print("   • 中期目标: 90% 的翻译达到高质量标准 (≥90分)")
+    print("   • 长期目标: 建立零缺陷的翻译质量体系")
 
 
 async def main() -> None:

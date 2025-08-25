@@ -5,22 +5,26 @@ import subprocess
 import sys
 from pathlib import Path
 
+import structlog
+
+logger = structlog.get_logger()
+
 
 def run_command(command: list[str], description: str):
     """运行一个命令并检查其退出码。"""
-    print(f"🚀 Running: {description}...")
+    logger.info(f"🚀 Running: {description}...")
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"❌ FAILED: {description}", file=sys.stderr)
+        logger.error(f"❌ FAILED: {description}", 标准输出=result.stdout, 标准错误=result.stderr)
         print(result.stdout, file=sys.stdout)
         print(result.stderr, file=sys.stderr)
         sys.exit(result.returncode)
-    print(f"✅ PASSED: {description}")
-    print("-" * 50)
+    logger.info(f"✅ PASSED: {description}")
+    logger.info("-" * 50)
 
 
 def main():
-    print("=== Trans-Hub Code Quality Check ===")
+    logger.info("=== Trans-Hub Code Quality Check ===")
 
     # 找到项目根目录 (包含 .importlinter 文件的目录)
     current_dir = Path.cwd()
@@ -32,7 +36,7 @@ def main():
             break
         project_root = project_root.parent
     else:
-        print("❌ 无法找到项目根目录 (.importlinter 文件)")
+        logger.error("❌ 无法找到项目根目录 (.importlinter 文件)")
         sys.exit(1)
 
     # 切换到项目根目录
@@ -65,7 +69,7 @@ def main():
         # 静态类型检查
         run_command(["poetry", "run", "mypy", "src/trans_hub"], "MyPy Type Check")
 
-        print("\n🎉 All checks passed successfully!")
+        logger.info("🎉 All checks passed successfully!")
 
     finally:
         # 恢复原始工作目录

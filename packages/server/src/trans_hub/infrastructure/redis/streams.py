@@ -6,6 +6,7 @@ Redis Streams 是一种功能强大的数据结构，非常适合用作持久化
 可消费的事件总线。
 """
 
+import json
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -36,15 +37,24 @@ class RedisStreamProducer(StreamProducer):
 
         Args:
             stream_name: Stream 的键名。
-            event_data: 要发布的事件内容（必须是扁平的 string-to-string 字典）。
+            event_data: 要发布的事件内容（支持嵌套结构和非字符串类型）。
         """
         try:
-            # Redis Streams 的字段和值都必须是字符串。
-            # 我们将事件数据转换为适合的格式。
-            # 注意：真实的实现可能需要一个更健壮的序列化器（如 JSON）。
-            flat_event_data = {
-                str(k): str(v) for k, v in event_data.items() if v is not None
-            }
+            # 使用 JSON 序列化整个事件数据以支持嵌套结构
+            try:
+                serialized_payload = json.dumps(event_data, ensure_ascii=False)
+            except (TypeError, ValueError) as e:
+                logger.error(
+                    "事件数据序列化失败",
+                    stream=stream_name,
+                    error=str(e),
+                    event_data_type=type(event_data).__name__,
+                )
+                raise
+
+            # Redis Streams 要求字段和值都是字符串
+            # 将序列化后的 JSON 作为单个 payload 字段存储
+            flat_event_data = {"payload": serialized_payload}
 
             # 使用 XADD 命令将事件添加到 Stream 的末尾
             await self._client.xadd(stream_name, flat_event_data)
@@ -58,3 +68,4 @@ class RedisStreamProducer(StreamProducer):
                 exc_info=True,
             )
             # 在生产环境中，这里可能需要一个回退机制或告警
+            raise

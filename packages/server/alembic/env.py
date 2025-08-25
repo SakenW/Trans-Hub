@@ -23,8 +23,12 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
+import structlog
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
+
+# 获取 structlog logger
+logger = structlog.get_logger(__name__)
 
 # --- 路径设置 ---
 # 将 `src` 目录添加到 sys.path，以允许 `trans_hub` 模块的绝对导入。
@@ -70,7 +74,7 @@ if db_schema and db_schema != "None":
     injected_engine = config.attributes.get("connection")
     if injected_engine is not None:
         is_postgresql = injected_engine.dialect.name == "postgresql"
-        print(f"[DEBUG] 从注入引擎检测到方言: {injected_engine.dialect.name}")
+        logger.debug("从注入引擎检测到方言", dialect=injected_engine.dialect.name)
     else:
         # 如果没有注入引擎且没有URL配置，尝试从应用配置检测
         if not sqlalchemy_url:
@@ -79,23 +83,23 @@ if db_schema and db_schema != "None":
                 app_config = create_app_config("test")
                 db_url = str(app_config.database.url)
                 is_postgresql = "postgresql" in db_url
-                print(f"[DEBUG] 从应用配置检测到方言: {'postgresql' if is_postgresql else 'other'}")
+                logger.debug("从应用配置检测到方言", dialect="postgresql" if is_postgresql else "other")
             except Exception:
                 is_postgresql = False
-                print(f"[DEBUG] 无法检测方言，默认为非PostgreSQL")
+                logger.debug("无法检测方言，默认为非PostgreSQL")
         else:
             is_postgresql = sqlalchemy_url.startswith("postgresql")
-            print(f"[DEBUG] 从URL检测到方言: {'postgresql' if is_postgresql else 'other'}")
+            logger.debug("从URL检测到方言", dialect="postgresql" if is_postgresql else "other")
     
     if is_postgresql:
         target_metadata.schema = db_schema
-        print(f"[DEBUG] 设置 target_metadata.schema = {db_schema}")
+        logger.debug("设置 target_metadata.schema", schema=db_schema)
     else:
         target_metadata.schema = None
-        print(f"[DEBUG] 非 PostgreSQL，设置 target_metadata.schema = None")
+        logger.debug("非 PostgreSQL，设置 target_metadata.schema = None")
 else:
     target_metadata.schema = None
-    print(f"[DEBUG] 无 db_schema 配置，设置 target_metadata.schema = None")
+    logger.debug("无 db_schema 配置，设置 target_metadata.schema = None")
 
 
 def run_migrations_offline() -> None:
@@ -116,9 +120,9 @@ def run_migrations_offline() -> None:
                 url = db_url.replace("+aiosqlite://", "://")
             else:
                 url = db_url
-            print(f"[DEBUG] 离线模式使用应用配置URL: {url}")
+            logger.debug("离线模式使用应用配置URL", url=url)
         except Exception as e:
-            print(f"[ERROR] 离线模式无法获取数据库URL: {e}")
+            logger.error("离线模式无法获取数据库URL", error=str(e))
             raise RuntimeError(
                 "离线模式需要数据库URL配置。请确保：\n"
                 "1. alembic.ini中配置了sqlalchemy.url\n"
@@ -128,7 +132,7 @@ def run_migrations_offline() -> None:
     
     # 版本表与业务表在同一 schema 中
     version_table_schema = target_metadata.schema
-    print(f"[DEBUG] 离线迁移 - version_table_schema = {version_table_schema}")
+    logger.debug("离线迁移 - version_table_schema", schema=version_table_schema)
     
     context.configure(
         url=url,
@@ -148,30 +152,30 @@ def run_migrations_online() -> None:
     # 这确保迁移和应用使用完全相同的数据库连接
     injected_engine = config.attributes.get("connection")
     if injected_engine is not None:
-        print(f"[DEBUG] 使用注入的引擎连接: {injected_engine.engine.url}")
+        logger.debug("使用注入的引擎连接", url=str(injected_engine.engine.url))
         connectable = injected_engine
     else:
         # 当没有注入引擎时，按优先级获取数据库连接：
         # 1. Alembic配置中的sqlalchemy.url（最高优先级）
         # 2. 环境变量TRANSHUB_DATABASE_URL
         # 3. 应用配置（最低优先级）
-        print(f"[DEBUG] 没有注入引擎，尝试获取数据库连接")
+        logger.debug("没有注入引擎，尝试获取数据库连接")
         
         # 首先检查Alembic配置中的sqlalchemy.url
         alembic_url = config.get_main_option("sqlalchemy.url")
         if alembic_url and alembic_url.strip():
-            print(f"[DEBUG] 使用Alembic配置中的数据库URL: {alembic_url}")
+            logger.debug("使用Alembic配置中的数据库URL", url=alembic_url)
             from sqlalchemy import create_engine
             connectable = create_engine(
                 alembic_url,
                 poolclass=pool.NullPool,
             )
-            print(f"[DEBUG] 使用Alembic配置创建引擎: {connectable.url}")
+            logger.debug("使用Alembic配置创建引擎", url=str(connectable.url))
         else:
             # 检查是否有环境变量设置的数据库URL
             env_db_url = os.environ.get("TRANSHUB_DATABASE_URL")
             if env_db_url:
-                print(f"[DEBUG] 使用环境变量数据库URL: {env_db_url}")
+                logger.debug("使用环境变量数据库URL", url=env_db_url)
                 # 将异步URL转换为同步URL（Alembic需要同步连接）
                 if "+asyncpg://" in env_db_url:
                     sync_db_url = env_db_url.replace("+asyncpg://", "+psycopg://")
@@ -185,10 +189,10 @@ def run_migrations_online() -> None:
                     sync_db_url,
                     poolclass=pool.NullPool,
                 )
-                print(f"[DEBUG] 使用环境变量创建引擎: {connectable.url}")
+                logger.debug("使用环境变量创建引擎", url=str(connectable.url))
             else:
                 # 回退到应用配置
-                print(f"[DEBUG] 环境变量未设置，回退到应用配置")
+                logger.debug("环境变量未设置，回退到应用配置")
                 try:
                     from trans_hub.bootstrap.init import create_app_config
                     
@@ -211,9 +215,9 @@ def run_migrations_online() -> None:
                         sync_db_url,
                         poolclass=pool.NullPool,
                     )
-                    print(f"[DEBUG] 使用应用配置创建引擎: {connectable.url}")
+                    logger.debug("使用应用配置创建引擎", url=str(connectable.url))
                 except Exception as e:
-                    print(f"[ERROR] 无法从应用配置获取数据库连接: {e}")
+                    logger.error("无法从应用配置获取数据库连接", error=str(e))
                     raise RuntimeError(
                     "无法获取数据库连接。请确保：\n"
                     "1. 环境变量已正确配置\n"
@@ -231,21 +235,21 @@ def run_migrations_online() -> None:
         connection_context = nullcontext(connectable)
     
     with connection_context as connection:
-        print(f"[DEBUG] 在线迁移 - target_metadata.schema = {target_metadata.schema}")
-        print(f"[DEBUG] 在线迁移 - 表数量 = {len(target_metadata.tables)}")
+        logger.debug("在线迁移 - target_metadata.schema", schema=target_metadata.schema)
+        logger.debug("在线迁移 - 表数量", count=len(target_metadata.tables))
         for table_name, table in target_metadata.tables.items():
-            print(f"[DEBUG] 表: {table_name}, schema: {table.schema}")
+            logger.debug("表信息", table_name=table_name, schema=table.schema)
         
         # [关键修复] 在配置context之前，确保目标schema存在
         # 这解决了Alembic试图在不存在的schema中创建alembic_version表的问题
         if target_metadata.schema and connection.dialect.name == "postgresql":
-            print(f"[DEBUG] 确保schema存在: {target_metadata.schema}")
+            logger.debug("确保schema存在", schema=target_metadata.schema)
             connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {target_metadata.schema}"))
             # 注意：不在这里提交，因为连接可能已经在事务中
         
         # 版本表与业务表在同一 schema 中
         version_table_schema = target_metadata.schema
-        print(f"[DEBUG] 配置 version_table_schema = {version_table_schema}")
+        logger.debug("配置 version_table_schema", schema=version_table_schema)
         
         context.configure(
             connection=connection,

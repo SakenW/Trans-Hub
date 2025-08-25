@@ -334,5 +334,6 @@ def setup_logging_from_config(
 # 类型仅用于注解，避免运行期循环依赖
 try:  # 运行期不导入（避免配置层与观测层互相依赖），仅用于类型提示
     from trans_hub.config import TransHubConfig  # noqa: F401
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
+    # 类型提示模块未可用，在运行时跳过
     pass

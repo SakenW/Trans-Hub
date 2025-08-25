@@ -19,7 +19,10 @@ import asyncio
 import sys
 from pathlib import Path
 
+import structlog
 from sqlalchemy import text
+
+logger = structlog.get_logger()
 
 # --- 路径设置，确保能导入 bootstrap ---
 try:
@@ -35,30 +38,30 @@ except ImportError as e:
 
 async def main() -> None:
     """加载测试配置，连接一次数据库，然后释放连接池。"""
-    print("🩺 正在诊断测试环境数据库连接...")
-    print("-" * 40)
+    logger.info("🩺 正在诊断测试环境数据库连接...")
+    logger.info("-" * 40)
     try:
         cfg = create_app_config(env_mode="test")
         db_url_masked = cfg.database.url.replace(
             cfg.database.url.split("@")[0].split("://")[-1], "user:***"
         )
-        print(f"  - 目标数据库: {db_url_masked}")
+        logger.info("目标数据库", 数据库URL=db_url_masked)
 
         eng = create_async_db_engine(cfg)
         try:
             async with eng.connect() as conn:
                 result = await conn.execute(text("SELECT 1"))
                 assert result.scalar_one() == 1
-            print("  - [✅] 连接成功。")
+            logger.info("[✅] 连接成功")
         finally:
             await dispose_engine(eng)
-            print("  - [✅] 连接池已成功释放。")
+            logger.info("[✅] 连接池已成功释放")
 
-        print("-" * 40)
-        print("\n🎉 诊断通过：测试环境配置正确，数据库可达。")
+        logger.info("-" * 40)
+        logger.info("🎉 诊断通过：测试环境配置正确，数据库可达")
 
     except Exception as e:
-        print(f"\n❌ 诊断失败: {e}", file=sys.stderr)
+        logger.error("❌ 诊断失败", 错误=str(e))
         sys.exit(1)
 
 

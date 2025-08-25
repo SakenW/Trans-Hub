@@ -14,7 +14,10 @@
 
 import asyncio
 from typing import Dict, List, Tuple
+import structlog
 from _shared import example_runner, print_section_header, print_step, print_success
+
+logger = structlog.get_logger()
 
 
 # 模拟已有的翻译记忆库数据
@@ -176,18 +179,23 @@ async def display_match_results(match_results: Dict[str, List[Tuple[str, float, 
     print_section_header("TM匹配结果分析", "🔍")
     
     for i, (new_text, matches) in enumerate(match_results.items(), 1):
-        print(f"\n📝 待翻译文本 {i}: {new_text}")
+        logger.info("待翻译文本", 序号=i, 文本=new_text)
         
         if not matches:
-            print("   ❌ 无匹配结果 - 需要新翻译")
+            logger.warning("无匹配结果 - 需要新翻译")
             continue
         
-        print("   🎯 TM匹配结果:")
+        logger.info("TM匹配结果")
         for j, (source, score, target) in enumerate(matches, 1):
             match_type = "🟢 精确匹配" if score >= 0.9 else "🟡 模糊匹配" if score >= 0.7 else "🟠 低相似度"
-            print(f"      {j}. {match_type} ({score:.1%})")
-            print(f"         源文本: {source}")
-            print(f"         建议译文: {target}")
+            logger.info(
+                "匹配项",
+                序号=j,
+                匹配类型=match_type,
+                相似度=f"{score:.1%}",
+                源文本=source,
+                建议译文=target
+            )
 
 
 async def simulate_tm_optimization(coordinator, tm_id: str) -> None:
@@ -238,7 +246,7 @@ async def generate_tm_statistics(match_results: Dict[str, List[Tuple[str, float,
         else:
             fuzzy_matches += 1
     
-    print(f"📈 匹配统计:")
+    print("📈 匹配统计:")
     print(f"   • 总文本数: {total_texts}")
     print(f"   • 精确匹配: {exact_matches} ({exact_matches/total_texts:.1%})")
     print(f"   • 模糊匹配: {fuzzy_matches} ({fuzzy_matches/total_texts:.1%})")
@@ -247,10 +255,10 @@ async def generate_tm_statistics(match_results: Dict[str, List[Tuple[str, float,
     potential_savings = (exact_matches + fuzzy_matches * 0.5) / total_texts
     print(f"\n💰 预估效率提升: {potential_savings:.1%}")
     
-    print(f"\n🎯 TM数据库状态:")
+    print("\n🎯 TM数据库状态:")
     print(f"   • 总条目数: {len(EXISTING_TM_DATA)}")
-    print(f"   • 支持语言: zh-CN, ja-JP, es-ES")
-    print(f"   • 平均质量分: 95%")
+    print("   • 支持语言: zh-CN, ja-JP, es-ES")
+    print("   • 平均质量分: 95%")
 
 
 async def demonstrate_tm_workflow(coordinator, project_id: str) -> None:

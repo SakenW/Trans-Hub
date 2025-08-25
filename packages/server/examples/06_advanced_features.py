@@ -14,12 +14,14 @@
 """
 
 import asyncio
-import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
+import structlog
 from _shared import example_runner, print_section_header, print_step, print_success
+
+logger = structlog.get_logger()
 
 
 class WorkflowStatus(Enum):
@@ -328,7 +330,7 @@ async def demonstrate_external_integrations(coordinator) -> None:
         ]
     }
     
-    print(f"\n   🎯 智能路由策略:")
+    print("\n   🎯 智能路由策略:")
     print(f"      质量优先: {integrations[routing_strategy['quality_priority']]['name']}")
     print(f"      成本优先: {integrations[routing_strategy['cost_priority']]['name']}")
     print(f"      故障转移: {len(routing_strategy['fallback_chain'])} 级")
@@ -369,19 +371,19 @@ async def demonstrate_performance_monitoring(coordinator) -> None:
         }
     }
     
-    print(f"   🖥️  系统性能:")
+    print("   🖥️  系统性能:")
     sys_metrics = performance_metrics["system_metrics"]
     print(f"      CPU使用率: {sys_metrics['cpu_usage']:.1f}%")
     print(f"      内存使用率: {sys_metrics['memory_usage']:.1f}%")
     print(f"      活跃连接: {sys_metrics['active_connections']} 个")
     
-    print(f"\n   🔄 翻译性能:")
+    print("\n   🔄 翻译性能:")
     trans_metrics = performance_metrics["translation_metrics"]
     print(f"      翻译速度: {trans_metrics['translations_per_hour']} 条/小时")
     print(f"      平均耗时: {trans_metrics['avg_translation_time']:.1f} 秒")
     print(f"      成功率: {trans_metrics['success_rate']:.1%}")
     
-    print(f"\n   🎯 质量指标:")
+    print("\n   🎯 质量指标:")
     quality_metrics = performance_metrics["quality_metrics"]
     print(f"      平均质量分: {quality_metrics['avg_quality_score']:.1f}/100")
     print(f"      人工审校率: {quality_metrics['human_review_rate']:.1%}")
@@ -395,7 +397,7 @@ async def demonstrate_performance_monitoring(coordinator) -> None:
         "low_quality": {"threshold": 80, "current": 87.3, "status": "正常"}
     }
     
-    print(f"\n   🚨 告警状态:")
+    print("\n   🚨 告警状态:")
     for rule_name, rule_config in alert_rules.items():
         status_icon = "🟢" if rule_config["status"] == "正常" else "🔴"
         print(f"      {status_icon} {rule_name}: {rule_config['current']} (阈值: {rule_config['threshold']})")
@@ -430,11 +432,11 @@ async def demonstrate_data_import_export(coordinator) -> None:
         ]
     }
     
-    print(f"   📥 支持的导入格式:")
+    print("   📥 支持的导入格式:")
     for fmt in supported_formats["import_formats"]:
         print(f"      • {fmt['format']}: {fmt['description']} - {fmt['use_case']}")
     
-    print(f"\n   📤 支持的导出格式:")
+    print("\n   📤 支持的导出格式:")
     for fmt in supported_formats["export_formats"]:
         print(f"      • {fmt['format']}: {fmt['description']} - {fmt['use_case']}")
     
@@ -456,7 +458,7 @@ async def demonstrate_data_import_export(coordinator) -> None:
         }
     }
     
-    print(f"\n   📊 最近操作统计:")
+    print("\n   📊 最近操作统计:")
     import_op = batch_operations["last_import"]
     print(f"      最后导入: {import_op['records_processed']} 条记录 ({import_op['format']}格式)")
     print(f"      成功率: {import_op['success_rate']:.1%}, 耗时: {import_op['processing_time']:.1f}秒")
@@ -511,12 +513,17 @@ async def demonstrate_custom_plugins(coordinator) -> None:
         }
     }
     
-    print(f"   🔌 可用插件:")
+    print("   🔌 可用插件:")
     for plugin_id, plugin_info in available_plugins.items():
         status_icon = {"active": "🟢", "inactive": "🔴", "beta": "🟡"}[plugin_info["status"]]
-        print(f"      {status_icon} {plugin_info['name']} v{plugin_info['version']}")
-        print(f"         {plugin_info['description']}")
-        print(f"         作者: {plugin_info['author']}")
+        logger.info(
+            "插件信息",
+            状态=status_icon,
+            名称=plugin_info['name'],
+            版本=plugin_info['version'],
+            描述=plugin_info['description'],
+            作者=plugin_info['author']
+        )
     
     # 模拟插件API
     plugin_apis = {
@@ -536,13 +543,8 @@ async def demonstrate_custom_plugins(coordinator) -> None:
         ]
     }
     
-    print(f"\n   🎣 插件钩子:")
-    for hook in plugin_apis["hooks"]:
-        print(f"      • {hook}")
-    
-    print(f"\n   🛠️  插件服务:")
-    for service in plugin_apis["services"]:
-        print(f"      • {service}")
+    logger.info("插件钩子", 钩子列表=plugin_apis["hooks"])
+    logger.info("插件服务", 服务列表=plugin_apis["services"])
     
     # 模拟自定义配置
     custom_config = {
@@ -558,12 +560,10 @@ async def demonstrate_custom_plugins(coordinator) -> None:
         }
     }
     
-    print(f"\n   ⚙️  插件配置示例:")
+    logger.info("插件配置示例")
     for plugin_id, config in custom_config.items():
         plugin_name = available_plugins[plugin_id]["name"]
-        print(f"      {plugin_name}:")
-        for key, value in config.items():
-            print(f"        • {key}: {value}")
+        logger.info("插件配置", 插件名称=plugin_name, 配置=config)
     
     print_success("自定义插件演示完成", 
                  total_plugins=len(available_plugins),
@@ -583,7 +583,6 @@ async def generate_comprehensive_report(coordinator, project_ids: Dict[str, str]
     # 模拟项目指标
     project_metrics = []
     for project_key, project_id in project_ids.items():
-        project_info = PROJECTS[project_key]
         metrics = ProjectMetrics(
             project_id=project_id,
             total_content=1000 + hash(project_key) % 500,
@@ -596,7 +595,7 @@ async def generate_comprehensive_report(coordinator, project_ids: Dict[str, str]
         )
         project_metrics.append(metrics)
     
-    print(f"📈 项目概览:")
+    print("📈 项目概览:")
     total_content = sum(m.total_content for m in project_metrics)
     total_translated = sum(m.translated_content for m in project_metrics)
     avg_quality = sum(m.avg_quality_score for m in project_metrics) / len(project_metrics)
@@ -606,7 +605,7 @@ async def generate_comprehensive_report(coordinator, project_ids: Dict[str, str]
     print(f"   • 已翻译: {total_translated:,} 条 ({total_translated/total_content:.1%})")
     print(f"   • 平均质量: {avg_quality:.1f}/100")
     
-    print(f"\n📋 项目详情:")
+    print("\n📋 项目详情:")
     for metrics in project_metrics:
         project_key = next(k for k, v in project_ids.items() if v == metrics.project_id)
         project_name = PROJECTS[project_key]["name"]
@@ -624,7 +623,7 @@ async def generate_comprehensive_report(coordinator, project_ids: Dict[str, str]
         "capacity_usage": "68%"
     }
     
-    print(f"\n🏥 系统健康状况:")
+    print("\n🏥 系统健康状况:")
     print(f"   • 整体状态: {system_health['overall_status']}")
     print(f"   • 运行时间: {system_health['uptime']}")
     print(f"   • 响应时间: {system_health['response_time']}")
@@ -640,7 +639,7 @@ async def generate_comprehensive_report(coordinator, project_ids: Dict[str, str]
         "📊 考虑设置更详细的性能监控"
     ]
     
-    print(f"\n💡 优化建议:")
+    print("\n💡 优化建议:")
     for i, recommendation in enumerate(recommendations, 1):
         print(f"   {i}. {recommendation}")
 
@@ -657,7 +656,7 @@ async def main() -> None:
         await demonstrate_resource_sharing(coordinator, project_ids)
         
         # 设置高级工作流
-        workflow_ids = await setup_advanced_workflows(coordinator)
+        await setup_advanced_workflows(coordinator)
         
         # 演示外部集成
         await demonstrate_external_integrations(coordinator)

@@ -35,6 +35,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Iterable
 
+import structlog
+
+logger = structlog.get_logger()
+
 # -------- 可调参数 --------
 DEFAULT_DIRS = ["packages", "scripts", "docs", "alembic", "migrations"]
 DEFAULT_ROOT_FILES = [
@@ -353,16 +357,20 @@ def main() -> None:
     targets = iter_targets(scan_root, args.extra)
     files = walk_files(scan_root, targets)
 
-    print("🚀 开始生成项目快照")
-    print(f" - 扫描根目录: {scan_root}")
-    print(f" - 脚本目录 / 输出文件: {script_dir} / {output_path.name}")
-    print(
-        f" - 包含起点:   {', '.join(p.as_posix() for p in targets) if targets else '(空)'}"
+    logger.info("🚀 开始生成项目快照")
+    logger.info(
+        "开始生成项目快照",
+        扫描根目录=str(scan_root),
+        脚本目录=str(script_dir),
+        输出文件=output_path.name
     )
-    print(f" - 文件总数:   {len(files)}")
-    if args.no_content:
-        print(" - 模式:       仅目录树（--no-content）")
-    print(f" - 最大字节:   {args.max_bytes}")
+    logger.info(
+        "扫描配置",
+        包含起点=', '.join(p.as_posix() for p in targets) if targets else '(空)',
+        文件总数=len(files),
+        模式="仅目录树（--no-content）" if args.no_content else "完整内容",
+        最大字节=args.max_bytes
+    )
 
     with io.open(output_path, "w", encoding="utf-8", newline="\n") as out:
         out.write(
@@ -374,7 +382,7 @@ def main() -> None:
         write_dir_tree(scan_root, files, out)
         write_file_contents(scan_root, files, out, args.max_bytes, args.no_content)
 
-    print(f"\n✅ 已生成：{output_path}")
+    logger.info("快照生成完成", 输出路径=str(output_path))
 
 
 if __name__ == "__main__":
