@@ -64,11 +64,3 @@ class Coordinator:
     async def get_comments(self, head_id: str) -> list[Comment]:
         """获取指定翻译头的所有评论。"""
         return await self.commenting_service.get_all(head_id)
-
-    async def initialize(self) -> None:
-        """[保留] 初始化钩子，当前为空。"""
-        pass
-
-    async def close(self) -> None:
-        """[保留] 关闭钩子，用于释放资源，当前为空。"""
-        pass

@@ -33,7 +33,7 @@ class BaseTranslationEngine(ABC, Generic[_ConfigType]):
     @classmethod
     def name(cls) -> str:
         """从类名自动推断引擎的名称。"""
-        return cls.__name__.replace("Engine", "").lower()
+        return cls.__name__.removesuffix("Engine").lower()
 
     async def initialize(self) -> None:
         """引擎的异步初始化钩子，用于设置连接池等。"""

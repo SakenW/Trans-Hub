@@ -202,7 +202,6 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
         self, batch_size: int
     ) -> AsyncGenerator[list[ContentItem], None]:
         """流式获取待处理的 'draft' 状态翻译任务。"""
-        offset = 0
         while True:
             # 在事务中查询并使用 FOR UPDATE SKIP LOCKED 锁定一批任务
             stmt = (
@@ -210,7 +209,6 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
                 .where(ThTransHead.current_status == TranslationStatus.DRAFT.value)
                 .order_by(ThTransHead.updated_at)
                 .limit(batch_size)
-                .offset(offset)
                 # 预加载关联的 content 以避免 N+1 查询
                 .options(selectinload(ThTransHead.content))
                 .with_for_update(skip_locked=True)
@@ -248,5 +246,3 @@ class SqlAlchemyTranslationRepository(BaseRepository, ITranslationRepository):
 
             if len(items) < batch_size:
                 break
-
-            offset += batch_size

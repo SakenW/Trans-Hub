@@ -67,6 +67,7 @@ questionary = ">=2.1.0" # 交互式 CLI
 # [修复] Alembic 默认依赖的同步驱动
 psycopg = { version = ">=3.2.3", extras = ["binary"] } # PostgreSQL 同步驱动
 asyncpg = ">=0.30.0"                                   # 确保 asyncpg 在开发环境中始终可用
+fakeredis = "^2.31.0"
 
 [tool.poetry.scripts]
 # CLI 入口点

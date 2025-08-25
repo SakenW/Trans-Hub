@@ -50,15 +50,37 @@ class TranslationProcessor:
         if not batch:
             return
 
-        texts = [item.source_payload.get(self.PAYLOAD_TEXT_KEY, "") for item in batch]
-        item_template = batch[0]
+        # 验证并过滤有效的文本条目
+        valid_items = []
+        texts = []
+        
+        for item in batch:
+            text = item.source_payload.get(self.PAYLOAD_TEXT_KEY, "")
+            if not text or not text.strip():
+                logger.warning(
+                    "跳过缺失或空的文本条目",
+                    head_id=item.head_id,
+                    content_id=item.content_id,
+                    payload_keys=list(item.source_payload.keys()),
+                )
+                continue
+            
+            valid_items.append(item)
+            texts.append(text)
+        
+        # 如果没有有效的文本条目，直接返回
+        if not valid_items:
+            logger.info("批次中没有有效的文本条目，跳过翻译")
+            return
+
+        item_template = valid_items[0]
         engine_outputs = await active_engine.atranslate_batch(
             texts=texts,
             target_lang=item_template.target_lang,
             source_lang=item_template.source_lang,
         )
 
-        for item, output in zip(batch, engine_outputs):
+        for item, output in zip(valid_items, engine_outputs):
             if isinstance(output, EngineSuccess):
                 await self._handle_success(uow, item, output, active_engine)
             elif isinstance(output, EngineError):
