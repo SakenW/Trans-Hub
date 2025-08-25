@@ -62,7 +62,17 @@ class AppContainer(containers.DeclarativeContainer):
         key_prefix=config.provided.redis.key_prefix,
     )
 
-    stream_producer = providers.Singleton(RedisStreamProducer, client=redis_client)
+    def _create_stream_producer(config: TransHubConfig, redis_client):
+        """创建流生产者，当 Redis 未配置时返回 None。"""
+        if not config.redis.url:
+            return None
+        return RedisStreamProducer(client=redis_client)
+
+    stream_producer = providers.Singleton(
+        _create_stream_producer,
+        config=config,
+        redis_client=redis_client,
+    )
 
     # ==================================================================
     # 适配器 (Adapters)

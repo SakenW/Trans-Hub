@@ -46,13 +46,13 @@ class TranslationProcessor:
     ) -> None:
         """
         在给定的 UoW 中处理一批待翻译的内容条目。
+        支持多语言批次处理，按 (source_lang, target_lang) 分组。
         """
         if not batch:
             return
 
         # 验证并过滤有效的文本条目
         valid_items = []
-        texts = []
 
         for item in batch:
             text = item.source_payload.get(self.PAYLOAD_TEXT_KEY, "")
@@ -66,35 +66,87 @@ class TranslationProcessor:
                 continue
 
             valid_items.append(item)
-            texts.append(text)
 
         # 如果没有有效的文本条目，直接返回
         if not valid_items:
             logger.info("批次中没有有效的文本条目，跳过翻译")
             return
 
-        item_template = valid_items[0]
+        # 检查是否为单语言批次（性能优化）
+        first_item = valid_items[0]
+        is_single_language = all(
+            item.source_lang == first_item.source_lang and 
+            item.target_lang == first_item.target_lang 
+            for item in valid_items
+        )
+        
+        if is_single_language:
+            # 单语言批次：直接处理，避免分组开销
+            await self._process_language_group(
+                uow, valid_items, first_item.source_lang, first_item.target_lang, active_engine
+            )
+        else:
+            # 多语言批次：按 (source_lang, target_lang) 分组处理
+            from collections import defaultdict
+            language_groups = defaultdict(list)
+            
+            for item in valid_items:
+                lang_key = (item.source_lang, item.target_lang)
+                language_groups[lang_key].append(item)
+
+            # 对每个语言组分别处理
+            for (source_lang, target_lang), group_items in language_groups.items():
+                await self._process_language_group(
+                    uow, group_items, source_lang, target_lang, active_engine
+                )
+
+    async def _process_language_group(
+        self,
+        uow: "IUnitOfWork",
+        group_items: list[ContentItem],
+        source_lang: str,
+        target_lang: str,
+        active_engine: "BaseTranslationEngine",
+    ) -> None:
+        """处理单个语言组的翻译任务。"""
+        if not group_items:
+            return
+            
+        logger.debug(
+            "处理语言组",
+            source_lang=source_lang,
+            target_lang=target_lang,
+            item_count=len(group_items),
+        )
+        
+        # 提取该组的文本
+        texts = [item.source_payload[self.PAYLOAD_TEXT_KEY] for item in group_items]
+        
+        # 调用翻译引擎
         engine_outputs = await active_engine.atranslate_batch(
             texts=texts,
-            target_lang=item_template.target_lang,
-            source_lang=item_template.source_lang,
+            target_lang=target_lang,
+            source_lang=source_lang,
         )
 
         # 校验引擎返回数量与输入数量是否匹配
-        if len(engine_outputs) != len(valid_items):
+        if len(engine_outputs) != len(group_items):
             logger.error(
                 "引擎返回结果数量与输入条目数量不匹配，存在数据丢失风险",
-                expected_count=len(valid_items),
+                expected_count=len(group_items),
                 actual_count=len(engine_outputs),
                 engine_name=active_engine.name(),
-                batch_size=len(batch),
+                source_lang=source_lang,
+                target_lang=target_lang,
             )
             raise ValueError(
-                f"引擎返回结果数量不匹配：期望 {len(valid_items)} 个结果，"
-                f"实际收到 {len(engine_outputs)} 个结果"
+                f"引擎返回结果数量不匹配：期望 {len(group_items)} 个结果，"
+                f"实际收到 {len(engine_outputs)} 个结果 "
+                f"(语言对: {source_lang} -> {target_lang})"
             )
 
-        for item, output in zip(valid_items, engine_outputs):
+        # 处理该组的翻译结果
+        for item, output in zip(group_items, engine_outputs):
             if isinstance(output, EngineSuccess):
                 await self._handle_success(uow, item, output, active_engine)
             elif isinstance(output, EngineError):
@@ -103,7 +155,10 @@ class TranslationProcessor:
                     head_id=item.head_id,
                     error=output.error_message,
                     is_retryable=output.is_retryable,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
                 )
+
 
     async def _handle_success(
         self,
