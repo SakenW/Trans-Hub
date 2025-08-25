@@ -13,6 +13,7 @@
 用法:
     poetry run python packages/server/scripts/check_test_environment.py
 """
+
 from __future__ import annotations
 
 import asyncio

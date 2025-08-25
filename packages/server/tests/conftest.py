@@ -54,14 +54,14 @@ from trans_hub.management.config_utils import get_real_db_url
 def run_migrations(engine: Engine, db_schema: str | None):
     """使用给定的引擎运行 alembic 迁移。"""
     from trans_hub.management.config_utils import get_real_db_url
-    
+
     print(f"[DEBUG] 开始执行迁移，目标schema: {db_schema}")
-    
+
     alembic_cfg = Config()
     alembic_cfg.set_main_option("script_location", "alembic")
     # 不设置sqlalchemy.url，让env.py使用注入的引擎
     alembic_cfg.set_main_option("db_schema", db_schema or "public")
-    
+
     print(f"[DEBUG] Alembic配置: script_location=alembic, db_schema={db_schema}")
     print(f"[DEBUG] 引擎URL: {engine.url}")
 
@@ -78,20 +78,20 @@ def run_migrations(engine: Engine, db_schema: str | None):
     # 注意：不在这里设置 metadata.schema，让 env.py 根据配置自行处理
     metadata = Base.metadata
     alembic_cfg.attributes["target_metadata"] = metadata
-    
+
     print("[DEBUG] 开始执行Alembic迁移...")
     try:
         # [关键修复] 在事务中执行迁移，确保正确提交
         with engine.begin() as connection:
             # 直接传递连接给 Alembic，确保在同一事务中执行
             alembic_cfg.attributes["connection"] = connection
-            
+
             # 将迁移升级到最新版本
             command.upgrade(alembic_cfg, "head")
             print("[DEBUG] 迁移执行完成，事务将自动提交")
-        
+
         print("[DEBUG] 迁移事务已提交")
-        
+
     except Exception as e:
         print(f"[DEBUG] 迁移执行失败: {e}")
         raise
@@ -144,7 +144,7 @@ async def migrated_db(test_config: TransHubConfig) -> AsyncGenerator[AsyncEngine
         alembic_ini_path = SERVER_PACKAGE_ROOT / "alembic.ini"
         alembic_cfg = Config(str(alembic_ini_path))
         db_schema = alembic_cfg.get_main_option("db_schema", "public")
-        
+
         # 使用连接注入的方式在事务中执行迁移
         with sync_engine.begin() as connection:
             alembic_cfg.attributes["connection"] = connection
@@ -246,7 +246,7 @@ async def app_container(
     container = AppContainer()
     container.config.override(final_config)
     container.db_engine.override(migrated_db)  # 使用已迁移的数据库
-    
+
     # 重新创建 sessionmaker 以使用新的 engine
     sessionmaker = create_async_sessionmaker(migrated_db)
     container.db_sessionmaker.override(sessionmaker)
@@ -274,13 +274,30 @@ async def app_container(
 @pytest_asyncio.fixture
 async def uow_factory(app_container: AppContainer) -> UowFactory:
     """(函数级) 从 DI 容器获取 UoW 工厂。"""
-    # 在每个测试前清理 outbox 表，避免测试间状态污染
+    # 在每个测试前清理所有数据表，避免测试间状态污染
     async with app_container.uow_factory() as uow:
+        # 按照外键依赖顺序清理表，避免约束冲突
+        # 1. 清理依赖表
         await uow.session.execute(text("DELETE FROM th.outbox"))
+        await uow.session.execute(text("DELETE FROM th.events"))
+        await uow.session.execute(text("DELETE FROM th.comments"))
+        await uow.session.execute(text("DELETE FROM th.tm_links"))
+        await uow.session.execute(text("DELETE FROM th.resolve_cache"))
+
+        # 2. 清理核心翻译表
+        await uow.session.execute(text("DELETE FROM th.trans_head"))
+        await uow.session.execute(text("DELETE FROM th.trans_rev"))
+        await uow.session.execute(text("DELETE FROM th.tm_units"))
+        await uow.session.execute(text("DELETE FROM th.content"))
+
+        # 3. 清理配置表
+        await uow.session.execute(text("DELETE FROM th.locales_fallbacks"))
+        await uow.session.execute(text("DELETE FROM th.projects"))
+
         await uow.commit()
         # 清理会话，确保没有遗留的 detached 对象
         uow.session.expunge_all()
-    
+
     return app_container.uow_factory
 
 

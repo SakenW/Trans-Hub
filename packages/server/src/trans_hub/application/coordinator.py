@@ -5,6 +5,7 @@ Trans-Hub 应用服务总协调器 (v3.3.1 依赖注入修复版)。
 """
 
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 from trans_hub_core.types import Comment

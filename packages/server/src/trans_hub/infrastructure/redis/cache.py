@@ -8,7 +8,6 @@ from typing import Any
 
 import redis.asyncio as aioredis
 import structlog
-
 from trans_hub_core.interfaces import CacheHandler
 
 
@@ -30,28 +29,17 @@ class RedisCacheHandler(CacheHandler):
         except json.JSONDecodeError as e:
             # 反序列化失败，记录警告并返回 None
             self._logger.warning(
-                "缓存值反序列化失败",
-                key=key,
-                raw_value=raw_value,
-                error=str(e)
+                "缓存值反序列化失败", key=key, raw_value=raw_value, error=str(e)
             )
             return None
         except aioredis.RedisError as e:
             # Redis 连接或操作错误，记录错误并返回 None
-            self._logger.error(
-                "Redis 操作失败",
-                operation="get",
-                key=key,
-                error=str(e)
-            )
+            self._logger.error("Redis 操作失败", operation="get", key=key, error=str(e))
             return None
         except Exception as e:
             # 其他未预期的异常，记录错误并重新抛出
             self._logger.error(
-                "缓存获取时发生未预期异常",
-                key=key,
-                error=str(e),
-                exc_info=True
+                "缓存获取时发生未预期异常", key=key, error=str(e), exc_info=True
             )
             raise
 
@@ -65,20 +53,16 @@ class RedisCacheHandler(CacheHandler):
                 "缓存值序列化失败，跳过写入",
                 key=key,
                 value_type=type(value).__name__,
-                error=str(e)
+                error=str(e),
             )
             return
-        
+
         try:
             await self._client.set(self._prefix + key, serialized_value, ex=ttl)
         except aioredis.RedisError as e:
             # Redis 连接或操作错误，记录错误并重新抛出
             self._logger.error(
-                "Redis 写入操作失败",
-                operation="set",
-                key=key,
-                ttl=ttl,
-                error=str(e)
+                "Redis 写入操作失败", operation="set", key=key, ttl=ttl, error=str(e)
             )
             raise
 

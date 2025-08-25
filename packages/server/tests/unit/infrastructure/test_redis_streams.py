@@ -43,14 +43,14 @@ class TestRedisStreamProducer:
         # 验证 xadd 被调用
         mock_redis_client.xadd.assert_called_once()
         call_args = mock_redis_client.xadd.call_args
-        
+
         # 验证 stream 名称
         assert call_args[0][0] == stream_name
-        
+
         # 验证事件数据格式
         flat_event_data = call_args[0][1]
         assert "payload" in flat_event_data
-        
+
         # 验证 JSON 序列化
         parsed_data = json.loads(flat_event_data["payload"])
         assert parsed_data == event_data
@@ -77,7 +77,7 @@ class TestRedisStreamProducer:
         # 验证调用
         mock_redis_client.xadd.assert_called_once()
         call_args = mock_redis_client.xadd.call_args
-        
+
         # 验证嵌套结构被正确序列化
         flat_event_data = call_args[0][1]
         parsed_data = json.loads(flat_event_data["payload"])
@@ -89,11 +89,11 @@ class TestRedisStreamProducer:
     async def test_publish_with_non_serializable_data(self, producer, mock_redis_client):
         """测试发布不可序列化的数据时的错误处理。"""
         stream_name = "test_stream"
-        
+
         # 创建不可序列化的对象
         class NonSerializable:
             pass
-        
+
         event_data = {
             "type": "invalid_event",
             "data": NonSerializable()  # 不可序列化
@@ -102,7 +102,7 @@ class TestRedisStreamProducer:
         # 验证抛出异常
         with pytest.raises((TypeError, ValueError)):
             await producer.publish(stream_name, event_data)
-        
+
         # 验证 xadd 没有被调用
         mock_redis_client.xadd.assert_not_called()
 
@@ -111,7 +111,7 @@ class TestRedisStreamProducer:
         """测试 Redis 操作失败时的错误处理。"""
         stream_name = "test_stream"
         event_data = {"type": "test_event"}
-        
+
         # 模拟 Redis 错误
         mock_redis_client.xadd.side_effect = Exception("Redis connection failed")
 
@@ -135,7 +135,7 @@ class TestRedisStreamProducer:
         # 验证调用
         mock_redis_client.xadd.assert_called_once()
         call_args = mock_redis_client.xadd.call_args
-        
+
         # 验证 Unicode 字符被正确处理
         flat_event_data = call_args[0][1]
         parsed_data = json.loads(flat_event_data["payload"])
@@ -154,7 +154,7 @@ class TestRedisStreamProducer:
         # 验证调用
         mock_redis_client.xadd.assert_called_once()
         call_args = mock_redis_client.xadd.call_args
-        
+
         # 验证空事件被正确处理
         flat_event_data = call_args[0][1]
         parsed_data = json.loads(flat_event_data["payload"])
@@ -175,14 +175,14 @@ class TestRedisStreamProducer:
         # 验证调用
         call_args = mock_redis_client.xadd.call_args
         flat_event_data = call_args[0][1]
-        
+
         # 验证 ensure_ascii=False 选项生效
         # JSON 字符串应该包含原始的非 ASCII 字符，而不是转义序列
         payload_str = flat_event_data["payload"]
         assert "中文测试" in payload_str
         assert "日本語テスト" in payload_str
         assert "한국어 테스트" in payload_str
-        
+
         # 验证可以正确解析
         parsed_data = json.loads(payload_str)
         assert parsed_data == event_data

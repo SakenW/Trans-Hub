@@ -25,7 +25,7 @@ from pathlib import Path
 
 import structlog
 from alembic import context
-from sqlalchemy import engine_from_config, pool, text
+from sqlalchemy import pool, text
 
 # 获取 structlog logger
 logger = structlog.get_logger(__name__)
@@ -69,7 +69,7 @@ db_schema = config.get_main_option("db_schema", None)
 if db_schema and db_schema != "None":
     # 获取数据库 schema 配置并设置 target_metadata.schema
     sqlalchemy_url = config.get_main_option("sqlalchemy.url", "")
-    
+
     # 检查是否有注入的引擎（用于测试）
     injected_engine = config.attributes.get("connection")
     if injected_engine is not None:
@@ -80,17 +80,23 @@ if db_schema and db_schema != "None":
         if not sqlalchemy_url:
             try:
                 from trans_hub.bootstrap.init import create_app_config
+
                 app_config = create_app_config("test")
                 db_url = str(app_config.database.url)
                 is_postgresql = "postgresql" in db_url
-                logger.debug("从应用配置检测到方言", dialect="postgresql" if is_postgresql else "other")
+                logger.debug(
+                    "从应用配置检测到方言",
+                    dialect="postgresql" if is_postgresql else "other",
+                )
             except Exception:
                 is_postgresql = False
                 logger.debug("无法检测方言，默认为非PostgreSQL")
         else:
             is_postgresql = sqlalchemy_url.startswith("postgresql")
-            logger.debug("从URL检测到方言", dialect="postgresql" if is_postgresql else "other")
-    
+            logger.debug(
+                "从URL检测到方言", dialect="postgresql" if is_postgresql else "other"
+            )
+
     if is_postgresql:
         target_metadata.schema = db_schema
         logger.debug("设置 target_metadata.schema", schema=db_schema)
@@ -105,13 +111,14 @@ else:
 def run_migrations_offline() -> None:
     """在"离线"模式下运行迁移。"""
     url = config.get_main_option("sqlalchemy.url")
-    
+
     # 如果没有配置URL，尝试从应用配置获取
     if not url:
         try:
             from trans_hub.bootstrap.init import create_app_config
+
             app_config = create_app_config("test")
-            
+
             # 将异步URL转换为同步URL（离线模式需要同步URL）
             db_url = str(app_config.database.url)
             if "+asyncpg://" in db_url:
@@ -129,11 +136,11 @@ def run_migrations_offline() -> None:
                 "2. 或者环境变量已正确配置\n"
                 f"错误详情: {e}"
             ) from e
-    
+
     # 版本表与业务表在同一 schema 中
     version_table_schema = target_metadata.schema
     logger.debug("离线迁移 - version_table_schema", schema=version_table_schema)
-    
+
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -160,12 +167,13 @@ def run_migrations_online() -> None:
         # 2. 环境变量TRANSHUB_DATABASE_URL
         # 3. 应用配置（最低优先级）
         logger.debug("没有注入引擎，尝试获取数据库连接")
-        
+
         # 首先检查Alembic配置中的sqlalchemy.url
         alembic_url = config.get_main_option("sqlalchemy.url")
         if alembic_url and alembic_url.strip():
             logger.debug("使用Alembic配置中的数据库URL", url=alembic_url)
             from sqlalchemy import create_engine
+
             connectable = create_engine(
                 alembic_url,
                 poolclass=pool.NullPool,
@@ -183,8 +191,9 @@ def run_migrations_online() -> None:
                     sync_db_url = env_db_url.replace("+aiosqlite://", "://")
                 else:
                     sync_db_url = env_db_url
-                
+
                 from sqlalchemy import create_engine
+
                 connectable = create_engine(
                     sync_db_url,
                     poolclass=pool.NullPool,
@@ -195,13 +204,13 @@ def run_migrations_online() -> None:
                 logger.debug("环境变量未设置，回退到应用配置")
                 try:
                     from trans_hub.bootstrap.init import create_app_config
-                    
+
                     # 使用测试环境模式加载配置
                     app_config = create_app_config("test")
-                    
+
                     # 使用应用配置创建引擎
                     from sqlalchemy import create_engine
-                    
+
                     # 将异步URL转换为同步URL（Alembic需要同步连接）
                     db_url = str(app_config.database.url)
                     if "+asyncpg://" in db_url:
@@ -210,7 +219,7 @@ def run_migrations_online() -> None:
                         sync_db_url = db_url.replace("+aiosqlite://", "://")
                     else:
                         sync_db_url = db_url
-                    
+
                     connectable = create_engine(
                         sync_db_url,
                         poolclass=pool.NullPool,
@@ -219,38 +228,41 @@ def run_migrations_online() -> None:
                 except Exception as e:
                     logger.error("无法从应用配置获取数据库连接", error=str(e))
                     raise RuntimeError(
-                    "无法获取数据库连接。请确保：\n"
-                    "1. 环境变量已正确配置\n"
-                    "2. 或者通过代码注入数据库连接\n"
-                    f"错误详情: {e}"
-                ) from e
+                        "无法获取数据库连接。请确保：\n"
+                        "1. 环境变量已正确配置\n"
+                        "2. 或者通过代码注入数据库连接\n"
+                        f"错误详情: {e}"
+                    ) from e
 
     # 根据connectable的类型决定如何获取连接
-    if hasattr(connectable, 'connect'):
+    if hasattr(connectable, "connect"):
         # 这是一个Engine对象，需要调用connect()
         connection_context = connectable.connect()
     else:
         # 这是一个Connection对象，直接使用
         from contextlib import nullcontext
+
         connection_context = nullcontext(connectable)
-    
+
     with connection_context as connection:
         logger.debug("在线迁移 - target_metadata.schema", schema=target_metadata.schema)
         logger.debug("在线迁移 - 表数量", count=len(target_metadata.tables))
         for table_name, table in target_metadata.tables.items():
             logger.debug("表信息", table_name=table_name, schema=table.schema)
-        
+
         # [关键修复] 在配置context之前，确保目标schema存在
         # 这解决了Alembic试图在不存在的schema中创建alembic_version表的问题
         if target_metadata.schema and connection.dialect.name == "postgresql":
             logger.debug("确保schema存在", schema=target_metadata.schema)
-            connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {target_metadata.schema}"))
+            connection.execute(
+                text(f"CREATE SCHEMA IF NOT EXISTS {target_metadata.schema}")
+            )
             # 注意：不在这里提交，因为连接可能已经在事务中
-        
+
         # 版本表与业务表在同一 schema 中
         version_table_schema = target_metadata.schema
         logger.debug("配置 version_table_schema", schema=version_table_schema)
-        
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

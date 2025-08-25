@@ -53,7 +53,7 @@ class TranslationProcessor:
         # 验证并过滤有效的文本条目
         valid_items = []
         texts = []
-        
+
         for item in batch:
             text = item.source_payload.get(self.PAYLOAD_TEXT_KEY, "")
             if not text or not text.strip():
@@ -64,10 +64,10 @@ class TranslationProcessor:
                     payload_keys=list(item.source_payload.keys()),
                 )
                 continue
-            
+
             valid_items.append(item)
             texts.append(text)
-        
+
         # 如果没有有效的文本条目，直接返回
         if not valid_items:
             logger.info("批次中没有有效的文本条目，跳过翻译")
@@ -164,7 +164,9 @@ class TranslationProcessor:
                     "engine_version": active_engine.VERSION,
                 }
                 try:
-                    await self._stream_producer.publish(self._event_stream_name, event_data)
+                    await self._stream_producer.publish(
+                        self._event_stream_name, event_data
+                    )
                     logger.debug(
                         "翻译完成事件已发布",
                         head_id=item.head_id,
@@ -184,4 +186,3 @@ class TranslationProcessor:
             )
             # 重新抛出异常以确保 UoW 回滚事务
             raise
-

@@ -362,14 +362,14 @@ def main() -> None:
         "开始生成项目快照",
         扫描根目录=str(scan_root),
         脚本目录=str(script_dir),
-        输出文件=output_path.name
+        输出文件=output_path.name,
     )
     logger.info(
         "扫描配置",
-        包含起点=', '.join(p.as_posix() for p in targets) if targets else '(空)',
+        包含起点=", ".join(p.as_posix() for p in targets) if targets else "(空)",
         文件总数=len(files),
         模式="仅目录树（--no-content）" if args.no_content else "完整内容",
-        最大字节=args.max_bytes
+        最大字节=args.max_bytes,
     )
 
     with io.open(output_path, "w", encoding="utf-8", newline="\n") as out:

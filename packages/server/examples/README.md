@@ -32,7 +32,7 @@
    ```bash
    # 从基础示例开始
    poetry run python examples/01_basic_workflow.py
-   
+
    # 或运行任何其他示例
    poetry run python examples/02_batch_processing.py
    ```
@@ -333,7 +333,7 @@ poetry install
    ```bash
    # 查看迁移状态
    poetry run alembic current
-   
+
    # 查看迁移历史
    poetry run alembic history
    ```

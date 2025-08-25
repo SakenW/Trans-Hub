@@ -1,5 +1,6 @@
 # src/trans_hub/lint_check.py
 """统一的代码质量检查脚本。"""
+
 import os
 import subprocess
 import sys
@@ -15,7 +16,9 @@ def run_command(command: list[str], description: str):
     logger.info(f"🚀 Running: {description}...")
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        logger.error(f"❌ FAILED: {description}", 标准输出=result.stdout, 标准错误=result.stderr)
+        logger.error(
+            f"❌ FAILED: {description}", 标准输出=result.stdout, 标准错误=result.stderr
+        )
         print(result.stdout, file=sys.stdout)
         print(result.stderr, file=sys.stderr)
         sys.exit(result.returncode)
@@ -50,8 +53,13 @@ def main():
         os.chdir(server_dir)
 
         # 使用 poetry run 但在项目根目录运行 lint-imports
-        import_linter_cmd = ["poetry", "run", "python", "-c",
-                           f"import os; os.chdir('{project_root}'); import subprocess; subprocess.run(['lint-imports'])"]
+        import_linter_cmd = [
+            "poetry",
+            "run",
+            "python",
+            "-c",
+            f"import os; os.chdir('{project_root}'); import subprocess; subprocess.run(['lint-imports'])",
+        ]
         run_command(import_linter_cmd, "Import Linter")
 
         # 切换回项目根目录
@@ -64,7 +72,9 @@ def main():
 
         # 代码风格与格式化
         run_command(["poetry", "run", "ruff", "check", "."], "Ruff Check")
-        run_command(["poetry", "run", "ruff", "format", "--check", "."], "Ruff Format Check")
+        run_command(
+            ["poetry", "run", "ruff", "format", "--check", "."], "Ruff Format Check"
+        )
 
         # 静态类型检查
         run_command(["poetry", "run", "mypy", "src/trans_hub"], "MyPy Type Check")
