@@ -54,13 +54,31 @@ class FakeStreamProducer(StreamProducer):
     def __init__(self):
         self.published_events: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.call_count = 0
+        self.fail_on_event_ids: set[str] = set()
+        self.fail_on_topics: set[str] = set()
 
     async def publish(self, stream_name: str, event_data: dict[str, Any]) -> None:
-        """记录发布的事件，而不是真正发送它。"""
-        self.published_events[stream_name].append(event_data)
+        """记录发布的事件，或根据配置模拟失败。"""
         self.call_count += 1
+        
+        # 检查是否应该模拟失败
+        event_id = event_data.get("id")
+        if stream_name in self.fail_on_topics or event_id in self.fail_on_event_ids:
+            raise RuntimeError(f"模拟发布失败: stream={stream_name}, event_id={event_id}")
+        
+        self.published_events[stream_name].append(event_data)
+
+    def set_fail_on_event_ids(self, event_ids: set[str]) -> None:
+        """设置应该失败的事件 ID。"""
+        self.fail_on_event_ids = event_ids
+
+    def set_fail_on_topics(self, topics: set[str]) -> None:
+        """设置应该失败的主题。"""
+        self.fail_on_topics = topics
 
     def clear(self):
-        """清空所有记录的事件。"""
+        """清空所有记录的事件和失败配置。"""
         self.published_events.clear()
         self.call_count = 0
+        self.fail_on_event_ids.clear()
+        self.fail_on_topics.clear()

@@ -4,7 +4,6 @@ import pytest
 from sqlalchemy import text
 from trans_hub.di.container import AppContainer
 from tests.helpers.factories.request_factory import create_request_data
-from trans_hub.bootstrap.init import load_config_with_validation
 
 pytestmark = pytest.mark.asyncio
 
@@ -19,7 +18,7 @@ async def test_smoke_flow_happy_path(
     # 0. Print configuration for debugging
     config = app_container.config()
     db_engine = app_container.db_engine()
-    print(f"\n=== Configuration Debug Info ===")
+    print("\n=== Configuration Debug Info ===")
     print(f"Config Type: {type(config)}")
     print(f"Config Content: {config}")
     print(f"DB Engine URL: {db_engine.url}")
@@ -47,7 +46,7 @@ async def test_smoke_flow_happy_path(
         except Exception as e:
             print(f"Error checking table existence: {e}")
     
-    print(f"=== End Configuration Debug ===")
+    print("=== End Configuration Debug ===")
     
     # 1. Get services from the container
     request_service = app_container.request_translation_service()

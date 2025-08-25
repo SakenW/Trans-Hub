@@ -101,7 +101,7 @@ class AppContainer(containers.DeclarativeContainer):
     translation_processor = providers.Factory(
         TranslationProcessor,
         stream_producer=stream_producer,
-        event_stream_name="translation_events",
+        event_stream_name=config.provided.worker.event_stream_name,
     )
 
     request_translation_service = providers.Factory(

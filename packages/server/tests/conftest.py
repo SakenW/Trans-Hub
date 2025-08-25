@@ -53,7 +53,6 @@ from trans_hub.management.config_utils import get_real_db_url
 
 def run_migrations(engine: Engine, db_schema: str | None):
     """使用给定的引擎运行 alembic 迁移。"""
-    from trans_hub.management.config_utils import get_real_db_url
 
     print(f"[DEBUG] 开始执行迁移，目标schema: {db_schema}")
 

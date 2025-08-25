@@ -17,16 +17,16 @@ async def get_redis_client(config: TransHubConfig) -> aioredis.Redis:
         if not url:
             raise ValueError("Redis URL 未配置（请设置 TRANSHUB_REDIS__URL）")
         try:
-            _redis_client = aioredis.from_url(url, decode_responses=True)
+            _redis_client = aioredis.from_url(url, decode_responses=True)  # type: ignore[no-untyped-call]
             # 测试连接是否可用
             await _redis_client.ping()
-        except Exception as e:
+        except (aioredis.RedisError, OSError) as e:
             # 如果连接失败，抛出更详细的错误信息
             raise ValueError(f"无法连接到 Redis 服务器 {url}: {e}") from e
     return _redis_client
 
 
-async def close_redis_client():
+async def close_redis_client() -> None:
     """关闭全局 Redis 客户端连接。"""
     global _redis_client
     if _redis_client:

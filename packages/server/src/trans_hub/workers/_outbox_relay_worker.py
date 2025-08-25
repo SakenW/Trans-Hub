@@ -37,11 +37,35 @@ async def run_once(
                 stream_producer.publish(event.topic, event.payload)
                 for event in pending_events
             ]
-            await asyncio.gather(*publish_tasks)
+            results = await asyncio.gather(*publish_tasks, return_exceptions=True)
 
-            event_ids = [event.id for event in pending_events]
-            await uow.outbox.mark_as_published(event_ids)
-            events_published = len(pending_events)
+            # 处理发布结果，仅标记成功发布的事件
+            successful_event_ids = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"事件发布失败: {pending_events[i].id}",
+                        error=result,
+                        event_topic=pending_events[i].topic,
+                        exc_info=True
+                    )
+                else:
+                    successful_event_ids.append(pending_events[i].id)
+
+            # 仅标记成功发布的事件
+            if successful_event_ids:
+                await uow.outbox.mark_as_published(successful_event_ids)
+                events_published = len(successful_event_ids)
+                
+                if len(successful_event_ids) < len(pending_events):
+                    failed_count = len(pending_events) - len(successful_event_ids)
+                    logger.warning(
+                        f"部分事件发布失败: {failed_count}/{len(pending_events)} 失败，"
+                        f"{len(successful_event_ids)} 成功发布"
+                    )
+            else:
+                logger.error(f"所有 {len(pending_events)} 个事件发布均失败")
+                events_published = 0
 
         logger.info(f"成功发布并标记了 {events_published} 条事件。")
 

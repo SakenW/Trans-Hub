@@ -3,14 +3,12 @@
 测试 DI 容器在无 Redis 配置下的行为。
 """
 
-import pytest
 from trans_hub.config import TransHubConfig
 from trans_hub.di.container import AppContainer
 
 
 def test_create_stream_producer_function_with_no_redis():
     """测试 _create_stream_producer 函数在无 Redis URL 时返回 None。"""
-    from trans_hub.di.container import AppContainer
     
     # 创建一个没有 Redis URL 的配置
     config = TransHubConfig(
@@ -32,7 +30,6 @@ def test_create_stream_producer_function_with_no_redis():
 
 def test_create_stream_producer_function_with_redis():
     """测试 _create_stream_producer 函数在有 Redis URL 时尝试创建实例。"""
-    from trans_hub.di.container import AppContainer
     from unittest.mock import Mock
     
     # 创建一个有 Redis URL 的配置

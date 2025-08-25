@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy.engine.url import make_url
 from unittest.mock import patch, MagicMock
 

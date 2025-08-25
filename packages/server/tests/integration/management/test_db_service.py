@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine
 from tests.helpers.tools.db_manager import _alembic_ini
 from trans_hub.config import TransHubConfig
 from trans_hub.management.db_service import DbService
@@ -20,7 +20,6 @@ def test_db_service_check_status_success(
     db_service: DbService, sync_migrated_db: Engine
 ):
     """测试健康检查在数据库已成功迁移时的行为。"""
-    from unittest.mock import patch
     
     db_service.config.database.url = sync_migrated_db.url.render_as_string(
         hide_password=False
@@ -39,7 +38,6 @@ def test_db_service_check_status_success(
 
 def test_db_service_rebuild_database(db_service: DbService, sync_migrated_db: Engine):
     """测试重建数据库功能。"""
-    from unittest.mock import patch
 
     db_service.config.database.url = sync_migrated_db.url.render_as_string(
         hide_password=False

@@ -27,18 +27,25 @@ async def _run_all_workers(container: AppContainer = Provide[AppContainer]):
     uow_factory = container.uow_factory()
     stream_producer = await container.stream_producer() if config.redis.url else None
 
-    tasks = [
-        _translation_worker.run_worker_loop(container, shutdown_event),
-    ]
-    if stream_producer:
-        tasks.append(
-            _outbox_relay_worker.run_relay_loop(
-                config, uow_factory, stream_producer, shutdown_event
-            )
-        )
-
     try:
-        await asyncio.gather(*tasks)
+        async with asyncio.TaskGroup() as tg:
+            # 启动翻译 Worker
+            tg.create_task(
+                _translation_worker.run_worker_loop(container, shutdown_event)
+            )
+            
+            # 如果配置了 Redis，启动 Outbox 中继 Worker
+            if stream_producer:
+                tg.create_task(
+                    _outbox_relay_worker.run_relay_loop(
+                        config, uow_factory, stream_producer, shutdown_event
+                    )
+                )
+    except* Exception as eg:
+        # TaskGroup 会自动取消所有任务，我们只需要设置关闭事件
+        shutdown_event.set()
+        # 重新抛出异常组中的第一个异常
+        raise eg.exceptions[0]
     finally:
         logger.info("正在关闭所有 Worker 的共享资源...")
         db_engine = await container.db_engine()
@@ -103,7 +110,11 @@ async def _run_workers_logic(
                     )
                 )
 
-            await asyncio.gather(*tasks)
+            # 使用 TaskGroup 进行结构化并发
+            async with asyncio.TaskGroup() as tg:
+                for task_coro in tasks:
+                    tg.create_task(task_coro)
+            
             await db_engine.dispose()
             if config.redis.url:
                 from trans_hub.infrastructure.redis._client import (
