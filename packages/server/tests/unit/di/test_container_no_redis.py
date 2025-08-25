@@ -45,15 +45,18 @@ def test_create_stream_producer_function_with_redis():
         active_engine="debug",
     )
     
-    # 使用 mock Redis 客户端
+    # 使用 mock Redis 客户端和 provider
     mock_redis_client = Mock()
+    mock_redis_client_provider = Mock(return_value=mock_redis_client)
     
     # 测试 _create_stream_producer 函数
-    result = AppContainer._create_stream_producer(config, mock_redis_client)
+    result = AppContainer._create_stream_producer(config, mock_redis_client_provider)
     assert result is not None
     # 验证返回的是 RedisStreamProducer 实例
     from trans_hub.infrastructure.redis.streams import RedisStreamProducer
     assert isinstance(result, RedisStreamProducer)
+    # 验证 provider 被调用了
+    mock_redis_client_provider.assert_called_once()
 
 
 def test_translation_processor_with_none_stream_producer():
